@@ -1,6 +1,6 @@
 ---
 name: mes-pc-frontend-page
-description: Use when creating or modifying PC-side Vue pages, routes, forms, tables, dialogs, API calls, or Element Plus UI for the badminton MES management frontend.
+description: Use when creating or modifying PC-side Vue pages, routes, forms, tables, dialogs, API calls, or Element Plus UI for the AI-MES Copilot management frontend.
 ---
 
 # MES PC Frontend Page

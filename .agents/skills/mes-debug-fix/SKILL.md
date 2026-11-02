@@ -1,6 +1,6 @@
 ---
 name: mes-debug-fix
-description: Use when diagnosing and fixing build failures, runtime exceptions, API errors, frontend route/import issues, database connection problems, MyBatis mapper errors, or failing tests in the badminton MES project.
+description: Use when diagnosing and fixing build failures, runtime exceptions, API errors, frontend route/import issues, database connection problems, MyBatis mapper errors, or failing tests in AI-MES Copilot.
 ---
 
 # MES Debug Fix

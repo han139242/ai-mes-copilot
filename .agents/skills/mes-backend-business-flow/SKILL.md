@@ -18,9 +18,10 @@ Use this for high-risk MES flows:
 ## Required Reading
 
 - `COLLABORATION.md`
-- `羽毛球MES开发约束框架.md`
+- `docs/FEATURES.md` for the supported AI capabilities, confirmation flow, and inspection-data boundary
+- `docs/SETUP.md` for isolated database setup and migration order
 - API document for the flow
-- related `schema.sql` tables
+- related `schema.sql` tables and ordered migrations under `workspace/idea/ems/src/main/resources/db/`
 - existing service/mapper patterns
 
 ## Workflow

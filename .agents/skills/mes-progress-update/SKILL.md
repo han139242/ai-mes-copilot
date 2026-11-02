@@ -1,13 +1,13 @@
 ---
 name: mes-progress-update
-description: Use before committing or handing off badminton MES work to update COLLABORATION.md with concise progress, module status, validation results, next step, risks, or AI-assisted development notes.
+description: Use before committing or handing off AI-MES Copilot work to update COLLABORATION.md with concise progress, module status, validation results, next step, risks, or AI-assisted development notes.
 ---
 
 # MES Progress Update
 
 ## Purpose
 
-Keep project progress readable for three AI-assisted developers. Updates should be short, useful, and tied to actual work.
+Keep project progress readable for community contributors. Updates should be short, useful, and tied to actual work. Public credits use GitHub usernames, not real names or private email addresses.
 
 ## When to Update
 
@@ -22,16 +22,16 @@ Update when:
 
 ## How to Update
 
-1. Add newest row at the top of the progress table.
-2. Use the existing columns: date, member, module, completed content, validation result, next step.
-3. Keep each cell concise.
-4. If a module status changed, update the status table too.
+1. Follow the current `COLLABORATION.md` structure: append a dated section describing the change.
+2. State the affected module or documents, completed work, and verification scope.
+3. Keep the entry concise; do not introduce a progress table when the file has none.
+4. If a module status changed, describe the new state in the same entry.
 5. Mention if validation was not run and why.
 
-## Good Row
+## Example Entry
 
 ```text
-2026-07-09 | AI 协助 | 用户管理 | 对齐用户分页接口路径并修复前端路由构建 | 后端测试通过，前端构建通过 | 登录联调
+YYYY-MM-DD 文档维护：更新当前项目说明与有效文档入口；检查链接和项目名称。仅修改说明文件，未运行业务回归。
 ```
 
 ## Must Not

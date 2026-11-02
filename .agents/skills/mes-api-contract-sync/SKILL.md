@@ -1,6 +1,6 @@
 ---
 name: mes-api-contract-sync
-description: Use when aligning backend API documents, Spring Boot controllers, request/response fields, frontend calls, route paths, status codes, or resolving API contract mismatches in the badminton MES project.
+description: Use when aligning backend API documents, Spring Boot controllers, request/response fields, frontend calls, route paths, status codes, or resolving API contract mismatches in AI-MES Copilot.
 ---
 
 # MES API Contract Sync
@@ -11,7 +11,7 @@ Use this when paths, methods, request fields, response formats, or frontend call
 
 ## Inputs to Compare
 
-- API document under `相关文档/md` or `md`
+- Relevant maintained documentation located with `rg --files -g "*.md"`; use `docs/FEATURES.md` for the supported AI workflow and inspect actual controller routes for endpoint contracts
 - Controller annotations and method parameters
 - frontend request code
 - `ResultData` response shape
@@ -24,7 +24,7 @@ Use this when paths, methods, request fields, response formats, or frontend call
 3. Locate frontend caller if it exists.
 4. Decide the source of truth:
    - working code and database reality first;
-   - then `schema.sql`, entity, API document;
+   - then `schema.sql`, ordered database migrations, entities, and maintained API documentation;
    - then collaboration notes.
 5. Make the smallest change that aligns all active callers.
 6. If the document is outdated, update or record the difference.

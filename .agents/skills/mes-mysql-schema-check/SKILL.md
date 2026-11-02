@@ -1,6 +1,6 @@
 ---
 name: mes-mysql-schema-check
-description: Use when modifying or validating MySQL schema.sql, Java entities, MyBatis mappers, table names, primary keys, field types, or database consistency for the badminton MES project.
+description: Use when modifying or validating MySQL schema.sql, Java entities, MyBatis mappers, table names, primary keys, field types, or database consistency for AI-MES Copilot.
 ---
 
 # MES MySQL Schema Check
@@ -11,9 +11,9 @@ Use this to prevent schema/entity drift. It is required when touching `schema.sq
 
 ## Checks
 
-1. Count `CREATE TABLE` entries in `schema.sql`.
+1. Read `docs/SETUP.md` and `scripts/lamp_migrations.py` for the ordered schema baseline. Include both `schema.sql` and the applicable migrations when inspecting current table definitions.
 2. Count entity classes with `@TableName`.
-3. Compare table names between SQL and entities.
+3. Compare table names between the effective migrated schema and entities; counts from the base `schema.sql` alone are only a starting point.
 4. Compare SQL primary keys with `@TableId`.
 5. Spot-check important type mapping:
    - `BIGINT` -> `Long`
@@ -36,7 +36,7 @@ Run from repository root:
 ## Fix Workflow
 
 1. Determine whether SQL or entity is wrong.
-2. Prefer `schema.sql` and verified database design as baseline.
+2. Prefer `schema.sql`, the ordered migrations, and verified isolated database design as baseline.
 3. Fix entity annotations and fields before mapper/controller code.
 4. Re-run the counts and Maven test.
 5. Record any intentional schema change in `COLLABORATION.md`.

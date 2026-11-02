@@ -1,13 +1,13 @@
 ---
 name: mes-wechat-miniprogram
-description: Use when creating or modifying the WeChat mini program side of the badminton MES project, including mobile pages, API integration, login/session handling, scanning workflows, task/report views, or lightweight shop-floor operations.
+description: Use when explicitly maintaining the historical WeChat mini program code retained in AI-MES Copilot, including mobile pages, API integration, login/session handling, scanning workflows, task/report views, or lightweight shop-floor operations.
 ---
 
 # MES WeChat Mini Program
 
 ## Scope
 
-Use this for future mobile scenarios such as task viewing,扫码追溯, production reporting, inspection entry, warehouse confirmation, equipment repair reporting, or dashboard snippets.
+The historical code is under `workspace/vx`. The current delivered application is the backend and PC frontend; do not imply that this mini program has been verified against the current release. Use this skill only when the task explicitly concerns its task viewing, scanning, reporting, inspection, warehouse, equipment, or dashboard workflows.
 
 ## Planning Rules
 

@@ -1,12 +1,12 @@
 # GitHub Copilot Instructions
 
-本仓库是羽毛球 MES 系统。后端主要使用 Spring Boot，PC 前端使用 Vue，后续包含微信小程序端，数据库使用 MySQL。
+本仓库是 AI-MES Copilot，以智能调光台灯 L100/L200 为业务场景。后端使用 Spring Boot 与 MySQL，PC 前端使用 Vue 3；AI 工作台提供自然语言查询、预览确认、业务办理和结果回查。课程交付已完成，后续欢迎社区维护。`workspace/vx` 是历史微信小程序代码，仅在明确涉及该模块的任务中维护。
 
 ## Before Coding
 
-- Read `COLLABORATION.md`.
+- Read `README.md`, `COLLABORATION.md`, `CONTRIBUTING.md`, and the relevant guide in `docs/`.
 - Locate current documents with `rg --files -g "*.md"` because documents may be moved during collaboration.
-- Prefer existing code and `schema.sql` over guesses.
+- Prefer existing code, `schema.sql`, and the ordered database migrations over guesses; the setup order is documented in `docs/SETUP.md`.
 - Keep changes scoped to one module or one feature.
 
 ## Backend
@@ -34,6 +34,9 @@
 - Do not physically delete production, inventory, quality, or traceability data.
 - Inventory changes must preserve balance and movement records.
 - Status values should use stable English codes.
+- Run database-writing checks only against your own isolated test database.
+- Keep model understanding separate from business validation: writes still require permissions, valid states, and the documented confirmation flow. AI must not invent physical inspection measurements.
+- Keep real credentials in environment variables. Public contributor credits use GitHub usernames; do not publish personal coursework or identities.
 
 ## Project Skills
 

@@ -1,6 +1,6 @@
 ---
 name: mes-code-review
-description: Use before committing or when reviewing badminton MES changes for bugs, contract mismatches, schema drift, risky business logic, missing validation, unrelated changes, or missing progress updates.
+description: Use before committing or when reviewing AI-MES Copilot changes for bugs, contract mismatches, schema drift, risky business logic, missing validation, unrelated changes, or missing progress updates.
 ---
 
 # MES Code Review

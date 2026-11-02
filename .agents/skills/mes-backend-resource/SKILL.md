@@ -1,6 +1,6 @@
 ---
 name: mes-backend-resource
-description: Use when implementing or modifying a normal Spring Boot backend resource module for the badminton MES system, especially CRUD APIs, pagination, soft delete, mapper/service/controller/entity alignment, or MyBatis-Plus resource endpoints.
+description: Use when implementing or modifying a normal Spring Boot backend resource module for AI-MES Copilot, especially CRUD APIs, pagination, soft delete, mapper/service/controller/entity alignment, or MyBatis-Plus resource endpoints.
 ---
 
 # MES Backend Resource
@@ -15,7 +15,7 @@ For production execution, inventory deduction, quality handling, or traceability
 
 - `COLLABORATION.md`
 - API document for the module
-- `schema.sql` table definition
+- `schema.sql` and applicable migration table definitions, with migration order from `docs/SETUP.md`
 - Existing entity, mapper, service, controller patterns in `workspace/idea/ems`
 
 ## Implementation Steps
