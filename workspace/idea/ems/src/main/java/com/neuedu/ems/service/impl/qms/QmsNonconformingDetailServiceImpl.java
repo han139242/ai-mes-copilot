@@ -108,10 +108,7 @@ public class QmsNonconformingDetailServiceImpl extends ServiceImpl<QmsNonconform
             return false;
         }
         QmsNonconformingDetail existing = getNonconformingDetailById(nonconformingDetail.getDetailId());
-        if (existing == null || !canChangeNonconformingOrder(existing.getNcrId())) {
-            return false;
-        }
-        if (nonconformingDetail.getNcrId() != null && !canChangeNonconformingOrder(nonconformingDetail.getNcrId())) {
+        if (!updatable(existing, nonconformingDetail.getNcrId())) {
             return false;
         }
         if (nonconformingDetail.getDefectQuantity() == null) {
@@ -120,6 +117,14 @@ public class QmsNonconformingDetailServiceImpl extends ServiceImpl<QmsNonconform
         prepareNonconformingDetail(nonconformingDetail);
         nonconformingDetail.setDeletedFlag(null);
         return baseMapper.updateById(nonconformingDetail) > 0;
+    }
+
+    /** 原单与目标单都必须处于可修改状态，任一处不可改即整体拒绝。 */
+    private boolean updatable(QmsNonconformingDetail existing, Long targetNcrId) {
+        if (existing == null || !canChangeNonconformingOrder(existing.getNcrId())) {
+            return false;
+        }
+        return targetNcrId == null || canChangeNonconformingOrder(targetNcrId);
     }
 
     /**

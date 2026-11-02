@@ -27,7 +27,10 @@ public class QmsInspectionStandard {
     private String upperLimit;
     private String lowerLimit;
     private String judgementRule;
+    private String confirmationStatus;
+    private String sourceReference;
     private String remark;
+    @com.baomidou.mybatisplus.annotation.Version
     private Integer version;
     private Long createdBy;
     private LocalDateTime createdTime;

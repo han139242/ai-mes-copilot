@@ -52,6 +52,18 @@ public interface MfgWorkOrderService extends IService<MfgWorkOrder> {
      */
     boolean removeWorkOrderById(Long workOrderId);
 
+    /**
+     * 根据ID删除生产工单（软删除），同时释放该草稿工单占用的物料预留。
+     * @param workOrderId 生产工单ID
+     * @param operatorId 操作人，用于记录预留释放的审计信息，可为空
+     * @return 是否成功
+     */
+    boolean removeWorkOrderById(Long workOrderId, Long operatorId);
+
+    int removeWorkOrders(List<Long> workOrderIds, Long operatorId);
+
+    MfgWorkOrder rescheduleWorkOrders(Long workOrderId, Long operatorId);
+
     MfgWorkOrder generateWorkOrder(Long planId, MfgWorkOrder request, Long operatorId);
 
     MfgWorkOrder releaseWorkOrder(Long workOrderId, Long operatorId, String remark);
@@ -62,6 +74,9 @@ public interface MfgWorkOrderService extends IService<MfgWorkOrder> {
 
     void addSupplementMaterialRequirements(Long workOrderId, BigDecimal supplementQuantity,
                                            Long operatorId, String reason);
+
+    void addSupplementMaterialRequirements(Long workOrderId, BigDecimal supplementQuantity,
+                                           Long operatorId, String reason, java.util.Set<Long> operations);
 
     /**
      * 查询生产工单列表，支持关键字搜索、状态筛选、生产计划筛选和产品筛选。

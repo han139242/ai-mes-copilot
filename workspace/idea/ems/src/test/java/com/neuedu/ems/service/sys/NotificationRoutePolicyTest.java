@@ -24,7 +24,9 @@ class NotificationRoutePolicyTest {
                 "/wms/stocktakes",
                 "/wms/replenishment",
                 "/eam/repair-orders",
-                "/eam/maintenance-plans"
+                "/eam/maintenance-plans",
+                "/ai/alert",
+                "/ai/automation"
         ).forEach(route -> assertTrue(policy.isAllowed(route), route));
 
         assertFalse(policy.isAllowed("https://example.com"));

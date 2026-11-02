@@ -21,6 +21,8 @@ public class QmsInspectionResult {
     @TableId(value = "result_id", type = IdType.AUTO)
     private Long resultId;
     private Long inspectionId;
+    /** 件号：逐件全检时标记结果属于哪一件产品，例如 L200-001。 */
+    private String pieceNo;
     private Long itemId;
     private String measuredValue;
     private String result;

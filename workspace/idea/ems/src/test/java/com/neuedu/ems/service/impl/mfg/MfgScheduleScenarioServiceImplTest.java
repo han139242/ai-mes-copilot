@@ -7,16 +7,20 @@ import com.neuedu.ems.entity.mfg.MfgLineProductCapability;
 import com.neuedu.ems.entity.mfg.MfgProductionOrder;
 import com.neuedu.ems.entity.mfg.MfgScheduleItem;
 import com.neuedu.ems.entity.mfg.MfgScheduleScenario;
+import com.neuedu.ems.entity.mfg.MfgWorkOrder;
 import com.neuedu.ems.entity.org.OrgShift;
 import com.neuedu.ems.entity.process.ProcessRoute;
 import com.neuedu.ems.entity.process.ProcessRouteItem;
+import com.neuedu.ems.vo.mfg.ScheduleSimulationComparison;
 import com.neuedu.ems.mapper.factory.FactoryLineMapper;
+import com.neuedu.ems.mapper.mdm.MdmProductMapper;
 import com.neuedu.ems.mapper.mfg.MfgLineCalendarRuleMapper;
 import com.neuedu.ems.mapper.mfg.MfgLineProductCapabilityMapper;
 import com.neuedu.ems.mapper.mfg.MfgProductionOrderMapper;
 import com.neuedu.ems.mapper.mfg.MfgProductionPlanMapper;
 import com.neuedu.ems.mapper.mfg.MfgScheduleItemMapper;
 import com.neuedu.ems.mapper.mfg.MfgScheduleScenarioMapper;
+import com.neuedu.ems.mapper.mfg.MfgWorkOrderMapper;
 import com.neuedu.ems.mapper.org.OrgShiftMapper;
 import com.neuedu.ems.mapper.process.ProcessRouteItemMapper;
 import com.neuedu.ems.mapper.process.ProcessRouteMapper;
@@ -34,6 +38,7 @@ import java.time.temporal.TemporalAdjusters;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -64,6 +69,7 @@ class MfgScheduleScenarioServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new MfgScheduleScenarioServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
         scenarioMapper = mock(MfgScheduleScenarioMapper.class);
         itemMapper = mock(MfgScheduleItemMapper.class);
         orderMapper = mock(MfgProductionOrderMapper.class);
@@ -85,6 +91,7 @@ class MfgScheduleScenarioServiceImplTest {
         ReflectionTestUtils.setField(service, "processRouteMapper", routeMapper);
         ReflectionTestUtils.setField(service, "processRouteItemMapper", routeItemMapper);
         ReflectionTestUtils.setField(service, "orgShiftMapper", shiftMapper);
+        ReflectionTestUtils.setField(service, "mdmProductMapper", mock(MdmProductMapper.class));
 
         when(scenarioMapper.selectCount(any())).thenReturn(0L);
         doAnswer(invocation -> {
@@ -109,6 +116,22 @@ class MfgScheduleScenarioServiceImplTest {
         verify(planMapper).selectCount(queryCaptor.capture());
         assertTrue(queryCaptor.getValue().getSqlSegment().contains("status <>"));
         assertTrue(queryCaptor.getValue().getParamNameValuePairs().containsValue("CLOSED"));
+    }
+
+    @Test
+    void runningPlanCountsAsOccupiedSoNewOrdersDoNotOverlapIt() {
+        when(planMapper.selectList(any())).thenReturn(List.of());
+
+        ReflectionTestUtils.invokeMethod(service, "listActiveProductionPlans");
+
+        @SuppressWarnings("rawtypes")
+        ArgumentCaptor<QueryWrapper> queryCaptor = ArgumentCaptor.forClass(QueryWrapper.class);
+        verify(planMapper).selectList(queryCaptor.capture());
+        // 在制（RUNNING）计划正占着产线，漏掉它会把新订单排到同一时段，两张工单抢一台设备。
+        String sql = queryCaptor.getValue().getSqlSegment();
+        assertTrue(sql.contains("status"), sql);
+        assertTrue(queryCaptor.getValue().getParamNameValuePairs().containsValue("RUNNING")
+                || sql.contains("RUNNING"), sql + " / " + queryCaptor.getValue().getParamNameValuePairs());
     }
 
     @Test
@@ -371,5 +394,212 @@ class MfgScheduleScenarioServiceImplTest {
                 () -> service.calculateScenario(request));
 
         verify(scenarioMapper, never()).insert(any(MfgScheduleScenario.class));
+    }
+
+    @Test
+    void schedulesOneLampWithZeroUnitAgingTimeAsAFullBatch() {
+        stubLampRoute(BigDecimal.ONE);
+        MfgScheduleItem item = calculateSingleItem("LAMP-ONE");
+        assertEquals("SCHEDULED", item.getStatus());
+        assertEquals(new BigDecimal("66.00"), item.getEstimatedMinutes());
+        assertEquals(TEST_DATE.atTime(9, 6), item.getPlannedEndTime());
+    }
+
+    @Test
+    void schedulesFiftyOneLampsWithTwoCompleteAgingBatches() {
+        stubLampRoute(BigDecimal.valueOf(51));
+        MfgScheduleItem item = calculateSingleItem("LAMP-51");
+        assertEquals("SCHEDULED", item.getStatus());
+        assertEquals(new BigDecimal("426.00"), item.getEstimatedMinutes());
+        assertEquals(TEST_DATE.atTime(15, 6), item.getPlannedEndTime());
+    }
+
+    @Test
+    void fiftyLampsUseExactlyOneAgingBatch() {
+        stubLampRoute(BigDecimal.valueOf(50));
+        MfgScheduleItem item = calculateSingleItem("LAMP-50");
+        assertEquals("SCHEDULED", item.getStatus());
+        assertEquals(new BigDecimal("360.00"), item.getEstimatedMinutes());
+        assertEquals(TEST_DATE.atTime(14, 0), item.getPlannedEndTime());
+    }
+
+    @Test
+    void followsConfiguredBatchValuesInsteadOfHardCodingFiftyAndSixty() {
+        stubLampRoute(BigDecimal.valueOf(21));
+        ProcessRouteItem aging = agingStep();
+        aging.setBatchCapacity(BigDecimal.valueOf(20));
+        aging.setBatchDurationMinutes(BigDecimal.valueOf(120));
+        when(routeItemMapper.selectList(any())).thenReturn(List.of(laborStep(), aging));
+        MfgScheduleItem item = calculateSingleItem("LAMP-CONFIGURED");
+        assertEquals("SCHEDULED", item.getStatus());
+        assertEquals(new BigDecimal("366.00"), item.getEstimatedMinutes());
+        assertEquals(TEST_DATE.atTime(14, 6), item.getPlannedEndTime());
+    }
+
+    @Test
+    void rejectsBatchRouteWithoutBatchDurationInsteadOfFallingBackToUnitTime() {
+        stubLampRoute(BigDecimal.ONE);
+        ProcessRouteItem aging = agingStep();
+        aging.setBatchDurationMinutes(null);
+        when(routeItemMapper.selectList(any())).thenReturn(List.of(laborStep(), aging));
+        MfgScheduleItem item = calculateSingleItem("LAMP-INVALID-BATCH");
+        assertEquals("CONFLICT", item.getStatus());
+        assertEquals("工艺路线缺少有效标准工时", item.getConflictReason());
+    }
+
+    @Test
+    void refusesToJoinTwoThirtyMinuteWindowsIntoOneAgingBatch() {
+        stubLampRoute(BigDecimal.ONE);
+        OrgShift morning = dayShift();
+        morning.setEndTime(LocalTime.of(8, 30));
+        OrgShift afternoon = dayShift();
+        afternoon.setShiftId(2L);
+        afternoon.setStartTime(LocalTime.of(13, 0));
+        afternoon.setEndTime(LocalTime.of(13, 30));
+        MfgLineCalendarRule afternoonRule = calendarRule(1L);
+        afternoonRule.setShiftId(2L);
+        when(shiftMapper.selectList(any())).thenReturn(List.of(morning, afternoon));
+        when(calendarRuleMapper.selectList(any())).thenReturn(List.of(calendarRule(1L), afternoonRule));
+        assertEquals("CONFLICT", calculateSingleItem("LAMP-SPLIT-BATCH").getStatus());
+    }
+
+    @Test
+    void waitsUntilAfternoonForAContinuousAgingWindow() {
+        stubLampRoute(BigDecimal.ONE);
+        OrgShift morning = dayShift();
+        morning.setEndTime(LocalTime.of(8, 30));
+        OrgShift afternoon = dayShift();
+        afternoon.setShiftId(2L);
+        afternoon.setStartTime(LocalTime.of(13, 0));
+        afternoon.setEndTime(LocalTime.of(14, 30));
+        MfgLineCalendarRule afternoonRule = calendarRule(1L);
+        afternoonRule.setShiftId(2L);
+        when(shiftMapper.selectList(any())).thenReturn(List.of(morning, afternoon));
+        when(calendarRuleMapper.selectList(any())).thenReturn(List.of(calendarRule(1L), afternoonRule));
+        MfgScheduleItem item = calculateSingleItem("LAMP-AFTERNOON");
+        assertEquals("SCHEDULED", item.getStatus());
+        assertEquals(TEST_DATE.atTime(14, 0), item.getPlannedEndTime());
+    }
+
+    @Test
+    void manualCandidatesIncludeTheFullAgingBatch() {
+        stubLampRoute(BigDecimal.ONE);
+        MfgProductionOrder order = orderMapper.selectList(new QueryWrapper<>()).getFirst();
+        when(orderMapper.selectOne(any())).thenReturn(order);
+        var candidates = service.listEligibleLinesForOrder(order.getProductionOrderId());
+        assertEquals(1, candidates.size());
+        assertEquals(new BigDecimal("66.00"), candidates.getFirst().getEstimatedMinutes());
+        assertEquals(66, java.time.Duration.between(candidates.getFirst().getEarliestStartTime(),
+                candidates.getFirst().getEarliestEndTime()).toMinutes());
+    }
+
+    @Test
+    void manualPlacementCannotShortenAgingToSixMinutes() {
+        stubLampRoute(BigDecimal.ONE);
+        MfgProductionOrder order = orderMapper.selectList(new QueryWrapper<>()).getFirst();
+        when(orderMapper.selectOne(any())).thenReturn(order);
+        var error = assertThrows(com.neuedu.ems.exception.BusinessException.class, () ->
+                service.validatePlanningPlacement(order.getProductionOrderId(), 1L,
+                        TEST_DATE.atTime(8, 0), TEST_DATE.atTime(8, 6)));
+        assertTrue(error.getMessage().contains("连续批次"));
+    }
+
+    private void stubLampRoute(BigDecimal quantity) {
+        stubOneOrder(quantity);
+        stubCapability(1L, 1L, 1, BigDecimal.ONE);
+        stubLine(1L, BigDecimal.valueOf(480));
+        stubRoute(1L, 1L);
+        when(routeItemMapper.selectList(any())).thenReturn(List.of(agingStep(), laborStep()));
+        stubDayShiftCalendar(1L);
+    }
+
+    private ProcessRouteItem laborStep() {
+        ProcessRouteItem item = routeItem(1L, BigDecimal.valueOf(6));
+        item.setSequenceNo(10);
+        item.setResourceType("LABOR");
+        return item;
+    }
+
+    private ProcessRouteItem agingStep() {
+        ProcessRouteItem item = routeItem(1L, BigDecimal.ZERO);
+        item.setSequenceNo(20);
+        item.setResourceType("BATCH_EQUIPMENT");
+        item.setBatchCapacity(BigDecimal.valueOf(50));
+        item.setBatchDurationMinutes(BigDecimal.valueOf(60));
+        return item;
+    }
+
+    private MfgScheduleItem calculateSingleItem(String number) {
+        service.calculateScenario(request(number));
+        ArgumentCaptor<MfgScheduleItem> item = ArgumentCaptor.forClass(MfgScheduleItem.class);
+        verify(itemMapper).insert(item.capture());
+        return item.getValue();
+    }
+
+    @Test
+    void finishedOrderIsNotScheduledAgainBySimulation() {
+        MfgWorkOrderMapper workOrderMapper = mock(MfgWorkOrderMapper.class);
+        ReflectionTestUtils.setField(service, "mfgWorkOrderMapper", workOrderMapper);
+
+        MfgProductionOrder order = new MfgProductionOrder();
+        order.setProductionOrderId(21L);
+        order.setProductionOrderNo("MO-DONE");
+        order.setProductId(1L);
+        order.setOrderQuantity(BigDecimal.valueOf(2));
+        order.setDeliveryDate(TEST_DATE);
+        order.setStatus("RELEASED");
+        when(orderMapper.selectOne(any())).thenReturn(order);
+
+        MfgWorkOrder root = new MfgWorkOrder();
+        root.setWorkOrderNo("WO-1");
+        root.setWorkOrderType("ROOT");
+        root.setStatus("FINISHED");
+        root.setPlannedQuantity(BigDecimal.valueOf(2));
+        root.setCompletedQuantity(BigDecimal.valueOf(2));
+        when(workOrderMapper.selectList(any())).thenReturn(List.of(root));
+
+        ScheduleSimulationComparison comparison = service.simulateOrderSchedule(21L);
+
+        assertEquals("COMPLETED", comparison.getPlans().get(0).getCode());
+        assertEquals(Boolean.FALSE, comparison.getPlans().get(0).isFeasible());
+        assertTrue(comparison.getConclusion().contains("已完工 2 / 2"));
+        assertTrue(comparison.getConclusion().contains("不需要再排产"));
+        assertNull(comparison.getPlans().get(0).getStartTime());
+        verify(capabilityMapper, never()).selectList(any());
+    }
+
+    @Test
+    void partiallyCompletedOrderStillGoesThroughSimulation() {
+        MfgWorkOrderMapper workOrderMapper = mock(MfgWorkOrderMapper.class);
+        ReflectionTestUtils.setField(service, "mfgWorkOrderMapper", workOrderMapper);
+
+        MfgProductionOrder order = new MfgProductionOrder();
+        order.setProductionOrderId(22L);
+        order.setProductionOrderNo("MO-HALF");
+        order.setProductId(1L);
+        order.setOrderQuantity(BigDecimal.valueOf(4));
+        order.setDeliveryDate(TEST_DATE);
+        order.setStatus("RELEASED");
+        when(orderMapper.selectOne(any())).thenReturn(order);
+
+        MfgWorkOrder root = new MfgWorkOrder();
+        root.setWorkOrderNo("WO-2");
+        root.setWorkOrderType("ROOT");
+        root.setStatus("RUNNING");
+        root.setPlannedQuantity(BigDecimal.valueOf(4));
+        root.setCompletedQuantity(BigDecimal.valueOf(2));
+        when(workOrderMapper.selectList(any())).thenReturn(List.of(root));
+
+        stubCapability(1L, 1L, 1, BigDecimal.ONE);
+        stubLine(1L, BigDecimal.valueOf(800));
+        stubRoute(1L, 1L);
+        stubRouteMinutes(1L, new BigDecimal("0.50"));
+        stubDayShiftCalendar(1L);
+
+        ScheduleSimulationComparison comparison = service.simulateOrderSchedule(22L);
+
+        assertEquals("CURRENT", comparison.getPlans().get(0).getCode());
+        assertNotNull(comparison.getPlans().get(0).getStartTime());
+        assertTrue(comparison.getConclusion().contains("开工"), comparison.getConclusion());
     }
 }

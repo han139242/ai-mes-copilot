@@ -218,11 +218,10 @@ public class EamRepairOrderServiceImpl extends ServiceImpl<EamRepairOrderMapper,
     @Transactional
     public boolean closeRepairOrder(Long repairId, String repairResult, BigDecimal repairCost, Long operatorUserId) {
         EamRepairOrder existing = getRepairOrderById(repairId);
-        boolean closeable = existing != null
-                && (STATUS_REPAIRING.equals(existing.getStatus())
+        boolean repairing = existing != null && (STATUS_REPAIRING.equals(existing.getStatus())
                 || BusinessStatus.Repair.WAIT_ACCEPTANCE.equals(existing.getStatus()));
-        if (!closeable || operatorUserId == null || !StringUtils.hasText(repairResult)
-                || (repairCost != null && repairCost.signum() < 0)) {
+        boolean validCost = repairCost == null || repairCost.signum() >= 0;
+        if (!repairing || operatorUserId == null || !StringUtils.hasText(repairResult) || !validCost) {
             return false;
         }
         LocalDateTime now = LocalDateTime.now();

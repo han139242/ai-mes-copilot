@@ -53,4 +53,31 @@ class FileUtilTest {
         assertThrows(RuntimeException.class, () -> fileUtil.moveTempToFormal("../outside.txt"));
         assertTrue(Files.exists(outsideFile));
     }
+
+    @Test
+    void deletesFileAndAllowsRepeatedDeletion() throws Exception {
+        Path file = Files.writeString(testRoot.resolve("delete-me.txt"), "temporary");
+
+        fileUtil.deleteFile(file.toString());
+
+        assertTrue(Files.notExists(file));
+        assertDoesNotThrow(() -> fileUtil.deleteFile(file.toString()));
+    }
+
+    @Test
+    void reportsDeletionFailureInsteadOfSilentlySucceeding() throws Exception {
+        Path folder = Files.createDirectory(testRoot.resolve("nonempty"));
+        Files.writeString(folder.resolve("keep.txt"), "keep");
+
+        assertThrows(IllegalStateException.class, () -> fileUtil.deleteFile(folder.toString()));
+        assertTrue(Files.exists(folder.resolve("keep.txt")));
+    }
+
+    @Test
+    void randomPathKeepsPortableShape() {
+        ReflectionTestUtils.setField(fileUtil, "firstLevelLength", 2);
+        ReflectionTestUtils.setField(fileUtil, "secondLevelLength", 3);
+
+        assertTrue(fileUtil.generateTwoLevelRandomPath().matches("[A-Za-z0-9]{2}/[A-Za-z0-9]{3}/"));
+    }
 }

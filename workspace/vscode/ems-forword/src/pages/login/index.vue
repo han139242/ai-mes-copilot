@@ -1,74 +1,101 @@
 <script setup>
-import { reactive, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import AppIcon from '@/components/common/AppIcon.vue'
-import { getCurrentUserInfo, login } from '@/api/auth'
-import shuttlecockImage from '@/assets/login-background-blue.png'
-import { firstAccessiblePath, isNavigationPathAccessible } from '@/config/navigation'
-import {
-  setCurrentUser,
-  setToken,
-  startFrameworkPreview
-} from '@/utils/auth'
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import { ElMessage } from 'element-plus';
+import AppIcon from '@/components/common/AppIcon.vue';
+import LampScene from './LampScene.vue';
+import { appName } from '@/config/branding';
+import { getCurrentUserInfo, login } from '@/api/auth';
+import { firstAccessiblePath, isNavigationPathAccessible } from '@/config/navigation';
+import { setCurrentUser, setToken, startFrameworkPreview } from '@/utils/auth';
 
-const route = useRoute()
-const router = useRouter()
+const route = useRoute();
+const router = useRouter();
 // ref 保存单个响应式值；reactive 适合把整个登录表单作为一个响应式对象管理。
-const formRef = ref()
-const loading = ref(false)
-const showPreview = import.meta.env.DEV
+const formRef = ref();
+const loading = ref(false);
+const showPreview = import.meta.env.DEV;
+const year = new Date().getFullYear();
+// 大写锁定提示：密码框输入时容易踩坑，检测到就给出可见提示。
+const capsLock = ref(false);
 
 const form = reactive({
   username: '',
   password: '',
-  remember: true
-})
+  remember: true,
+});
 
 // rules 交给 Element Plus 的 el-form，在发送登录请求前先检查必填项。
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
-  password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
-}
+  password: [{ required: true, message: '请输入密码', trigger: 'blur' }],
+};
+
+// 演示环境提供一键填充账号，答辩现场切换岗位时不必手打密码。
+const demoAccounts = [
+  { username: 'admin', label: '系统管理员', role: '全功能' },
+  { username: 'lamp_operator', label: '操作工', role: '现场作业' },
+  { username: 'lamp_quality', label: '陈静', role: '质检员' },
+  { username: 'lamp_warehouse', label: '刘洋', role: '仓管员' },
+  { username: 'lamp_leader', label: '赵磊', role: '班组长' },
+];
+const demoPassword = 'Admin@12345';
+
+// 登录按钮文案随状态变化，避免用户重复点击。
+const submitText = computed(() => (loading.value ? '正在验证身份…' : '登录工作台'));
 
 // 路由守卫把未登录用户送到登录页时，会用 redirect 记录用户原本想访问的页面。
 // 登录成功后回到该页面；没有 redirect 时进入首页，并限制目标必须是站内路径。
 function resolveTarget() {
-  const fallback = firstAccessiblePath('/forbidden')
-  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : ''
+  const fallback = firstAccessiblePath('/forbidden');
+  const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '';
   if (!redirect.startsWith('/')) {
-    return fallback
+    return fallback;
   }
-  return isNavigationPathAccessible(redirect) ? redirect : fallback
+  return isNavigationPathAccessible(redirect) ? redirect : fallback;
+}
+
+// 大写锁定只在键盘事件里可靠，鼠标点击不会触发，因此只监听按键。
+function handleCapsLock(event) {
+  if (typeof event.getModifierState === 'function') {
+    capsLock.value = event.getModifierState('CapsLock');
+  }
+}
+
+// 一键填充演示账号，密码统一使用演示口令。
+function fillDemoAccount(account) {
+  form.username = account.username;
+  form.password = demoPassword;
+  capsLock.value = false;
 }
 
 // 执行表单校验、调用登录接口、保存Token和用户权限，最后进入原目标页面。
 async function handleLogin() {
   // 第一步先执行前端表单验证，验证不通过或正在登录时不重复发送请求。
-  const valid = await formRef.value?.validate().catch(() => false)
+  const valid = await formRef.value?.validate().catch(() => false);
   if (!valid || loading.value) {
-    return
+    return;
   }
 
-  loading.value = true
+  loading.value = true;
   try {
     // 第二步调用后端登录接口，账号密码正确时后端签发 JWT Token。
     const result = await login({
       username: form.username.trim(),
-      password: form.password
-    })
+      password: form.password,
+    });
     // 第三步保存 Token。之后 request.js 会把它自动放进每次请求的 Authorization 请求头。
-    setToken(result.token, form.remember)
+    setToken(result.token, form.remember);
     // 第四步再查询用户、角色和权限并保存，菜单及按钮权限都依赖这份用户信息。
-    const userInfo = await getCurrentUserInfo()
-    setCurrentUser(userInfo.data || result.data)
-    ElMessage.success('登录成功')
+    const userInfo = await getCurrentUserInfo();
+    setCurrentUser(userInfo.data || result.data);
+    ElMessage.success('登录成功');
     // replace 不会把登录页留在浏览器历史中，按“返回”不会再次回到登录页。
-    await router.replace(resolveTarget())
+    await router.replace(resolveTarget());
   } catch {
     // 请求错误已经由共享Axios响应拦截器统一提示，这里不重复弹窗。
   } finally {
-    loading.value = false
+    loading.value = false;
   }
 }
 
@@ -76,47 +103,94 @@ async function handleLogin() {
 async function enterPreview() {
   // 仅开发环境提供框架预览，不请求真实登录接口。
   if (startFrameworkPreview()) {
-    await router.replace('/dashboard')
+    await router.replace('/dashboard');
   }
 }
+
+// 页面挂载后自动聚焦用户名，减少一次鼠标操作。
+onMounted(() => {
+  const input = document.querySelector('.login-form input[placeholder="请输入用户名"]');
+  input?.focus?.();
+});
+
+onBeforeUnmount(() => {
+  capsLock.value = false;
+});
 </script>
 
 <template>
-  <!-- 登录页由品牌背景区和登录表单区组成，表单提交统一进入handleLogin。 -->
-  <main class="login-page" :style="{ '--shuttlecock-image': `url(${shuttlecockImage})` }">
-    <section class="brand-panel" aria-label="羽毛球制造执行系统介绍">
-      <div class="brand-shell">
-        <div class="brand-copy">
-          <span class="brand-kicker">BADMINTON MANUFACTURING</span>
-          <h1>羽球智造 <strong>MES</strong></h1>
-          <p>羽毛球制造执行系统</p>
+  <main class="login-page">
+    <div class="ambient-art" aria-hidden="true">
+      <span class="ambient-ribbon ribbon-one" /><span class="ambient-ribbon ribbon-two" /><span class="ambient-grid" />
+    </div>
+    <header class="page-header">
+      <div class="brand">
+        <span class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none">
+            <path
+              d="m10 6 12 4-3 7-12-4 3-7Zm9 10 5 8H12m6-2v4m-9 0h17"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            />
+            <path d="m8 17-2 3m7-2-1 4" stroke="currentColor" stroke-opacity=".55" stroke-linecap="round" />
+          </svg>
+        </span>
+        <div class="brand-name">
+          <strong>{{ appName }}</strong
+          ><span>MANUFACTURING EXECUTION SYSTEM</span>
         </div>
       </div>
-    </section>
+      <span class="header-caption">LAMP MES <i /> 工作台入口</span>
+    </header>
 
-    <section class="login-panel" aria-label="系统登录">
-      <div class="login-card">
-        <div class="login-heading">
-          <span class="login-eyebrow"><i />系统访问</span>
-          <h2>欢迎回来</h2>
-          <p>登录羽球智造制造运营工作台</p>
+    <div class="login-main">
+      <section class="product-intro" aria-label="智能调光台灯制造执行系统">
+        <div class="intro-copy">
+          <p class="intro-eyebrow"><span /> LIGHTING THE NEXT</p>
+          <h1>让每一束光，<br /><span>有序而生。</span></h1>
+          <p class="intro-subtitle">智能调光台灯制造执行系统</p>
         </div>
+        <div class="product-visual">
+          <span class="visual-orbit" aria-hidden="true" />
+          <LampScene />
+          <div class="product-meta"><span>智能调光系列</span><strong>L100 / L200</strong></div>
+          <span class="visual-caption" aria-hidden="true">PRECISION IN EVERY LIGHT</span>
+        </div>
+        <div class="capability-list" aria-label="平台能力">
+          <div class="capability-item">
+            <AppIcon name="bot" :size="19" /><span><strong>AI 智能办理</strong><small>让业务操作更高效</small></span>
+          </div>
+          <div class="capability-item">
+            <AppIcon name="route" :size="19" /><span><strong>全过程跟踪</strong><small>让生产过程更清晰</small></span>
+          </div>
+          <div class="capability-item">
+            <AppIcon name="bell" :size="19" /><span><strong>主动预警</strong><small>让异常处理更及时</small></span>
+          </div>
+        </div>
+      </section>
 
+      <section class="login-card" aria-label="系统登录">
+        <header class="login-heading">
+          <div class="heading-topline"><span class="heading-accent" /><span>WORKSPACE ACCESS</span></div>
+          <h2>欢迎登录</h2>
+          <p>欢迎使用智能调光台灯 MES</p>
+        </header>
         <el-form
           ref="formRef"
+          class="login-form"
           :model="form"
           :rules="rules"
           :aria-busy="loading"
           label-position="top"
-          size="large"
           @keyup.enter="handleLogin"
         >
           <el-form-item label="用户名" prop="username">
-            <el-input v-model="form.username" autocomplete="username" placeholder="请输入用户名">
-              <template #prefix><AppIcon name="user" :size="16" /></template>
+            <el-input v-model="form.username" autocomplete="username" placeholder="请输入用户名" size="large">
+              <template #prefix><AppIcon name="user" :size="18" /></template>
             </el-input>
           </el-form-item>
-
           <el-form-item label="密码" prop="password">
             <el-input
               v-model="form.password"
@@ -124,446 +198,828 @@ async function enterPreview() {
               autocomplete="current-password"
               placeholder="请输入密码"
               show-password
+              size="large"
+              @keydown="handleCapsLock"
+              @keyup="handleCapsLock"
             >
-              <template #prefix><AppIcon name="lock" :size="16" /></template>
+              <template #prefix><AppIcon name="lock" :size="18" /></template>
             </el-input>
+            <p v-if="capsLock" class="caps-hint"><AppIcon name="alert" :size="13" />大写锁定已开启</p>
           </el-form-item>
-
-          <div class="login-options">
-            <el-checkbox v-model="form.remember">保持登录</el-checkbox>
-            <span class="login-status"><AppIcon name="shield-check" :size="13" />JWT 安全认证</span>
-          </div>
-
+          <div class="login-options"><el-checkbox v-model="form.remember">保持登录</el-checkbox></div>
           <el-button class="login-submit" type="primary" :loading="loading" @click="handleLogin">
-            <template v-if="!loading">
-              进入工作台
-              <AppIcon name="arrow" :size="16" />
-            </template>
-            <template v-else>登录中…</template>
-          </el-button>
-
-          <el-button v-if="showPreview" class="preview-button" plain @click="enterPreview">
-            查看基础框架
+            {{ submitText }}<AppIcon v-if="!loading" name="arrow" :size="17" />
           </el-button>
         </el-form>
 
-        <footer class="login-footer">
-          <span><AppIcon name="shield-check" :size="13" />企业内部系统</span>
-          <span>MES 管理端 · 2026</span>
-        </footer>
-      </div>
-    </section>
+        <div v-if="showPreview" class="development-tools">
+          <details class="demo-accounts">
+            <summary>演示账号<AppIcon name="chevron" :size="13" /></summary>
+            <div class="demo-content">
+              <p class="demo-hint">选择岗位，自动填入账号</p>
+              <div class="demo-list">
+                <button
+                  v-for="account in demoAccounts"
+                  :key="account.username"
+                  type="button"
+                  :class="{ active: form.username === account.username }"
+                  @click="fillDemoAccount(account)"
+                >
+                  <strong>{{ account.label }}</strong
+                  ><span>{{ account.role }}</span>
+                </button>
+              </div>
+              <p class="demo-password">
+                演示口令 <code>{{ demoPassword }}</code>
+              </p>
+            </div>
+          </details>
+          <el-button class="preview-button" text @click="enterPreview">查看基础框架</el-button>
+        </div>
+        <div class="access-note">
+          <AppIcon name="shield-check" :size="14" /><span>授权访问 · 安全连接每一道工序</span>
+        </div>
+      </section>
+    </div>
+
+    <footer class="page-footer">
+      <span>© {{ year }} {{ appName }}</span
+      ><span>仅限授权人员访问</span>
+    </footer>
   </main>
 </template>
 
 <style scoped>
-/* 登录页样式：控制全屏背景、品牌文字、登录卡片、表单控件和移动端适配。 */
+/* 登录页专属视觉：深海蓝、青绿与暖光；不影响任何公共组件或其他页面。 */
 .login-page {
+  --el-color-primary: #167d83;
+  --el-color-primary-light-3: #5aa3a6;
+  --el-color-primary-light-5: #90bfc1;
+  --el-color-primary-light-7: #c3dfe0;
+  --el-color-primary-light-9: #edf7f6;
+  --el-color-primary-dark-2: #10666c;
   position: relative;
+  display: grid;
+  grid-template-rows: auto 1fr auto;
   min-height: 100dvh;
-  overflow-x: hidden;
-  overflow-y: auto;
-  background: #dceafa;
-  font-family: var(--mes-font);
+  overflow: clip;
+  background: #f4f3ed;
+  color: #173640;
+  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  -webkit-font-smoothing: antialiased;
 }
-
-.login-page::before {
+.ambient-art {
   position: absolute;
   inset: 0;
-  background: var(--shuttlecock-image) center / cover no-repeat;
-  filter: brightness(.96) saturate(.9) contrast(1.02);
-  content: '';
-  opacity: 1;
-  animation: background-breathe 18s ease-in-out infinite alternate;
-  transform-origin: center;
-}
-
-.login-page::after {
-  position: absolute;
-  inset: 0;
+  overflow: hidden;
+  pointer-events: none;
   background:
-    linear-gradient(180deg, rgb(240 248 255 / 24%) 0%, transparent 30%, rgb(27 86 145 / 7%) 100%),
-    linear-gradient(90deg, rgb(255 255 255 / 10%) 0%, transparent 50%, rgb(20 74 130 / 10%) 100%);
-  content: '';
-  pointer-events: none;
+    radial-gradient(ellipse at 88% 10%, #ffffff 0%, transparent 42%),
+    radial-gradient(ellipse at 96% 98%, #e5ece6 0%, transparent 48%);
 }
-
-.brand-panel {
+.ambient-art::before {
   position: absolute;
-  z-index: 1;
-  inset: 0;
-  min-height: 100dvh;
-  padding: 0 20px;
-  background: transparent;
-  pointer-events: none;
+  inset: 0 44% 0 0;
+  background:
+    radial-gradient(ellipse at 68% 53%, rgb(41 124 125 / 30%), transparent 58%),
+    radial-gradient(ellipse at 3% 0%, rgb(27 75 92 / 65%), transparent 55%),
+    linear-gradient(145deg, #0b1f31 5%, #102d3a 58%, #153d43 100%);
+  content: '';
 }
-
-.brand-shell {
+.ambient-art::after {
+  position: absolute;
+  width: 340px;
+  height: 340px;
+  right: -190px;
+  bottom: -150px;
+  border: 60px solid rgb(36 110 112 / 4%);
+  border-radius: 50%;
+  content: '';
+}
+.ambient-ribbon {
+  position: absolute;
+  display: block;
+  border: 1px solid rgb(160 218 210 / 9%);
+  border-radius: 50%;
+}
+.ribbon-one {
+  width: 720px;
+  height: 720px;
+  left: -440px;
+  top: -420px;
+  box-shadow:
+    0 0 0 52px rgb(153 215 207 / 2%),
+    0 0 0 104px rgb(153 215 207 / 2%);
+}
+.ribbon-two {
+  width: 680px;
+  height: 680px;
+  left: 31%;
+  bottom: -530px;
+  border-color: rgb(157 211 202 / 14%);
+}
+.ambient-grid {
+  position: absolute;
+  inset: 15% 44% 0 0;
+  background-image:
+    linear-gradient(rgb(160 218 210 / 4%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(160 218 210 / 4%) 1px, transparent 1px);
+  background-size: 52px 52px;
+  mask-image: radial-gradient(ellipse at 70% 70%, #000, transparent 75%);
+}
+.page-header,
+.page-footer {
   position: relative;
   z-index: 1;
   display: flex;
-  width: 100%;
-  flex-direction: column;
   align-items: center;
-  animation: brand-enter .9s cubic-bezier(.2, .8, .2, 1) both;
+  justify-content: space-between;
 }
-
-.brand-copy {
-  width: min(520px, 100%);
-  margin: 34px auto 0;
-  text-align: center;
+.page-header {
+  padding: 31px clamp(32px, 4.5vw, 88px);
 }
-
-.brand-kicker {
-  display: inline-flex;
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.brand-icon {
+  display: grid;
+  width: 44px;
+  height: 44px;
+  flex: none;
+  place-items: center;
+  border: 1px solid rgb(176 229 217 / 24%);
+  border-radius: 13px;
+  background: linear-gradient(145deg, #24616a, #154451);
+  color: #d3f0e7;
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 10%);
+}
+.brand-icon svg {
+  width: 30px;
+  height: 30px;
+}
+.brand-name {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.brand-name strong {
+  color: #edf5f4;
+  font-size: 17px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+.brand-name > span {
+  color: #96afb7;
+  font-size: 8px;
+  letter-spacing: 1.5px;
+}
+.header-caption {
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  color: #71827f;
+  font-size: 10px;
+  letter-spacing: 2px;
+}
+.header-caption i {
+  width: 1px;
+  height: 12px;
+  background: #c4d0cb;
+}
+.login-main {
+  position: relative;
+  display: grid;
+  width: min(1280px, calc(100% - 112px));
+  grid-template-columns: minmax(0, 1fr) 424px;
+  align-items: center;
+  gap: clamp(80px, 9vw, 160px);
+  margin: auto;
+  padding: 22px 0 30px;
+}
+.product-intro {
+  position: relative;
+  min-width: 0;
+}
+.intro-copy {
+  position: relative;
+  z-index: 1;
+}
+.intro-eyebrow {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 18px;
+  color: #a4c8c8;
+  font-size: 10px;
+  font-weight: 500;
+  letter-spacing: 3.5px;
+}
+.intro-eyebrow > span {
+  width: 23px;
+  height: 1px;
+  background: #80c2b7;
+}
+.intro-copy h1 {
+  margin: 0;
+  color: #f4f6f2;
+  font-size: clamp(42px, 3.8vw, 56px);
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: 3px;
+  white-space: nowrap;
+}
+.intro-copy h1 > span {
+  color: #aad7cb;
+}
+.intro-subtitle {
+  margin: 17px 0 0;
+  color: #b1c1c6;
+  font-size: 13px;
+  letter-spacing: 3px;
+}
+.product-visual {
+  position: relative;
+  height: 315px;
+  margin: -2px -8px 4px -18px;
+}
+.product-visual :deep(.lamp-scene) {
+  position: relative;
+  z-index: 1;
+}
+.visual-orbit {
+  position: absolute;
+  width: 72%;
+  height: 42%;
+  left: 11%;
+  bottom: -2%;
+  border: 1px solid rgb(142 197 186 / 18%);
+  border-radius: 50%;
+  transform: rotate(-9deg);
+}
+.visual-orbit::before {
+  position: absolute;
+  inset: 16px -18px;
+  border: 1px dashed rgb(142 197 186 / 10%);
+  border-radius: 50%;
+  content: '';
+}
+.product-meta {
+  position: absolute;
+  z-index: 2;
+  top: 37%;
+  right: 2%;
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  padding: 4px 0 4px 12px;
+  border-left: 1px solid #b4a07a;
+}
+.product-meta span {
+  color: #a5b9be;
+  font-size: 10px;
+  letter-spacing: 1px;
+}
+.product-meta strong {
+  color: #e3d2af;
+  font-size: 12px;
+  font-weight: 500;
+  letter-spacing: 2px;
+}
+.visual-caption {
+  position: absolute;
+  left: 12%;
+  bottom: 13%;
+  color: #769999;
+  font-size: 8px;
+  letter-spacing: 2px;
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+}
+.capability-list {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+  margin-top: 11px;
+  padding-top: 20px;
+  border-top: 1px solid rgb(185 217 212 / 16%);
+}
+.capability-item {
+  display: flex;
   align-items: center;
   gap: 9px;
-  margin-bottom: 11px;
-  color: #245f95;
-  font-size: 11px;
-  font-weight: 760;
-  line-height: 1.2;
+  min-width: 0;
 }
-
-.brand-kicker::before,
-.brand-kicker::after {
-  width: 28px;
-  height: 1px;
-  background: rgb(var(--mes-primary-rgb) / 78%);
-  content: '';
+.capability-item > .app-icon {
+  flex: none;
+  color: #96cabc;
 }
-
-.brand-copy h1 {
-  color: #123a62;
-  font-size: 40px;
-  font-weight: 720;
-  line-height: 1.14;
-  letter-spacing: 0;
-  text-shadow: 0 2px 12px rgb(255 255 255 / 52%);
-}
-
-.brand-copy h1 strong {
-  color: var(--mes-primary);
-  font-weight: 780;
-}
-
-.brand-copy p {
-  max-width: 480px;
-  margin-top: 9px;
-  color: #416583;
-  font-size: 14px;
-  font-weight: 520;
-  line-height: 1.6;
-}
-
-.login-panel {
-  position: relative;
-  z-index: 2;
+.capability-item > span {
   display: flex;
-  min-height: 100dvh;
-  align-items: center;
-  justify-content: center;
-  padding: 152px 24px 34px;
-  background: transparent;
+  flex-direction: column;
+  gap: 7px;
 }
-
+.capability-item strong {
+  color: #e2ece9;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.capability-item small {
+  color: #9cb4b8;
+  font-size: 10px;
+  white-space: nowrap;
+}
 .login-card {
   position: relative;
   width: 100%;
-  max-width: 432px;
-  overflow: hidden;
-  padding: 34px 36px 25px;
-  border: 1px solid rgb(255 255 255 / 92%);
-  border-radius: 7px;
-  background: rgb(250 253 255 / 91%);
-  box-shadow: 0 28px 72px rgb(24 70 117 / 20%), 0 3px 10px rgb(26 61 96 / 8%);
-  backdrop-filter: blur(20px) saturate(106%);
-  animation: login-enter .9s cubic-bezier(.2, .8, .2, 1) .12s both;
+  padding: 38px 36px 25px;
+  border: 1px solid #fff;
+  border-radius: 22px;
+  background: #fff;
+  box-shadow:
+    0 26px 70px rgb(29 56 53 / 9%),
+    0 3px 12px rgb(29 56 53 / 3%);
 }
-
 .login-card::before {
   position: absolute;
-  top: 0;
-  right: 0;
-  left: 0;
-  height: 4px;
-  background: var(--mes-primary);
+  left: 36px;
+  right: 36px;
+  top: -1px;
+  height: 3px;
+  border-radius: 0 0 5px 5px;
+  background: linear-gradient(90deg, #2b8587, #9dc6b6 62%, #dfc99f);
   content: '';
 }
-
 .login-heading {
-  margin-bottom: 24px;
+  margin-bottom: 29px;
 }
-
-.login-eyebrow {
-  display: inline-flex;
-  align-items: center;
-  gap: 7px;
-  margin-bottom: 10px;
-  color: #2f6fa7;
-  font-size: 11px;
-  font-weight: 760;
-  letter-spacing: 0;
-}
-
-.login-eyebrow i {
-  width: 7px;
-  height: 7px;
-  border: 2px solid rgb(var(--mes-primary-rgb) / 26%);
-  border-radius: 50%;
-  background: var(--mes-primary);
-}
-
-.login-heading h2 {
-  color: var(--mes-text);
-  font-family: var(--mes-font);
-  font-size: 28px;
-  font-weight: 720;
-  line-height: 1.2;
-}
-
-.login-heading p {
-  margin-top: 7px;
-  color: var(--mes-text-secondary);
-  font-size: 13px;
-  line-height: 1.6;
-}
-
-.login-options {
+.heading-topline {
   display: flex;
   align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin: -2px 0 21px;
+  gap: 9px;
+  margin-bottom: 20px;
+  color: #758b89;
+  font-size: 8px;
+  letter-spacing: 1.8px;
 }
-
-.login-status {
-  display: inline-flex;
+.heading-accent {
+  display: block;
+  width: 21px;
+  height: 3px;
+  border-radius: 3px;
+  background: #22828a;
+}
+.login-heading h2 {
+  margin: 0;
+  color: #173640;
+  font-size: 29px;
+  font-weight: 600;
+  letter-spacing: 1px;
+}
+.login-heading p {
+  margin: 10px 0 0;
+  color: #738480;
+  font-size: 12px;
+}
+.login-form :deep(.el-form-item) {
+  margin-bottom: 24px;
+}
+.login-form :deep(.el-form-item__label) {
+  height: auto;
+  margin-bottom: 9px;
+  padding: 0;
+  color: #475f63;
+  font-size: 13px;
+  line-height: 1.5;
+}
+.login-form :deep(.el-form-item__label::before) {
+  display: none;
+}
+.login-form :deep(.el-input__wrapper) {
+  min-height: 49px;
+  padding: 1px 14px;
+  border-radius: 9px;
+  background: #f5f8f7;
+  box-shadow: 0 0 0 1px #dfe8e4 inset;
+  transition:
+    box-shadow 0.18s,
+    background 0.18s;
+}
+.login-form :deep(.el-input__wrapper:hover) {
+  box-shadow: 0 0 0 1px #adc9c4 inset;
+}
+.login-form :deep(.el-input__wrapper.is-focus) {
+  background: #fff;
+  box-shadow:
+    0 0 0 1px #398f92 inset,
+    0 0 0 3px rgb(34 130 138 / 8%);
+}
+.login-form :deep(.el-form-item.is-error .el-input__wrapper) {
+  box-shadow: 0 0 0 1px var(--el-color-danger) inset;
+}
+.login-form :deep(.el-input__inner) {
+  color: #203f49;
+  font-size: 13px;
+}
+.login-form :deep(.el-input__inner::placeholder) {
+  color: #8b9b9a;
+}
+.login-form :deep(.el-input__prefix) {
+  margin-right: 6px;
+  color: #789b98;
+}
+.login-form :deep(.el-form-item__error) {
+  padding-top: 5px;
+  font-size: 11px;
+}
+.caps-hint {
+  display: flex;
   align-items: center;
   gap: 5px;
-  overflow: hidden;
-  color: #708294;
+  margin: 6px 0 0;
+  color: #a57931;
   font-size: 11px;
-  text-align: right;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
-
-.login-submit.el-button,
-.preview-button.el-button {
-  width: 100%;
-  height: 48px;
-  margin: 0;
-  border-radius: 5px;
-  font-size: 14px;
-  font-weight: 660;
-  transition: transform .2s ease, box-shadow .2s ease, background-color .2s ease, border-color .2s ease;
+.login-options {
+  margin: -7px 0 18px;
 }
-
+.login-options :deep(.el-checkbox__label) {
+  padding-left: 7px;
+  color: #758883;
+  font-size: 12px;
+}
+.login-options :deep(.el-checkbox__inner) {
+  border-radius: 4px;
+}
 .login-submit.el-button {
-  display: inline-flex;
-  gap: 8px;
-  border: 0;
-  color: #fff;
-  background: #2d8cf0;
-  box-shadow: 0 8px 20px rgb(31 112 194 / 18%);
-  letter-spacing: 0;
-}
-
-.login-submit.el-button:hover:not(:disabled) {
-  background: #1679dc;
-  box-shadow: 0 10px 24px rgb(31 112 194 / 24%);
-  transform: translateY(-1px);
-}
-
-.login-submit.el-button:active:not(:disabled),
-.preview-button.el-button:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.preview-button.el-button {
-  margin-top: 10px;
-  color: var(--mes-text-secondary);
-  border-color: #c8d7e5;
-  background: rgb(255 255 255 / 76%);
-}
-
-.preview-button.el-button:hover:not(:disabled) {
-  color: var(--mes-primary);
-  border-color: var(--mes-primary-border);
-  background: var(--mes-primary-soft);
-  box-shadow: 0 8px 18px rgb(var(--mes-primary-rgb) / 12%);
-  transform: translateY(-1px);
-}
-
-.login-footer {
-  display: inline-flex;
   width: 100%;
+  height: 49px;
+  border: 1px solid rgb(9 88 96 / 12%);
+  border-radius: 9px;
+  background: linear-gradient(105deg, #21868a, #126571);
+  color: #fff;
+  font-size: 14px;
+  font-weight: 500;
+  letter-spacing: 2px;
+  box-shadow:
+    0 7px 17px rgb(21 109 117 / 18%),
+    inset 0 1px 0 rgb(255 255 255 / 14%);
+  transition:
+    filter 0.18s,
+    box-shadow 0.18s;
+}
+.login-submit :deep(> span) {
+  display: flex;
   align-items: center;
+  justify-content: center;
+  gap: 17px;
+}
+.login-submit.el-button:hover,
+.login-submit.el-button:focus-visible {
+  filter: brightness(1.06);
+  box-shadow: 0 9px 23px rgb(21 109 117 / 24%);
+}
+.login-submit.el-button:active {
+  filter: brightness(0.94);
+}
+.development-tools {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 18px;
+  margin-top: 20px;
+}
+.demo-accounts {
+  min-width: 0;
+  flex: 1;
+}
+.demo-accounts summary {
+  display: flex;
+  width: fit-content;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  color: #748985;
+  font-size: 11px;
+  list-style: none;
+  cursor: pointer;
+}
+.demo-accounts summary::-webkit-details-marker {
+  display: none;
+}
+.demo-accounts summary:hover,
+.demo-accounts[open] summary {
+  color: #167d83;
+}
+.demo-accounts[open] summary .app-icon {
+  transform: rotate(90deg);
+}
+.demo-content {
+  padding-top: 12px;
+}
+.demo-hint {
+  margin: 0 0 10px;
+  color: #738884;
+  font-size: 11px;
+}
+.demo-list {
+  display: grid;
+  gap: 6px;
+}
+.demo-list button {
+  display: flex;
+  align-items: baseline;
   justify-content: space-between;
   gap: 10px;
-  margin-top: 22px;
-  padding-top: 14px;
-  border-top: 1px solid rgb(190 207 222 / 72%);
-  color: #748697;
+  padding: 8px 9px;
+  border: 1px solid #dfe8e4;
+  border-radius: 6px;
+  background: #f7faf8;
+  cursor: pointer;
+}
+.demo-list button:hover,
+.demo-list button.active {
+  border-color: #99c0b9;
+  background: #ecf6f2;
+}
+.demo-list strong {
+  color: #4e6b66;
+  font-size: 11px;
+  font-weight: 500;
+}
+.demo-list span {
+  color: #738b85;
   font-size: 10px;
 }
-
-.login-footer span:first-child {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+.demo-password {
+  margin: 9px 0 0;
+  color: #748883;
+  font-size: 10px;
 }
-
-:deep(.el-form-item) { margin-bottom: 17px; }
-
-:deep(.el-form-item__label) {
-  padding-bottom: 7px;
-  color: #3e4d5d;
-  font-size: 13px;
-  font-weight: 660;
+.demo-password code {
+  font-size: 10px;
 }
-
-:deep(.el-input__wrapper) {
-  min-height: 48px;
-  padding: 1px 12px 1px 10px;
-  border-radius: 5px;
-  background: rgb(255 255 255 / 94%);
-  box-shadow: 0 0 0 1px #bdccda inset, 0 2px 6px rgb(48 76 104 / 4%);
-  transition: box-shadow .18s ease, background-color .18s ease;
+.preview-button.el-button {
+  height: 26px;
+  margin: 0;
+  padding: 4px 0;
+  color: #748985;
+  font-size: 11px;
 }
-
-:deep(.el-input__wrapper:hover) {
-  background: #fff;
-  box-shadow: 0 0 0 1px #83b2de inset, 0 3px 8px rgb(48 76 104 / 6%);
-}
-
-:deep(.el-input__wrapper.is-focus) {
-  background: #fff;
-  box-shadow: 0 0 0 1px #2d8cf0 inset, 0 0 0 4px rgb(45 140 240 / 10%) !important;
-}
-
-:deep(.el-form-item__content) { overflow: visible; }
-
-:deep(.el-input__inner) {
-  color: var(--mes-text);
+.preview-button.el-button:hover {
   background: transparent;
-  font-size: 14px;
+  color: #167d83;
 }
-
-:deep(.el-input__inner::placeholder) { color: #9aa8b5; }
-
-:deep(.el-input__prefix) { color: var(--mes-primary); }
-
-:deep(.el-input__prefix-inner) {
-  width: 29px;
+.access-note {
+  display: flex;
+  align-items: center;
   justify-content: center;
-  margin-right: 7px;
-  border-right: 1px solid #e0e8ef;
+  gap: 7px;
+  margin-top: 23px;
+  padding-top: 19px;
+  border-top: 1px solid #edf0ec;
+  color: #7e8e88;
+  font-size: 10px;
+  letter-spacing: 0.5px;
 }
-
-:deep(.el-input__suffix) { color: #748494; }
-
-:deep(.el-input__inner:-webkit-autofill),
-:deep(.el-input__inner:-webkit-autofill:hover),
-:deep(.el-input__inner:-webkit-autofill:focus) {
-  -webkit-text-fill-color: var(--mes-text);
-  box-shadow: 0 0 0 1000px #fff inset;
-  caret-color: var(--mes-text);
-  transition: background-color 9999s ease-out 0s;
+.access-note > .app-icon {
+  color: #87a99b;
 }
-
-:deep(.el-input__wrapper:hover .el-input__inner:-webkit-autofill) {
-  box-shadow: 0 0 0 1000px #fbfdff inset;
+.page-footer {
+  gap: 16px;
+  padding: 23px clamp(32px, 4.5vw, 88px);
+  font-size: 10px;
+  letter-spacing: 0.5px;
 }
-
-:deep(.el-input__wrapper.is-focus .el-input__inner:-webkit-autofill) {
-  box-shadow: 0 0 0 1000px #fff inset;
+.page-footer > span:first-child {
+  color: #93adb1;
 }
-
-:deep(.el-checkbox) {
-  --el-checkbox-text-color: var(--mes-text-secondary);
-  --el-checkbox-checked-text-color: var(--mes-text);
-  --el-checkbox-input-border-color: #aebbc8;
-  --el-checkbox-checked-bg-color: var(--mes-primary);
-  --el-checkbox-checked-input-border-color: var(--mes-primary);
-  --el-checkbox-checked-icon-color: #fff;
+.page-footer > span:last-child {
+  color: #768982;
 }
-
-@media (max-width: 1080px) {
-  .brand-copy { margin-top: 30px; }
-  .login-panel { padding-top: 146px; }
+.login-page button:focus-visible,
+.login-page summary:focus-visible {
+  outline: 2px solid #58a4a0;
+  outline-offset: 4px;
 }
-
-@media (max-width: 880px) {
-  .login-page::before { background-position: 31% center; }
-
-  .login-page::after {
-    background: linear-gradient(180deg, rgb(242 249 255 / 30%) 0%, rgb(235 245 255 / 8%) 55%, rgb(28 87 145 / 8%) 100%);
+@media (min-width: 1600px) {
+  .login-main {
+    width: min(1360px, calc(100% - 160px));
+    grid-template-columns: minmax(0, 1fr) 456px;
+    gap: 180px;
   }
-
-  .brand-panel { padding-inline: 18px; }
-  .brand-copy { width: min(430px, 100%); margin-top: 27px; }
-  .brand-copy h1 { font-size: 32px; }
-
-  .login-panel {
-    min-height: 100dvh;
-    padding: 136px 20px 30px;
-    background: transparent;
+  .intro-copy h1 {
+    font-size: 61px;
   }
-
+  .product-visual {
+    height: 370px;
+    margin-top: 0;
+  }
   .login-card {
-    max-width: 480px;
-    margin: 0 auto;
-    background: rgb(255 255 255 / 94%);
-    box-shadow: 0 18px 46px rgb(25 63 102 / 16%);
-    backdrop-filter: blur(18px);
+    padding: 46px 42px 30px;
+  }
+  .login-card::before {
+    right: 42px;
+    left: 42px;
+  }
+  .capability-list {
+    gap: 18px;
+    padding-top: 25px;
+  }
+  .capability-item {
+    gap: 13px;
+  }
+  .capability-item strong {
+    font-size: 13px;
+  }
+  .capability-item small {
+    font-size: 11px;
   }
 }
-
-@media (max-width: 600px) {
-  .brand-copy { margin-top: 22px; }
-  .brand-copy h1 { font-size: 30px; }
-  .brand-copy p { margin-top: 6px; font-size: 13px; }
-  .brand-kicker { margin-bottom: 8px; font-size: 10px; }
-  .brand-kicker::before,
-  .brand-kicker::after { width: 18px; }
-  .login-panel { padding: 124px 14px 22px; }
-  .login-card { padding: 27px 22px 21px; }
-  .login-footer { align-items: flex-start; flex-direction: column; gap: 5px; }
+@media (min-width: 901px) and (max-height: 800px) {
+  .page-header {
+    padding-top: 23px;
+    padding-bottom: 20px;
+  }
+  .login-main {
+    padding-top: 8px;
+    padding-bottom: 16px;
+  }
+  .intro-copy h1 {
+    font-size: 45px;
+  }
+  .intro-eyebrow {
+    margin-bottom: 13px;
+  }
+  .intro-subtitle {
+    margin-top: 13px;
+  }
+  .product-visual {
+    height: 265px;
+    margin-top: -2px;
+  }
+  .capability-list {
+    margin-top: 6px;
+    padding-top: 17px;
+  }
+  .login-card {
+    padding-top: 30px;
+    padding-bottom: 21px;
+  }
+  .login-heading {
+    margin-bottom: 25px;
+  }
+  .heading-topline {
+    margin-bottom: 15px;
+  }
+  .access-note {
+    margin-top: 18px;
+    padding-top: 16px;
+  }
+  .page-footer {
+    padding-top: 18px;
+    padding-bottom: 18px;
+  }
 }
-
-@media (max-height: 760px) and (min-width: 881px) {
-  .brand-copy { margin-top: 22px; }
-  .brand-copy h1 { font-size: 32px; }
-  .brand-copy p { margin-top: 5px; font-size: 13px; }
-  .brand-kicker { margin-bottom: 7px; }
-  .login-panel { padding: 114px 24px 20px; }
-  .login-card { padding: 27px 30px 20px; }
-  .login-heading { margin-bottom: 20px; }
-  :deep(.el-form-item) { margin-bottom: 14px; }
-  .login-options { margin-bottom: 17px; }
-  .login-footer { margin-top: 18px; padding-top: 12px; }
+@media (min-width: 901px) and (max-width: 1150px) {
+  .login-main {
+    width: calc(100% - 72px);
+    grid-template-columns: minmax(0, 1fr) 380px;
+    gap: 58px;
+  }
+  .intro-copy h1 {
+    font-size: 39px;
+    letter-spacing: 1px;
+  }
+  .intro-subtitle {
+    font-size: 12px;
+    letter-spacing: 1px;
+  }
+  .product-visual {
+    height: 290px;
+    margin-left: -30px;
+    margin-right: -10px;
+  }
+  .product-meta {
+    right: 0;
+    top: 23%;
+  }
+  .product-meta strong {
+    font-size: 10px;
+    letter-spacing: 1px;
+  }
+  .product-meta span {
+    font-size: 9px;
+  }
+  .capability-list {
+    gap: 8px;
+  }
+  .capability-item {
+    gap: 6px;
+  }
+  .capability-item > .app-icon {
+    width: 16px;
+    height: 16px;
+  }
+  .capability-item strong {
+    font-size: 11px;
+  }
+  .capability-item small {
+    display: none;
+  }
+  .login-card {
+    padding-right: 29px;
+    padding-left: 29px;
+  }
 }
-
-@keyframes background-breathe {
-  from { filter: brightness(.95) saturate(.88) contrast(1.02); transform: scale(1.014); }
-  to { filter: brightness(.98) saturate(.92) contrast(1.01); transform: scale(1.002); }
+@media (max-width: 900px) {
+  .ambient-art {
+    background: linear-gradient(155deg, #0e2939 0%, #17474b 43%, #f4f3ed 43.1%, #f4f3ed 100%);
+  }
+  .ambient-art::before {
+    inset: 0;
+    background: radial-gradient(ellipse at 80% 5%, rgb(111 185 166 / 15%), transparent 48%);
+  }
+  .ambient-grid {
+    inset: 0 0 35%;
+  }
+  .ribbon-two {
+    left: 55%;
+    bottom: 35%;
+  }
+  .page-header {
+    padding: 30px;
+  }
+  .header-caption {
+    display: none;
+  }
+  .login-main {
+    width: min(424px, calc(100% - 48px));
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0;
+    padding: 25px 0 38px;
+  }
+  .product-intro {
+    display: none;
+  }
+  .login-card {
+    padding: 37px 32px 25px;
+  }
+  .page-footer {
+    justify-content: center;
+    flex-wrap: wrap;
+    padding: 22px 24px;
+  }
+  .page-footer > span:first-child {
+    color: #768982;
+  }
 }
-
-@keyframes login-enter {
-  from { opacity: 0; transform: translateY(28px); }
-  to { opacity: 1; transform: translateY(0); }
+@media (max-width: 400px) {
+  .page-header {
+    padding: 26px 23px;
+  }
+  .brand {
+    gap: 10px;
+  }
+  .brand-icon {
+    width: 38px;
+    height: 38px;
+    border-radius: 11px;
+  }
+  .brand-name strong {
+    font-size: 15px;
+    letter-spacing: 0.5px;
+  }
+  .brand-name > span {
+    font-size: 6px;
+    letter-spacing: 1px;
+  }
+  .login-main {
+    width: calc(100% - 32px);
+    padding: 18px 0 30px;
+  }
+  .login-card {
+    padding: 31px 25px 22px;
+    border-radius: 19px;
+  }
+  .login-card::before {
+    right: 25px;
+    left: 25px;
+  }
+  .login-heading h2 {
+    font-size: 27px;
+  }
+  .page-footer {
+    gap: 8px 14px;
+    font-size: 9px;
+  }
 }
-
-@keyframes brand-enter {
-  from { opacity: 0; transform: translateY(-22px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .login-page::before,
-  .brand-shell,
-  .login-card { animation: none; }
+  .login-page *,
+  .login-page :deep(*) {
+    transition: none !important;
+  }
 }
 </style>

@@ -51,6 +51,7 @@ class DashboardServiceImplTest {
     private MfgTaskMapper taskMapper;
     private MfgWorkReportMapper workReportMapper;
     private ProcessOperationMapper processOperationMapper;
+    private com.neuedu.ems.mapper.process.ProcessRouteItemMapper processRouteItemMapper;
     private WmsReplenishmentSuggestionMapper replenishmentMapper;
     private EamEquipmentMapper equipmentMapper;
     private QmsInspectionOrderMapper inspectionOrderMapper;
@@ -62,12 +63,14 @@ class DashboardServiceImplTest {
         initLambdaMetadata(ProcessOperation.class);
         initLambdaMetadata(WmsReplenishmentSuggestion.class);
         initLambdaMetadata(EamEquipment.class);
+        initLambdaMetadata(QmsInspectionOrder.class);
         service = new DashboardServiceImpl();
         productionOrderMapper = mock(MfgProductionOrderMapper.class);
         workOrderMapper = mock(MfgWorkOrderMapper.class);
         taskMapper = mock(MfgTaskMapper.class);
         workReportMapper = mock(MfgWorkReportMapper.class);
         processOperationMapper = mock(ProcessOperationMapper.class);
+        processRouteItemMapper = mock(com.neuedu.ems.mapper.process.ProcessRouteItemMapper.class);
         replenishmentMapper = mock(WmsReplenishmentSuggestionMapper.class);
         equipmentMapper = mock(EamEquipmentMapper.class);
         inspectionOrderMapper = mock(QmsInspectionOrderMapper.class);
@@ -76,6 +79,7 @@ class DashboardServiceImplTest {
         ReflectionTestUtils.setField(service, "mfgTaskMapper", taskMapper);
         ReflectionTestUtils.setField(service, "mfgWorkReportMapper", workReportMapper);
         ReflectionTestUtils.setField(service, "processOperationMapper", processOperationMapper);
+        ReflectionTestUtils.setField(service, "processRouteItemMapper", processRouteItemMapper);
         ReflectionTestUtils.setField(service, "wmsReplenishmentSuggestionMapper", replenishmentMapper);
         ReflectionTestUtils.setField(service, "eamEquipmentMapper", equipmentMapper);
         ReflectionTestUtils.setField(service, "qmsInspectionOrderMapper", inspectionOrderMapper);
@@ -92,7 +96,9 @@ class DashboardServiceImplTest {
         MfgTask finalTask = new MfgTask();
         finalTask.setTaskId(11L);
         finalTask.setOperationId(7L);
-        when(processOperationMapper.selectOne(any())).thenReturn(finalOperation);
+        // 最终产出工序 = 各路线序号最大的工序；这里路线为空，靠历史固定编码 OP-PACK 兜底。
+        when(processRouteItemMapper.selectList(any())).thenReturn(List.of());
+        when(processOperationMapper.selectList(any())).thenReturn(List.of(finalOperation));
         when(taskMapper.selectList(any())).thenReturn(List.of(finalTask));
         when(workReportMapper.selectList(any())).thenReturn(List.of());
         when(replenishmentMapper.selectCount(any())).thenReturn(4L);
@@ -118,7 +124,7 @@ class DashboardServiceImplTest {
         verify(workOrderMapper, times(2)).selectCount(workOrderQueries.capture());
         verify(taskMapper).selectCount(taskQuery.capture());
         verify(taskMapper).selectList(outputTaskQuery.capture());
-        verify(processOperationMapper).selectOne(finalOperationQuery.capture());
+        verify(processOperationMapper).selectList(finalOperationQuery.capture());
         verify(workReportMapper).selectList(outputReportQuery.capture());
         verify(replenishmentMapper).selectCount(replenishmentQuery.capture());
         verify(equipmentMapper).selectCount(equipmentQuery.capture());
@@ -156,7 +162,9 @@ class DashboardServiceImplTest {
 
     @Test
     void summaryReturnsZeroOutputWhenFinalOperationIsMissing() {
-        when(processOperationMapper.selectOne(any())).thenReturn(null);
+        // 既没有可用的路线末工序，也没有历史固定编码 OP-PACK 的工序：产量必须为 0。
+        when(processRouteItemMapper.selectList(any())).thenReturn(List.of());
+        when(processOperationMapper.selectList(any())).thenReturn(List.of());
 
         Map<String, Object> result = service.getSummary(
                 LocalDate.of(2026, 7, 17), LocalDate.of(2026, 7, 17));
@@ -169,7 +177,7 @@ class DashboardServiceImplTest {
 
     @Test
     void equipmentStatisticsUseEnglishCodesAndAggregateMaintenance() {
-        when(equipmentMapper.selectCount(any())).thenReturn(10L, 4L, 2L, 1L, 3L);
+        when(equipmentMapper.selectCount(any())).thenReturn(10L, 4L, 2L, 1L, 3L, 6L);
 
         Map<String, Object> result = service.getEquipmentStatus();
 
@@ -178,8 +186,9 @@ class DashboardServiceImplTest {
         assertEquals(2L, result.get("stopped"));
         assertEquals(1L, result.get("fault"));
         assertEquals(3L, result.get("maintenance"));
+        assertEquals(6L, result.get("repaired"));
         ArgumentCaptor<Wrapper<EamEquipment>> queries = wrapperCaptor();
-        verify(equipmentMapper, times(5)).selectCount(queries.capture());
+        verify(equipmentMapper, times(6)).selectCount(queries.capture());
         assertTrue(values(queries.getAllValues().get(0)).contains(BusinessStatus.Equipment.RUNNING));
         assertTrue(values(queries.getAllValues().get(1)).contains(BusinessStatus.Equipment.IDLE));
         assertTrue(values(queries.getAllValues().get(2)).contains(BusinessStatus.Equipment.STOPPED));
@@ -187,6 +196,21 @@ class DashboardServiceImplTest {
         Collection<Object> maintenanceValues = values(queries.getAllValues().get(4));
         assertTrue(maintenanceValues.contains(BusinessStatus.Equipment.MAINTAINING));
         assertTrue(maintenanceValues.contains(BusinessStatus.Equipment.REPAIRING));
+        assertTrue(values(queries.getAllValues().get(5)).contains(BusinessStatus.Equipment.REPAIRED));
+    }
+
+    @Test
+    void qualityStatisticsFilterOnBusinessTimeSoImportedOrdersAreNotDropped() {
+        // 历史导入的检验单创建时间为空、检验时间有值：只按创建时间过滤会把它整批漏掉。
+        when(inspectionOrderMapper.selectList(any())).thenReturn(List.of());
+
+        service.getQualityStatistics(LocalDate.of(2026, 10, 25), LocalDate.of(2026, 10, 25));
+
+        ArgumentCaptor<Wrapper<QmsInspectionOrder>> query = wrapperCaptor();
+        verify(inspectionOrderMapper).selectList(query.capture());
+        String segment = query.getValue().getSqlSegment();
+        assertTrue(segment.toUpperCase().contains("COALESCE"), "过滤条件必须对业务时间兜底，实际是：" + segment);
+        assertTrue(segment.contains("inspection_time"), "过滤条件必须用到检验时间，实际是：" + segment);
     }
 
     private QmsInspectionOrder inspection(String result) {

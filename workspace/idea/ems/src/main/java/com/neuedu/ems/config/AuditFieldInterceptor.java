@@ -9,6 +9,7 @@ import org.apache.ibatis.plugin.Interceptor;
 import org.apache.ibatis.plugin.Intercepts;
 import org.apache.ibatis.plugin.Invocation;
 import org.apache.ibatis.plugin.Signature;
+import org.apache.ibatis.reflection.SystemMetaObject;
 import org.springframework.stereotype.Component;
 
 import java.lang.reflect.Field;
@@ -79,17 +80,20 @@ public class AuditFieldInterceptor implements Interceptor {
 
     private boolean hasVersionValue(Object entity) {
         for (Class<?> type = entity.getClass(); type != null; type = type.getSuperclass()) {
-            for (Field field : type.getDeclaredFields()) {
-                if (field.isAnnotationPresent(Version.class)) {
-                    try {
-                        field.setAccessible(true);
-                        return field.get(entity) != null;
-                    } catch (IllegalAccessException e) {
-                        throw new IllegalStateException("无法读取乐观锁版本字段", e);
-                    }
-                }
+            Field field = versionField(type);
+            if (field != null) {
+                return SystemMetaObject.forObject(entity).getValue(field.getName()) != null;
             }
         }
         return false;
+    }
+
+    private Field versionField(Class<?> type) {
+        for (Field field : type.getDeclaredFields()) {
+            if (field.isAnnotationPresent(Version.class)) {
+                return field;
+            }
+        }
+        return null;
     }
 }

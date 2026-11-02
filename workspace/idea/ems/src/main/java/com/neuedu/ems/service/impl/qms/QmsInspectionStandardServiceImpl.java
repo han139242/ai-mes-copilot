@@ -15,6 +15,8 @@ import java.util.List;
  */
 @Service
 public class QmsInspectionStandardServiceImpl extends ServiceImpl<QmsInspectionStandardMapper, QmsInspectionStandard> implements QmsInspectionStandardService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.neuedu.ems.service.qms.InspectionStandardReviewService reviewService;
 
     /**
      * 分页查询检验标准列表，支持检验项目、产品和工序筛选。
@@ -63,6 +65,8 @@ public class QmsInspectionStandardServiceImpl extends ServiceImpl<QmsInspectionS
      */
     @Override
     public boolean saveStandard(QmsInspectionStandard standard) {
+        standard.setStandardId(null);
+        standard.setConfirmationStatus("DRAFT");
         if (standard.getDeletedFlag() == null) {
             standard.setDeletedFlag(0);
         }
@@ -75,12 +79,23 @@ public class QmsInspectionStandardServiceImpl extends ServiceImpl<QmsInspectionS
      * @return 是否成功
      */
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor=Exception.class)
     public boolean updateStandard(QmsInspectionStandard standard) {
         if (standard.getStandardId() == null) {
             return false;
         }
+        var existing=baseMapper.lockActive(standard.getStandardId());
+        if(existing==null)return false;
+        reviewService.requireDraft(existing);
+        if(reviewService.controlled(existing.getProductId()) && standard.getVersion()==null)
+            throw new com.neuedu.ems.exception.OptimisticLockConflictException();
+        if(standard.getVersion()==null)standard.setVersion(existing.getVersion());
+        standard.setConfirmationStatus(null);
         standard.setDeletedFlag(null);
-        return baseMapper.updateById(standard) > 0;
+        int updated=baseMapper.updateById(standard);
+        if(updated==0 && reviewService.controlled(existing.getProductId()))
+            throw new com.neuedu.ems.exception.OptimisticLockConflictException();
+        return updated>0;
     }
 
     /**
@@ -89,9 +104,14 @@ public class QmsInspectionStandardServiceImpl extends ServiceImpl<QmsInspectionS
      * @return 是否成功
      */
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor=Exception.class)
     public boolean removeStandardById(Long standardId) {
+        var existing=baseMapper.lockActive(standardId);
+        if(existing==null)return false;
+        reviewService.requireDraft(existing);
         QmsInspectionStandard standard = new QmsInspectionStandard();
         standard.setStandardId(standardId);
+        standard.setVersion(existing.getVersion());
         standard.setDeletedFlag(1);
         return baseMapper.updateById(standard) > 0;
     }
@@ -102,17 +122,17 @@ public class QmsInspectionStandardServiceImpl extends ServiceImpl<QmsInspectionS
      * @return 是否成功
      */
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor=Exception.class)
     public boolean removeStandardsByIds(List<Long> standardIds) {
         if (standardIds == null || standardIds.isEmpty()) {
             return false;
         }
-        List<QmsInspectionStandard> standards = standardIds.stream().map(standardId -> {
-            QmsInspectionStandard standard = new QmsInspectionStandard();
-            standard.setStandardId(standardId);
-            standard.setDeletedFlag(1);
-            return standard;
-        }).toList();
-        return updateBatchById(standards);
+        for (Long id : standardIds) {
+            if (!removeStandardById(id)) {
+                throw new com.neuedu.ems.exception.BusinessException(com.neuedu.ems.common.ResultCode.NOT_FOUND);
+            }
+        }
+        return true;
     }
 
     /**

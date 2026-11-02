@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
 
 
 import java.io.IOException;
@@ -19,6 +20,12 @@ import java.util.concurrent.TimeUnit;
 @Component
 @Slf4j
 public class RedisUtil {
+    @Value("${mes.cache.namespace:}")
+    private String namespace = "";
+
+    private String scoped(String key) {
+        return StrUtil.isBlank(namespace) ? key : namespace + ":" + key;
+    }
     @Autowired
     private ObjectMapper objectMapper;
     /**
@@ -39,7 +46,7 @@ public class RedisUtil {
             throw new IllegalArgumentException("Redis缓存键不能为空");
         }
         ValueOperations<String, Object> operations = redisTemplate.opsForValue();
-        operations.set(key, value);
+        operations.set(scoped(key), value);
     }
 
     /**
@@ -57,7 +64,7 @@ public class RedisUtil {
             throw new IllegalArgumentException("过期时间不能为负数");
         }
         ValueOperations<String, Object> operations = redisTemplate.opsForValue();
-        operations.set(key, value, timeout, unit);
+        operations.set(scoped(key), value, timeout, unit);
     }
 
     /**
@@ -74,7 +81,7 @@ public class RedisUtil {
             throw new IllegalArgumentException("过期时间不能为负数");
         }
         ValueOperations<String, Object> operations = redisTemplate.opsForValue();
-        operations.set(key, value, timeout, TimeUnit.SECONDS);
+        operations.set(scoped(key), value, timeout, TimeUnit.SECONDS);
     }
 
     /**
@@ -87,7 +94,7 @@ public class RedisUtil {
             throw new IllegalArgumentException("Redis缓存键不能为空");
         }
         ValueOperations<String, Object> operations = redisTemplate.opsForValue();
-        return operations.get(key);
+        return operations.get(scoped(key));
     }
 
     public <T> T get(String key, Class<T> clazz) {
@@ -95,33 +102,29 @@ public class RedisUtil {
             return null;
         }
         try {
-            ValueOperations<String, Object> operations = redisTemplate.opsForValue();
-            Object cachedValue = operations.get(key);
-
-            if (cachedValue == null) {
-                return null;
-            }
-
-            if (clazz.isInstance(cachedValue)) {
-                return clazz.cast(cachedValue);
-            }
-
-            if (cachedValue instanceof String json) {
-                if (StrUtil.isBlank(json)) {
-                    return null;
-                }
-                return objectMapper.readValue(json, clazz);
-            }
-
-            return objectMapper.convertValue(cachedValue, clazz);
-
+            Object cachedValue = redisTemplate.opsForValue().get(scoped(key));
+            return convertCachedValue(cachedValue, clazz);
         } catch (IOException e) {
             log.warn("Redis cache JSON conversion failed for key {}: {}", key, e.getMessage());
-            return null;
         } catch (RuntimeException e) {
             log.warn("Redis cache conversion failed for key {}: {}", key, e.getMessage());
-            return null;
         }
+        return null;
+    }
+
+    /** 缓存值可能是目标类型实例、JSON 字符串或普通 Map，按三种情况分别还原。 */
+    private <T> T convertCachedValue(Object cachedValue, Class<T> clazz) throws IOException {
+        T converted;
+        if (cachedValue == null) {
+            converted = null;
+        } else if (clazz.isInstance(cachedValue)) {
+            converted = clazz.cast(cachedValue);
+        } else if (cachedValue instanceof String json) {
+            converted = StrUtil.isBlank(json) ? null : objectMapper.readValue(json, clazz);
+        } else {
+            converted = objectMapper.convertValue(cachedValue, clazz);
+        }
+        return converted;
     }
 
 
@@ -134,7 +137,7 @@ public class RedisUtil {
         if (key == null || key.isEmpty()) {
             throw new IllegalArgumentException("Redis缓存键不能为空");
         }
-        return Boolean.TRUE.equals(redisTemplate.delete(key));
+        return Boolean.TRUE.equals(redisTemplate.delete(scoped(key)));
     }
 
     /**
@@ -146,7 +149,7 @@ public class RedisUtil {
         if (key == null || key.isEmpty()) {
             throw new IllegalArgumentException("Redis缓存键不能为空");
         }
-        return Boolean.TRUE.equals(redisTemplate.hasKey(key));
+        return Boolean.TRUE.equals(redisTemplate.hasKey(scoped(key)));
     }
 
     /**
@@ -163,7 +166,7 @@ public class RedisUtil {
         if (timeout < 0) {
             throw new IllegalArgumentException("过期时间不能为负数");
         }
-        return Boolean.TRUE.equals(redisTemplate.expire(key, timeout, unit));
+        return Boolean.TRUE.equals(redisTemplate.expire(scoped(key), timeout, unit));
     }
 
     /**

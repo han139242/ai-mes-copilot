@@ -18,6 +18,9 @@ import java.util.Set;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import org.springframework.web.server.ResponseStatusException;
+import org.springframework.http.HttpStatus;
 
 class JwtAuthenticationFilterTest {
 
@@ -40,6 +43,18 @@ class JwtAuthenticationFilterTest {
     }
 
     @Test
+    void temporaryRevocationCheckFailureReturns503WithoutExecutingBusiness() throws Exception {
+        var request = authenticatedRequest("GET", "/api/sys/user/page");
+        var response = new MockHttpServletResponse();
+        var chain = new MockFilterChain();
+        when(tokenRevocationService.isRevoked("token")).thenThrow(new ResponseStatusException(HttpStatus.SERVICE_UNAVAILABLE));
+        filter.doFilter(request, response, chain);
+        assertEquals(503, response.getStatus());
+        assertEquals(500, new ObjectMapper().readTree(response.getContentAsString()).get("code").asInt());
+        assertNull(chain.getRequest());
+    }
+
+    @Test
     void returns403WhenAuthenticatedUserLacksPermission() throws Exception {
         MockHttpServletRequest request = authenticatedRequest("GET", "/api/sys/user/page");
         MockHttpServletResponse response = new MockHttpServletResponse();
@@ -49,6 +64,27 @@ class JwtAuthenticationFilterTest {
 
         assertEquals(403, response.getStatus());
         assertEquals(403, new ObjectMapper().readTree(response.getContentAsString()).get("code").asInt());
+    }
+
+    @Test
+    void databaseOutageDuringAuthorizationReturns503WithReason() throws Exception {
+        // 数据库断开时权限查询会抛连接异常。这里不能回 500，也不能当成令牌失效回 401，
+        // 否则用户会以为登录过期而去重新登录，实际重登也失败。要回 503 并说明原因。
+        MockHttpServletRequest request = authenticatedRequest("GET", "/api/sys/user/page");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+        when(permissionService.getContext(7L)).thenThrow(
+                new org.mybatis.spring.MyBatisSystemException(
+                        new org.springframework.jdbc.CannotGetJdbcConnectionException(
+                                "Failed to obtain JDBC Connection",
+                                new java.sql.SQLTransientConnectionException(
+                                        "EmsHikariPool - Connection is not available"))));
+
+        filter.doFilter(request, response, new MockFilterChain());
+
+        assertEquals(503, response.getStatus());
+        var body = new ObjectMapper().readTree(response.getContentAsString());
+        assertEquals(500, body.get("code").asInt());
+        assertEquals(true, body.get("data").get("message").asText().contains("数据库暂时连不上"));
     }
 
     @Test

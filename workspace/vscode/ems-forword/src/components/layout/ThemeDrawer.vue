@@ -1,14 +1,14 @@
 <script setup>
-import AppIcon from '@/components/common/AppIcon.vue'
-import { activeTheme, activeThemeKey, setTheme, themeOptions } from '@/utils/theme'
+import AppIcon from '@/components/common/AppIcon.vue';
+import { activeTheme, activeThemeKey, setTheme, themeOptions } from '@/utils/theme';
 
 // open通过父组件的v-model双向绑定，父组件控制抽屉打开，本组件可以主动关闭。
-const open = defineModel({ type: Boolean, default: false })
+const open = defineModel({ type: Boolean, default: false });
 
 // 应用并持久化主题后关闭抽屉；真正修改<html data-theme>由theme.js负责。
 function selectTheme(themeKey) {
-  setTheme(themeKey)
-  open.value = false
+  setTheme(themeKey);
+  open.value = false;
 }
 </script>
 
@@ -40,9 +40,7 @@ function selectTheme(themeKey) {
           <span class="theme-layout-preview" aria-hidden="true">
             <i class="preview-header" :style="{ backgroundColor: option.preview.header }" />
             <i class="preview-sidebar" :style="{ backgroundColor: option.preview.sidebar }" />
-            <i class="preview-content" :style="{ backgroundColor: option.preview.content }">
-              <b /><b /><b />
-            </i>
+            <i class="preview-content" :style="{ backgroundColor: option.preview.content }"> <b /><b /><b /> </i>
           </span>
           <span class="theme-layout-copy">
             <strong>{{ option.name }}</strong>
@@ -134,7 +132,9 @@ function selectTheme(themeKey) {
   border-radius: 5px;
   background: #fff;
   box-shadow: 0 2px 8px rgb(117 114 114 / 12%);
-  transition: transform .16s ease, box-shadow .16s ease;
+  transition:
+    transform 0.16s ease,
+    box-shadow 0.16s ease;
 }
 
 .theme-layout-option:hover .theme-layout-preview,

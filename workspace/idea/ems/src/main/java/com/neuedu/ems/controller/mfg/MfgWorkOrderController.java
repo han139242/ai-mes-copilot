@@ -37,6 +37,16 @@ public class MfgWorkOrderController {
 
     @Autowired
     private WmsOutboundOrderService wmsOutboundOrderService;
+    @Autowired private com.neuedu.ems.service.mfg.ComponentHandoverService componentHandover;
+    @Autowired private com.neuedu.ems.service.mfg.MfgDispatchOrderService dispatches;
+
+    /** 受控补同步历史放行组件；正常终检会自动触发，同步不生成仓库单据。 */
+    @PutMapping("/{workOrderId}/sync-component-handover")
+    public ResultData syncComponentHandover(@PathVariable Long workOrderId, @RequestAttribute("userId") Long userId) {
+        var quantity = componentHandover.synchronize(workOrderId, userId);
+        dispatches.refreshMaterialReadiness(workOrderId, userId);
+        return ResultData.success(ResultCode.SUCCESS, Map.of("transferredQuantity", quantity));
+    }
 
     @Autowired
     private ExcelExportUtil excelExportUtil;
@@ -133,19 +143,33 @@ public class MfgWorkOrderController {
                                             @RequestBody GenerateMaterialIssueRequest request) {
         WmsOutboundOrder order = wmsOutboundOrderService.generateMaterialIssue(
                 workOrderId, request == null ? null : request.getWarehouseId(), userId,
-                request == null ? null : request.getRemark());
-        return ResultData.success(ResultCode.SUCCESS, Map.of("outboundId", order.getOutboundId()));
+                request == null ? null : request.getRemark(),
+                request == null ? null : request.getRequestKey());
+        return ResultData.success(ResultCode.SUCCESS, Map.of("outboundId", order.getOutboundId(), "workOrderId", order.getWorkOrderId()));
     }
 
     /**
-     * 删除生产工单（软删除，将删除标志设为1）。
+     * 删除生产工单（软删除，将删除标志设为1），同时释放该工单占着的物料预留。
      * @param workOrderId 生产工单ID
+     * @param userId 当前登录用户，用于记录预留释放的审计信息
      * @return 操作结果
      */
     @DeleteMapping("/{workOrderId}")
-    public ResultData delete(@PathVariable("workOrderId") Long workOrderId) {
-        boolean flag = mfgWorkOrderService.removeWorkOrderById(workOrderId);
+    public ResultData delete(@PathVariable("workOrderId") Long workOrderId,
+                             @RequestAttribute("userId") Long userId) {
+        boolean flag = mfgWorkOrderService.removeWorkOrderById(workOrderId, userId);
         return flag ? ResultData.success(ResultCode.SUCCESS) : ResultData.fail(ResultCode.FAILED);
+    }
+
+    @DeleteMapping("/batch")
+    public ResultData deleteBatch(@RequestBody List<Long> workOrderIds,
+                                  @RequestAttribute("userId") Long userId) {
+        return ResultData.success(ResultCode.SUCCESS, mfgWorkOrderService.removeWorkOrders(workOrderIds, userId));
+    }
+
+    @PutMapping("/{workOrderId}/reschedule")
+    public ResultData reschedule(@PathVariable Long workOrderId, @RequestAttribute("userId") Long userId) {
+        return ResultData.success(ResultCode.SUCCESS, mfgWorkOrderService.rescheduleWorkOrders(workOrderId, userId));
     }
 
     /**
@@ -175,5 +199,7 @@ public class MfgWorkOrderController {
     public static class GenerateMaterialIssueRequest {
         private Long warehouseId;
         private String remark;
+        /** 可选幂等请求键：同键同参数重放返回原领料单，改参数会被拒绝。 */
+        private String requestKey;
     }
 }

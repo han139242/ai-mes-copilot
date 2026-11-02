@@ -1,6 +1,7 @@
 package com.neuedu.ems.entity.mfg;
 
 import com.baomidou.mybatisplus.annotation.IdType;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
@@ -30,6 +31,9 @@ public class MfgDispatchOrder {
     private String materialReadyStatus;
     private String status;
     private String remark;
+    /** 所属工单类型（ROOT/COMPONENT），仅供前端按工单类型过滤领料仓库。 */
+    @TableField(exist = false)
+    private String workOrderType;
     @Version
     private Integer version;
     private Long createdBy;

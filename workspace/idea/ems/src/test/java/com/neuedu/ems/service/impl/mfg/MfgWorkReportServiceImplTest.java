@@ -82,6 +82,10 @@ class MfgWorkReportServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new MfgWorkReportServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
+        ReflectionTestUtils.setField(service, "preparationGate", mock(com.neuedu.ems.service.mdm.ManufacturingPreparationGate.class));
+        ReflectionTestUtils.setField(service, "productQuantities", mock(com.neuedu.ems.service.mdm.ProductQuantityService.class));
+        ReflectionTestUtils.setField(service, "executionQuantities", mock(com.neuedu.ems.service.mdm.MaterialExecutionQuantityService.class));
         reportMapper = mock(MfgWorkReportMapper.class);
         taskMapper = mock(MfgTaskMapper.class);
         workOrderMapper = mock(MfgWorkOrderMapper.class);

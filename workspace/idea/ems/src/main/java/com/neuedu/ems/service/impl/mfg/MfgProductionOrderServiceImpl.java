@@ -2,6 +2,7 @@ package com.neuedu.ems.service.impl.mfg;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.conditions.update.UpdateWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.neuedu.ems.entity.mfg.MfgProductionOrder;
@@ -9,6 +10,7 @@ import com.neuedu.ems.common.BusinessStatus;
 import com.neuedu.ems.common.ResultCode;
 import com.neuedu.ems.entity.mfg.MfgDispatchOrder;
 import com.neuedu.ems.entity.mfg.MfgProductionPlan;
+import com.neuedu.ems.entity.mfg.MfgScheduleItem;
 import com.neuedu.ems.entity.mfg.MfgTask;
 import com.neuedu.ems.entity.mfg.MfgWorkOrder;
 import com.neuedu.ems.entity.mfg.MfgWorkOrderMaterial;
@@ -18,6 +20,7 @@ import com.neuedu.ems.exception.BusinessException;
 import com.neuedu.ems.mapper.mfg.MfgDispatchOrderMapper;
 import com.neuedu.ems.mapper.mfg.MfgProductionOrderMapper;
 import com.neuedu.ems.mapper.mfg.MfgProductionPlanMapper;
+import com.neuedu.ems.mapper.mfg.MfgScheduleItemMapper;
 import com.neuedu.ems.mapper.mfg.MfgTaskMapper;
 import com.neuedu.ems.mapper.mfg.MfgWorkReportMapper;
 import com.neuedu.ems.mapper.mfg.MfgWorkOrderMapper;
@@ -39,15 +42,18 @@ import java.util.List;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 
 /**
  * 生产订单管理 Service 实现类。
  */
 @Service
 public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrderMapper, MfgProductionOrder> implements MfgProductionOrderService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.neuedu.ems.service.sys.BusinessNumberService numbers;
 
-    private static final DateTimeFormatter ORDER_NUMBER_TIME = DateTimeFormatter.ofPattern("yyyyMMddHHmmssSSS");
+    @Autowired private com.neuedu.ems.service.mdm.ProductQuantityService productQuantities;
+    @Autowired private com.neuedu.ems.service.mfg.SupplyAllocationService supplyAllocations;
+
 
     @Autowired
     private SysStatusChangeLogMapper sysStatusChangeLogMapper;
@@ -57,6 +63,9 @@ public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrde
 
     @Autowired
     private MfgProductionPlanMapper productionPlanMapper;
+
+    @Autowired
+    private MfgScheduleItemMapper scheduleItemMapper;
 
     @Autowired
     private MfgWorkOrderMapper workOrderMapper;
@@ -131,8 +140,9 @@ public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrde
                 || order.getOrderQuantity() == null || order.getOrderQuantity().compareTo(BigDecimal.ZERO) <= 0) {
             return false;
         }
+        productQuantities.validate(order.getProductId(),order.getOrderQuantity());
         order.setProductionOrderId(null);
-        order.setProductionOrderNo("PO-" + LocalDateTime.now().format(ORDER_NUMBER_TIME));
+        order.setProductionOrderNo(numbers.next("PO",order.getCustomerId()));
         order.setStatus(BusinessStatus.Document.DRAFT);
         if (!StringUtils.hasText(order.getSourceType())) {
             order.setSourceType("MANUAL");
@@ -160,6 +170,8 @@ public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrde
         if (order.getOrderQuantity() != null && order.getOrderQuantity().compareTo(BigDecimal.ZERO) <= 0) {
             throw business(ResultCode.PARAM_ERROR, "生产订单数量必须大于 0");
         }
+        productQuantities.validate(order.getProductId()==null?existing.getProductId():order.getProductId(),
+                order.getOrderQuantity()==null?existing.getOrderQuantity():order.getOrderQuantity());
         order.setDeletedFlag(null);
         order.setStatus(null);
         order.setProductionOrderNo(null);
@@ -217,6 +229,8 @@ public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrde
 
         LocalDateTime now = LocalDateTime.now();
         validateUnusedMaterialRequirements(workOrderIds);
+        // 未执行的库存预留随撤回一起退回公共可用量，避免撤单后库存仍被旧承诺占住。
+        supplyAllocations.releaseForWorkOrders(workOrderIds, operatorId, now);
         for (MfgTask task : tasks) {
             closeTask(task, operatorId, remark, now);
         }
@@ -228,6 +242,10 @@ public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrde
         }
         for (MfgProductionPlan plan : plans) {
             closePlan(plan, operatorId, remark, now);
+        }
+        // 撤单同样要把排程明细一起退回待排，否则排产工作台仍认为这些订单已在排程中。
+        for (MfgProductionPlan plan : plans) {
+            releaseScheduleItemsForPlan(plan.getPlanId(), operatorId, remark, now);
         }
         restoreOrderToDraft(order, operatorId, remark, now);
     }
@@ -243,8 +261,17 @@ public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrde
         }
         List<MfgWorkOrder> workOrders = activeWorkOrdersForUpdate(List.of(planId));
         validateRemovableWorkOrders(workOrders);
-        withdrawWorkOrdersAndExecution(workOrders, operatorId, remark, LocalDateTime.now());
-        restorePlanToDraft(plan, operatorId, remark, LocalDateTime.now());
+        LocalDateTime now = LocalDateTime.now();
+        withdrawWorkOrdersAndExecution(workOrders, operatorId, remark, now);
+        // 排程工作台确认排程时生成的计划带着一条排程明细（mfg_schedule_item.plan_id 指向它）。
+        // 这种计划被撤回后不能只留在草稿里：草稿仍算"已排产"，排产工作台会继续拒绝重新加入该订单，
+        // 用户看到的就是"撤销了但没撤销干净"。所以整条链路一起退回待排：计划关闭、排程明细清除、订单退回新建。
+        if (releaseScheduleItemsForPlan(planId, operatorId, remark, now)) {
+            closePlan(plan, operatorId, remark, now);
+            restoreOrderForReschedule(plan.getProductionOrderId(), operatorId, remark, now);
+            return;
+        }
+        restorePlanToDraft(plan, operatorId, remark, now);
     }
 
     @Override
@@ -265,6 +292,7 @@ public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrde
         rejectExistingExecutionData(workOrderIds, tasks);
         validateUnusedMaterialRequirements(workOrderIds);
         LocalDateTime now = LocalDateTime.now();
+        supplyAllocations.releaseForWorkOrders(workOrderIds, operatorId, now);
         closeTasksAndDispatches(tasks, dispatchOrders, operatorId, remark, now);
         restoreWorkOrderToDraft(workOrder, operatorId, remark, now);
     }
@@ -303,15 +331,25 @@ public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrde
     }
 
     private void validateOrderForScheduling(MfgProductionOrder order) {
-        if (order.getCustomerId() == null || order.getProductId() == null
-                || order.getOrderQuantity() == null || order.getOrderQuantity().compareTo(BigDecimal.ZERO) <= 0
-                || order.getDeliveryDate() == null || !StringUtils.hasText(order.getSourceType())) {
+        if (!hasCompleteSchedulingInfo(order)) {
             throw business(ResultCode.PARAM_ERROR, "提交排产前必须填写客户、产品、正数数量、交付日期和需求来源");
         }
         if (order.getDeliveryDate().isBefore(LocalDate.now())) {
             throw business(ResultCode.BUSINESS_ERROR,
                     "订单交付日期 " + order.getDeliveryDate() + " 已早于当前日期，不能提交排产，请先调整交期");
         }
+    }
+
+    /** 客户、产品、正数数量、交付日期与需求来源都必须齐备。 */
+    private boolean hasCompleteSchedulingInfo(MfgProductionOrder order) {
+        boolean quantityValid = order.getOrderQuantity() != null
+                && order.getOrderQuantity().compareTo(BigDecimal.ZERO) > 0;
+        return hasBasicSchedulingInfo(order) && quantityValid && StringUtils.hasText(order.getSourceType());
+    }
+
+    /** 客户、产品与交付日期三项基本信息齐备。 */
+    private boolean hasBasicSchedulingInfo(MfgProductionOrder order) {
+        return order.getCustomerId() != null && order.getProductId() != null && order.getDeliveryDate() != null;
     }
 
     /**
@@ -339,7 +377,9 @@ public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrde
         QueryWrapper<MfgProductionOrder> wrapper = new QueryWrapper<>();
         wrapper.eq("deleted_flag", 0);
         if (StringUtils.hasText(keyword)) {
-            wrapper.like("production_order_no", keyword);
+            var aliases=numbers.aliasIds("PO",keyword);
+            wrapper.and(q -> q.like("production_order_no",keyword)
+                    .or(!aliases.isEmpty()).in(!aliases.isEmpty(),"production_order_id",aliases));
         }
         if (StringUtils.hasText(status)) {
             wrapper.eq("status", status);
@@ -430,17 +470,28 @@ public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrde
 
     private void validateRemovableWorkOrders(List<MfgWorkOrder> workOrders) {
         for (MfgWorkOrder workOrder : workOrders) {
-            String status = workOrder.getStatus();
-            boolean removableStatus = BusinessStatus.Document.DRAFT.equals(status)
-                    || BusinessStatus.Document.APPROVED.equals(status)
-                    || BusinessStatus.Document.RELEASED.equals(status)
-                    || BusinessStatus.Document.CLOSED.equals(status);
-            boolean hasCompletedQuantity = workOrder.getCompletedQuantity() != null
-                    && workOrder.getCompletedQuantity().compareTo(BigDecimal.ZERO) > 0;
-            if (!removableStatus || hasCompletedQuantity) {
+            if (isWorkOrderLocked(workOrder)) {
                 throw business(ResultCode.BUSINESS_ERROR, "无法撤回：生产工单已经开工或产生完成数量");
             }
         }
+    }
+
+    /** 状态不可撤回，或已产生完成数量，都视为工单已被锁定。 */
+    private boolean isWorkOrderLocked(MfgWorkOrder workOrder) {
+        boolean removableStatus = isRemovableStatus(workOrder.getStatus());
+        return !removableStatus || hasCompleted(workOrder.getCompletedQuantity());
+    }
+
+    /** 草稿、已审核、已下达、已关闭四种状态允许撤回。 */
+    private boolean isRemovableStatus(String status) {
+        return BusinessStatus.Document.DRAFT.equals(status)
+                || BusinessStatus.Document.APPROVED.equals(status)
+                || BusinessStatus.Document.RELEASED.equals(status)
+                || BusinessStatus.Document.CLOSED.equals(status);
+    }
+
+    private boolean hasCompleted(BigDecimal completedQuantity) {
+        return completedQuantity != null && completedQuantity.compareTo(BigDecimal.ZERO) > 0;
     }
 
     private void validateUnexecutedTasks(List<MfgTask> tasks) {
@@ -486,6 +537,7 @@ public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrde
         validateUnexecutedDispatchOrders(dispatchOrders);
         rejectExistingExecutionData(workOrderIds, tasks);
         validateUnusedMaterialRequirements(workOrderIds);
+        supplyAllocations.releaseForWorkOrders(workOrderIds, operatorId, now);
         closeTasksAndDispatches(tasks, dispatchOrders, operatorId, remark, now);
         for (MfgWorkOrder workOrder : workOrders) {
             closeWorkOrder(workOrder, operatorId, remark, now);
@@ -671,6 +723,67 @@ public class MfgProductionOrderServiceImpl extends ServiceImpl<MfgProductionOrde
 
     private boolean positive(BigDecimal value) {
         return value != null && value.compareTo(BigDecimal.ZERO) > 0;
+    }
+
+    /**
+     * 撤掉指向该计划的排程明细，让这张计划对应的订单重新变成"未排产"。
+     *
+     * <p>排程工作台确认排程时会写入一条 {@code mfg_schedule_item}，其中 {@code plan_id} 指向刚生成的计划、
+     * {@code status} 记为 CONFIRMED。计划被撤回后这条明细如果还留着，工作台仍认为该订单已在排程中，
+     * 再次"加入排程"就会提示"该订单已在当前排程中，无需重复添加"。这里把明细软删除并清空 plan_id：
+     * 软删除后它不再拦住重新加入，而 {@code addManualItem} 会通过"已删除明细"分支把同一行恢复复用，
+     * 不会在表里堆出重复记录。</p>
+     *
+     * @return 是否存在被撤掉的排程明细
+     */
+    private boolean releaseScheduleItemsForPlan(Long planId, Long operatorId, String remark, LocalDateTime now) {
+        QueryWrapper<MfgScheduleItem> query = new QueryWrapper<>();
+        query.eq("plan_id", planId).eq("deleted_flag", 0);
+        List<MfgScheduleItem> items = scheduleItemMapper.selectList(query);
+        if (items.isEmpty()) {
+            return false;
+        }
+        for (MfgScheduleItem item : items) {
+            // plan_id 要写成 NULL，updateById 会跳过 null 字段，这里用 UpdateWrapper 显式 set。
+            UpdateWrapper<MfgScheduleItem> update = new UpdateWrapper<>();
+            update.eq("schedule_item_id", item.getScheduleItemId())
+                    .eq("version", item.getVersion())
+                    .set("plan_id", null)
+                    .set("status", "SCHEDULED")
+                    .set("deleted_flag", 1)
+                    .set("updated_by", operatorId)
+                    .set("updated_time", now)
+                    .set("version", item.getVersion() + 1);
+            if (scheduleItemMapper.update(null, update) == 0) {
+                throw business(ResultCode.DATA_CONFLICT, "排程明细已被其他用户修改，请刷新后重试");
+            }
+            insertStatusLog("MFG_SCHEDULE_ITEM", item.getScheduleItemId(), item.getStatus(),
+                    "SCHEDULED", "WITHDRAW_UNEXECUTED_PLAN_CHAIN", operatorId, remark, now);
+            insertOperationLog("mfg_schedule_item", item.getScheduleItemId(),
+                    "WITHDRAW_UNEXECUTED_PLAN_CHAIN", operatorId, remark, now);
+        }
+        return true;
+    }
+
+    /**
+     * 把订单退回"新建"，让它重新出现在排产工作台的待排列表里。
+     *
+     * <p>手工排产只接受"新建且尚未生成生产计划"的订单，计划撤回后订单若仍停在已下达状态，
+     * 重新加入排程会被直接拒绝。撤回的是该订单最后一条计划时，订单必须同步退回新建。</p>
+     */
+    private void restoreOrderForReschedule(Long productionOrderId, Long operatorId, String remark, LocalDateTime now) {
+        QueryWrapper<MfgProductionPlan> query = new QueryWrapper<>();
+        query.eq("production_order_id", productionOrderId)
+                .eq("deleted_flag", 0)
+                .ne("status", BusinessStatus.Document.CLOSED);
+        if (productionPlanMapper.selectCount(query) > 0) {
+            return;
+        }
+        MfgProductionOrder order = activeOrderForUpdate(productionOrderId);
+        if (order == null || BusinessStatus.Document.DRAFT.equals(order.getStatus())) {
+            return;
+        }
+        restoreOrderToDraft(order, operatorId, remark, now);
     }
 
     private <T> boolean hasActiveRecords(BaseMapper<T> mapper, String field, List<Long> values) {

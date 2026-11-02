@@ -65,6 +65,11 @@ public interface MfgDispatchOrderService extends IService<MfgDispatchOrder> {
 
     MfgDispatchOrder generateDispatchOrder(Long workOrderId, MfgDispatchOrder request, Long operatorId);
 
+    com.neuedu.ems.vo.mfg.DispatchPreparationVO previewDispatch(Long workOrderId);
+
+    /** 只读检查工单本级用料是否实际到位，失败时返回业务原因。 */
+    void validateDispatchMaterials(Long workOrderId);
+
     List<MfgTask> releaseDispatchOrder(Long dispatchId, Long operatorId, String remark);
 
     void refreshMaterialReadiness(Long workOrderId, Long operatorId);

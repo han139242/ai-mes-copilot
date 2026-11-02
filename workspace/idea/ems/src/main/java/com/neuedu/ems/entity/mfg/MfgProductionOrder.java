@@ -32,6 +32,10 @@ public class MfgProductionOrder {
     private BigDecimal orderQuantity;
     private LocalDate deliveryDate;
     private String sourceType;
+    /** 来源销售订单 ID，销售订单确认后生成的生产订单会回填，便于反向追溯客户需求。 */
+    private Long sourceSalesOrderId;
+    /** 来源销售订单明细 ID，一行销售明细对应一张生产订单。 */
+    private Long sourceSalesOrderDetailId;
     private String status;
     private String remark;
     @Version

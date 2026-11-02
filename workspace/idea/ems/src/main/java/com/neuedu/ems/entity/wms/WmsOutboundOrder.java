@@ -26,6 +26,12 @@ public class WmsOutboundOrder {
     private Long warehouseId;
     private Long workOrderId;
     private Long applicantId;
+    /** 销售出库的经销商客户。 */
+    private Long customerId;
+    /** 销售出库来源生产订单，用于全程追溯。 */
+    private Long sourceProductionOrderId;
+    /** 销售发运前出货检验单。 */
+    private Long inspectionId;
     private String auditStatus;
     private LocalDateTime outboundTime;
     private String remark;

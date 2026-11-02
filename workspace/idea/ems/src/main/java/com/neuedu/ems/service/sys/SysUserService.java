@@ -27,6 +27,11 @@ public interface SysUserService extends IService<SysUser> {
 
     boolean assignRoles(Long userId, List<Long> roleIds);
 
+    /**
+     * 解除账号锁定：清零连续登录失败次数、清空锁定时间并恢复为启用状态。
+     */
+    boolean unlockUser(Long userId);
+
     SysUser getByUserName(String username);
 
 }

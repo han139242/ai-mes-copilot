@@ -45,6 +45,31 @@ public class ResponsibilityNotificationSupport {
                         String category, String severity, String title, String summary,
                         String bizNo, String routePath, Long sourceUserId, boolean acknowledgmentRequired,
                         Collection<NotificationEventPayload.RecipientTarget> rawTargets) {
+        dispatch(eventKey, aggregateType, aggregateId, eventType, category, severity, title, summary,
+                bizNo, routePath, sourceUserId, acknowledgmentRequired, rawTargets, false);
+    }
+
+    /**
+     * 周期性重复事件的提醒入口：同一事件键再次触发时刷新已有通知，而不是被唯一键丢掉。
+     * <p>
+     * 预警、超期提醒这类事件会在指标持续异常时反复触发。一次性事件用
+     * {@link #publish} 是正确的（重复投递应被拦掉），但重复事件必须走这里，
+     * 否则"冷却到期后再提醒一次"会静默失效，用户以为系统不再提醒了。
+     * </p>
+     */
+    public void publishRepeating(String eventKey, String aggregateType, Long aggregateId, String eventType,
+                                 String category, String severity, String title, String summary,
+                                 String bizNo, String routePath, Long sourceUserId,
+                                 boolean acknowledgmentRequired,
+                                 Collection<NotificationEventPayload.RecipientTarget> rawTargets) {
+        dispatch(eventKey, aggregateType, aggregateId, eventType, category, severity, title, summary,
+                bizNo, routePath, sourceUserId, acknowledgmentRequired, rawTargets, true);
+    }
+
+    private void dispatch(String eventKey, String aggregateType, Long aggregateId, String eventType,
+                          String category, String severity, String title, String summary,
+                          String bizNo, String routePath, Long sourceUserId, boolean acknowledgmentRequired,
+                          Collection<NotificationEventPayload.RecipientTarget> rawTargets, boolean repeating) {
         Map<String, NotificationEventPayload.RecipientTarget> targets = new LinkedHashMap<>();
         if (rawTargets != null) {
             for (NotificationEventPayload.RecipientTarget target : rawTargets) {
@@ -57,7 +82,11 @@ public class ResponsibilityNotificationSupport {
                 category, severity, title, summary, aggregateType, aggregateId, bizNo, routePath,
                 sourceUserId, employeeIdForUser(sourceUserId), LocalDateTime.now(), null,
                 acknowledgmentRequired, List.copyOf(targets.values()));
-        outboxService.enqueue(eventKey, aggregateType, aggregateId, eventType, payload);
+        if (repeating) {
+            outboxService.reenqueue(eventKey, aggregateType, aggregateId, eventType, payload);
+        } else {
+            outboxService.enqueue(eventKey, aggregateType, aggregateId, eventType, payload);
+        }
     }
 
     public NotificationEventPayload.RecipientTarget target(Long employeeId, String reason, String permission) {

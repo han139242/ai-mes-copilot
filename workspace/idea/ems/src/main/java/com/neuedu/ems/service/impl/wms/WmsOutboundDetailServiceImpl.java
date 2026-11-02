@@ -10,6 +10,7 @@ import com.neuedu.ems.mapper.wms.WmsOutboundOrderMapper;
 import com.neuedu.ems.service.wms.WmsOutboundDetailService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -18,8 +19,6 @@ import java.util.List;
  */
 @Service
 public class WmsOutboundDetailServiceImpl extends ServiceImpl<WmsOutboundDetailMapper, WmsOutboundDetail> implements WmsOutboundDetailService {
-
-    private static final String APPROVED_STATUS = "APPROVED";
 
     @Autowired
     private WmsOutboundOrderMapper wmsOutboundOrderMapper;
@@ -82,7 +81,9 @@ public class WmsOutboundDetailServiceImpl extends ServiceImpl<WmsOutboundDetailM
      * @return 是否成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean saveOutboundDetail(WmsOutboundDetail outboundDetail) {
+        outboundDetail.setInspectionId(null);
         if (!canChangeOutboundOrder(outboundDetail.getOutboundId())) {
             return false;
         }
@@ -98,7 +99,23 @@ public class WmsOutboundDetailServiceImpl extends ServiceImpl<WmsOutboundDetailM
      * @return 是否成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean updateOutboundDetail(WmsOutboundDetail outboundDetail) {
+        if (!canUpdateOutboundDetail(outboundDetail)) {
+            return false;
+        }
+        outboundDetail.setOutboundId(null);
+        outboundDetail.setInspectionId(null);
+        outboundDetail.setDeletedFlag(null);
+        return baseMapper.updateById(outboundDetail) > 0;
+    }
+
+    /**
+     * 判断出库明细是否允许更新：主键必填、原单据可改、且不允许改挂到其他出库单。
+     * @param outboundDetail 请求中的出库明细
+     * @return 是否允许更新
+     */
+    private boolean canUpdateOutboundDetail(WmsOutboundDetail outboundDetail) {
         if (outboundDetail.getDetailId() == null) {
             return false;
         }
@@ -106,11 +123,8 @@ public class WmsOutboundDetailServiceImpl extends ServiceImpl<WmsOutboundDetailM
         if (existing == null || !canChangeOutboundOrder(existing.getOutboundId())) {
             return false;
         }
-        if (outboundDetail.getOutboundId() != null && !canChangeOutboundOrder(outboundDetail.getOutboundId())) {
-            return false;
-        }
-        outboundDetail.setDeletedFlag(null);
-        return baseMapper.updateById(outboundDetail) > 0;
+        return outboundDetail.getOutboundId() == null
+                || java.util.Objects.equals(existing.getOutboundId(), outboundDetail.getOutboundId());
     }
 
     /**
@@ -119,6 +133,7 @@ public class WmsOutboundDetailServiceImpl extends ServiceImpl<WmsOutboundDetailM
      * @return 是否成功
      */
     @Override
+    @Transactional(rollbackFor = Exception.class)
     public boolean removeOutboundDetailById(Long detailId) {
         WmsOutboundDetail existing = getOutboundDetailById(detailId);
         if (existing == null || !canChangeOutboundOrder(existing.getOutboundId())) {
@@ -156,12 +171,16 @@ public class WmsOutboundDetailServiceImpl extends ServiceImpl<WmsOutboundDetailM
      */
     private boolean canChangeOutboundOrder(Long outboundId) {
         if (outboundId == null) {
-            return true;
+            return false;
         }
         LambdaQueryWrapper<WmsOutboundOrder> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(WmsOutboundOrder::getOutboundId, outboundId)
-                .eq(WmsOutboundOrder::getDeletedFlag, 0);
+                .eq(WmsOutboundOrder::getDeletedFlag, 0)
+                .last("FOR UPDATE");
         WmsOutboundOrder outboundOrder = wmsOutboundOrderMapper.selectOne(queryWrapper);
-        return outboundOrder != null && !APPROVED_STATUS.equals(outboundOrder.getAuditStatus());
+        if (outboundOrder != null && baseMapper.selectCount(new LambdaQueryWrapper<WmsOutboundDetail>()
+                .eq(WmsOutboundDetail::getOutboundId,outboundId).isNotNull(WmsOutboundDetail::getInspectionId)
+                .eq(WmsOutboundDetail::getDeletedFlag,0))>0) return false;
+        return outboundOrder != null && "SUBMITTED".equals(outboundOrder.getAuditStatus());
     }
 }

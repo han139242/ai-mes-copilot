@@ -30,6 +30,7 @@ class MfgManualScheduleDraftServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new MfgScheduleScenarioServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
         scenarioMapper = mock(MfgScheduleScenarioMapper.class);
         operationLogMapper = mock(SysOperationLogMapper.class);
         ReflectionTestUtils.setField(service, "baseMapper", scenarioMapper);
@@ -113,7 +114,7 @@ class MfgManualScheduleDraftServiceImplTest {
         assertEquals("MANUAL_BOARD", inserted.getAlgorithmCode());
         assertEquals("DRAFT", inserted.getStatus());
         assertEquals(8L, inserted.getCreatedBy());
-        assertTrue(inserted.getScenarioNo().startsWith("MANUAL-8-"));
+        assertTrue(inserted.getScenarioNo().startsWith("T-SC-20261027-"));
         assertEquals(22L, result.getScenarioId());
         verify(operationLogMapper).insert(any(SysOperationLog.class));
     }

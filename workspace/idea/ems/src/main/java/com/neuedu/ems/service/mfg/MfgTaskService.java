@@ -90,6 +90,9 @@ public interface MfgTaskService extends IService<MfgTask> {
      */
     boolean startTask(Long taskId, Long stationId, Long operatorId);
 
+    /** 只核查冻结路线中的前序及合格数量，不改变任务、工单或库存。 */
+    void checkTaskPredecessors(Long taskId);
+
     /**
      * 完成生产任务，记录完成数量和不良数量并将状态改为FINISHED。
      * @param taskId 生产任务ID
@@ -104,6 +107,12 @@ public interface MfgTaskService extends IService<MfgTask> {
 
     MfgTask createCompensationTask(Long sourceTaskId, Long sourceNcrId, BigDecimal plannedQuantity,
                                    String taskType, Long operatorId, String remark);
+
+    List<MfgTask> createScrapCompensationChain(Long sourceTaskId, Long ncrId, BigDecimal quantity,
+                                             Long operatorId, String remark);
+
+    MfgTask createDefectCompensationTask(Long sourceTaskId, Long defectResolutionTaskId, BigDecimal quantity,
+                                        String taskType, Long operatorId, String remark);
 
     void withdrawTaskStart(Long taskId, Long operatorId, String remark);
 }

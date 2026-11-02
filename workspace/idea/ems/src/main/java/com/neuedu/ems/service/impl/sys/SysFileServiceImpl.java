@@ -3,7 +3,9 @@ package com.neuedu.ems.service.impl.sys;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.neuedu.ems.common.ResultCode;
 import com.neuedu.ems.entity.sys.SysFile;
+import com.neuedu.ems.exception.BusinessException;
 import com.neuedu.ems.mapper.sys.SysFileMapper;
 import com.neuedu.ems.service.sys.SysFileService;
 import com.neuedu.ems.util.FileDownloadUtil;
@@ -67,9 +69,14 @@ public class SysFileServiceImpl extends ServiceImpl<SysFileMapper, SysFile> impl
     public void downloadFile(Long fileId, HttpServletResponse response) throws Exception {
         SysFile sysFile = getFileById(fileId);
         if (sysFile == null) {
-            throw new RuntimeException("文件不存在：" + fileId);
+            // 附件记录不存在属于可预期的业务结果，返回明确的业务提示而不是系统异常。
+            throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "附件不存在或已被删除，请刷新附件列表后重试");
         }
-        FileDownloadUtil.download(response, resolveStoragePath(sysFile.getFileUrl()), sysFile.getFileName());
+        String storagePath = resolveStoragePath(sysFile.getFileUrl());
+        if (!new File(storagePath).isFile()) {
+            throw new BusinessException(ResultCode.NOT_FOUND.getCode(), "附件文件已丢失，请重新上传");
+        }
+        FileDownloadUtil.download(response, storagePath, sysFile.getFileName());
     }
 
     @Override
@@ -128,7 +135,7 @@ public class SysFileServiceImpl extends ServiceImpl<SysFileMapper, SysFile> impl
 
     private String resolveStoragePath(String fileUrl) {
         if (!StringUtils.hasText(fileUrl)) {
-            throw new RuntimeException("文件地址不能为空");
+            throw new BusinessException(ResultCode.BUSINESS_ERROR.getCode(), "附件地址为空，无法下载");
         }
         String relativePath = fileUrl.replace('\\', '/');
         if (relativePath.startsWith(FILE_URL_PREFIX)) {
@@ -142,7 +149,7 @@ public class SysFileServiceImpl extends ServiceImpl<SysFileMapper, SysFile> impl
         Path storageRoot = Path.of(rootPath).toAbsolutePath().normalize();
         Path resolvedPath = storageRoot.resolve(relativePath).normalize();
         if (!resolvedPath.startsWith(storageRoot)) {
-            throw new RuntimeException("文件地址超出允许的存储目录");
+            throw new BusinessException(ResultCode.FORBIDDEN.getCode(), "附件地址超出允许的存储目录");
         }
         return resolvedPath.toString();
     }

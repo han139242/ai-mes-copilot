@@ -1,13 +1,28 @@
 <script setup>
+import { computed, ref } from 'vue';
+
 // defineModel 接收父组件的 v-model：用户修改控件时，值会同步回通用资源页的表单对象。
-const model = defineModel()
+const model = defineModel();
 
 // field 描述字段类型和规则，options 是下拉选项；该组件只负责选择合适的 Element Plus 控件。
-defineProps({
+const props = defineProps({
   field: { type: Object, required: true },
   options: { type: Array, default: () => [] },
-  compact: { type: Boolean, default: false }
-})
+  compact: { type: Boolean, default: false },
+});
+const keyword = ref('');
+const filteredOptions = computed(() => {
+  const query = keyword.value.trim().toLocaleLowerCase();
+  return props.options.filter((item) => String(item.searchLabel || item.label).toLocaleLowerCase().includes(query));
+});
+function filterOptions(query) {
+  keyword.value = query;
+}
+function resetSearch(visible) {
+  if (!visible) {
+    keyword.value = '';
+  }
+}
 </script>
 
 <template>
@@ -22,13 +37,16 @@ defineProps({
     :disabled="field.disabled"
     clearable
     filterable
+    :filter-method="filterOptions"
+    @visible-change="resetSearch"
   >
     <el-option
-      v-for="item in options"
+      v-for="item in filteredOptions"
       :key="String(item.value)"
       :label="item.label"
       :value="item.value"
       :disabled="item.disabled"
+      :title="item.searchLabel || item.label"
     />
   </el-select>
 

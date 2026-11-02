@@ -25,6 +25,8 @@ public class WmsOutboundDetail {
     private Long materialId;
     private Long batchId;
     private Long locationId;
+    /** 库存半成品领用复验；放行前禁止出库和转线边。 */
+    private Long inspectionId;
     private BigDecimal outboundQuantity;
     private String remark;
     private Integer version;

@@ -37,6 +37,20 @@ public class AuthServiceImpl implements AuthService {
     @Value("${mes.auth.max-login-attempts:5}")
     private int maxLoginAttempts = 5;
 
+    /** 记录一次登录失败；若因此触发了锁定或停用，立刻把可读原因抛给前端。 */
+    private void handleFailedAttempt(SysUser user) {
+        sysUserMapper.recordLoginFailure(user.getUserId(), Math.max(1, maxLoginAttempts));
+        rejectAfterRecheck(user.getUserId());
+    }
+
+    /** 更新之后再查一次账号状态，保证并发的锁定或停用不会被静默放过。 */
+    private void rejectAfterRecheck(Long userId) {
+        SysUser changedUser = sysUserMapper.selectById(userId);
+        if (changedUser != null) {
+            validateAccountStatus(changedUser);
+        }
+    }
+
     @Override
     public SysUser login(String username, String password) {
         if (!StringUtils.hasText(username) || !StringUtils.hasText(password)) {
@@ -46,25 +60,27 @@ public class AuthServiceImpl implements AuthService {
         if (user == null) {
             return null;
         }
+        return authenticate(user, password);
+    }
+
+    /** 校验密码并完成登录；密码不符时按失败策略处理。 */
+    private SysUser authenticate(SysUser user, String password) {
         validateAccountStatus(user);
         if (!passwordHasher.matches(password, user.getPasswordHash())) {
-            sysUserMapper.recordLoginFailure(user.getUserId(), Math.max(1, maxLoginAttempts));
-            SysUser failedUser = sysUserMapper.selectById(user.getUserId());
-            if (failedUser != null) {
-                validateAccountStatus(failedUser);
-            }
+            handleFailedAttempt(user);
             return null;
         }
-
         if (!passwordHasher.isEncoded(user.getPasswordHash())) {
             sysUserMapper.upgradePasswordHash(user.getUserId(), passwordHasher.hash(password));
         }
+        return completeLogin(user);
+    }
+
+    /** 落登录成功记录并回填缓存；并发下更新失败要重新核对账号状态。 */
+    private SysUser completeLogin(SysUser user) {
         LocalDateTime loginTime = LocalDateTime.now();
         if (sysUserMapper.recordLoginSuccess(user.getUserId(), loginTime) == 0) {
-            SysUser changedUser = sysUserMapper.selectById(user.getUserId());
-            if (changedUser != null) {
-                validateAccountStatus(changedUser);
-            }
+            rejectAfterRecheck(user.getUserId());
             return null;
         }
         user.setLoginFailCount(0);

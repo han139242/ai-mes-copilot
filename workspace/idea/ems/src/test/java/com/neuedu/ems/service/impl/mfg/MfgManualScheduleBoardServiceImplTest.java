@@ -58,6 +58,7 @@ class MfgManualScheduleBoardServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new MfgScheduleScenarioServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
         scenarioMapper = mock(MfgScheduleScenarioMapper.class);
         itemMapper = mock(MfgScheduleItemMapper.class);
         orderMapper = mock(MfgProductionOrderMapper.class);
@@ -86,6 +87,23 @@ class MfgManualScheduleBoardServiceImplTest {
         when(routeMapper.selectList(any())).thenReturn(List.of());
         when(routeItemMapper.selectList(any())).thenReturn(List.of());
         when(shiftMapper.selectList(any())).thenReturn(List.of());
+    }
+
+    @Test
+    void runningAndFinishedPlansRemainVisibleWithCurrentScheduleTimes() {
+        stubBoardData();
+        var running = new MfgProductionPlan(); running.setPlanId(71L);running.setPlanNo("RUNNING-71");
+        running.setProductionOrderId(202L);running.setLineId(22L);running.setStatus("RUNNING");
+        running.setPlannedStartTime(LocalDateTime.of(2026,7,14,8,0));running.setPlannedEndTime(LocalDateTime.of(2026,7,17,16,0));
+        var finished = new MfgProductionPlan();finished.setPlanId(72L);finished.setStatus("FINISHED");
+        finished.setProductionOrderId(202L);finished.setLineId(22L);finished.setPlannedStartTime(running.getPlannedStartTime());finished.setPlannedEndTime(running.getPlannedEndTime());
+        var closed = new MfgProductionPlan();closed.setPlanId(73L);closed.setStatus("CLOSED");
+        when(planMapper.selectList(any())).thenReturn(List.of(running,finished,closed));
+        var board=service.getManualScheduleBoard(7L);
+        assertEquals(2,board.getProductionPlanCount());
+        var item=board.getTimelineItems().stream().filter(i->Long.valueOf(71L).equals(i.getPlanId())).findFirst().orElseThrow();
+        assertEquals("RUNNING",item.getStatus());assertEquals(running.getPlannedEndTime(),item.getPlannedEndTime());
+        assertTrue(board.getTimelineItems().stream().noneMatch(i->Long.valueOf(73L).equals(i.getPlanId())));
     }
 
     @Test

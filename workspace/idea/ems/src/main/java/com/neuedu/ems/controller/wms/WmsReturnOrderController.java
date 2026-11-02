@@ -72,6 +72,20 @@ public class WmsReturnOrderController {
     }
 
     /**
+     * 列出指定工单当前可退的来源领料明细，供「新增退料」界面一次性带出全部可退项。
+     * @param workOrderId 生产工单ID
+     * @param excludedReturnId 编辑已有退料单时排除本单已占用的数量，新增时不传
+     * @return 可退明细清单
+     */
+    @GetMapping("/returnable")
+    public ResultData listReturnable(@RequestParam("workOrderId") Long workOrderId,
+                                     @RequestParam(value = "excludedReturnId", required = false)
+                                     Long excludedReturnId) {
+        return ResultData.success(ResultCode.SUCCESS,
+                wmsReturnOrderService.listReturnableDetails(workOrderId, excludedReturnId));
+    }
+
+    /**
      * 新增退料单；如果请求体包含details，则同步保存退料明细。
      * @param request 退料单请求体，JSON格式，可包含details
      * @return 操作结果或退料单ID

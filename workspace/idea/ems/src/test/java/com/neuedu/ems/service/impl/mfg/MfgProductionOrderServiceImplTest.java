@@ -4,6 +4,7 @@ import com.neuedu.ems.common.BusinessStatus;
 import com.neuedu.ems.entity.mfg.MfgDispatchOrder;
 import com.neuedu.ems.entity.mfg.MfgProductionOrder;
 import com.neuedu.ems.entity.mfg.MfgProductionPlan;
+import com.neuedu.ems.entity.mfg.MfgScheduleItem;
 import com.neuedu.ems.entity.mfg.MfgTask;
 import com.neuedu.ems.entity.mfg.MfgWorkOrder;
 import com.neuedu.ems.entity.mfg.MfgWorkOrderMaterial;
@@ -13,6 +14,7 @@ import com.neuedu.ems.exception.BusinessException;
 import com.neuedu.ems.mapper.mfg.MfgDispatchOrderMapper;
 import com.neuedu.ems.mapper.mfg.MfgProductionOrderMapper;
 import com.neuedu.ems.mapper.mfg.MfgProductionPlanMapper;
+import com.neuedu.ems.mapper.mfg.MfgScheduleItemMapper;
 import com.neuedu.ems.mapper.mfg.MfgTaskMapper;
 import com.neuedu.ems.mapper.mfg.MfgWorkReportMapper;
 import com.neuedu.ems.mapper.mfg.MfgWorkOrderMapper;
@@ -31,18 +33,35 @@ import org.springframework.test.util.ReflectionTestUtils;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.time.LocalDateTime;
+import java.util.HashSet;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class MfgProductionOrderServiceImplTest {
+
+    @Test
+    void saveUsesServerNumberInsteadOfClientSuppliedLongNumber() {
+        when(orderMapper.insert(any(MfgProductionOrder.class))).thenReturn(1);
+        MfgProductionOrder row = new MfgProductionOrder();
+        row.setProductId(1L);row.setCustomerId(11L);row.setOrderQuantity(BigDecimal.ONE);
+        row.setProductionOrderNo("CLIENT-20261027155833077-2114990116628385793");
+        assertTrue(service.saveOrder(row));
+        assertEquals("T-PO-20261027-001",row.getProductionOrderNo());
+        var numbers=(com.neuedu.ems.service.sys.BusinessNumberService)ReflectionTestUtils.getField(service,"numbers");
+        verify(numbers).next("PO",11L);
+    }
 
     private MfgProductionOrderServiceImpl service;
     private MfgProductionOrderMapper orderMapper;
@@ -51,6 +70,7 @@ class MfgProductionOrderServiceImplTest {
     private MfgProductionPlanMapper planMapper;
     private MfgWorkOrderMapper workOrderMapper;
     private MfgWorkOrderMaterialMapper materialMapper;
+    private MfgScheduleItemMapper scheduleItemMapper;
     private MfgDispatchOrderMapper dispatchMapper;
     private MfgTaskMapper taskMapper;
     private MfgWorkReportMapper workReportMapper;
@@ -60,10 +80,13 @@ class MfgProductionOrderServiceImplTest {
     private TraceProductLotMapper productLotMapper;
     private TraceMaterialUsageMapper materialUsageMapper;
     private MfgResponsibilityNotificationService responsibilityNotificationService;
+    private com.neuedu.ems.service.mfg.SupplyAllocationService supplyAllocations;
 
     @BeforeEach
     void setUp() {
         service = new MfgProductionOrderServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
+        ReflectionTestUtils.setField(service,"productQuantities",mock(com.neuedu.ems.service.mdm.ProductQuantityService.class));
         orderMapper = mock(MfgProductionOrderMapper.class);
         statusLogMapper = mock(SysStatusChangeLogMapper.class);
         operationLogMapper = mock(SysOperationLogMapper.class);
@@ -85,6 +108,9 @@ class MfgProductionOrderServiceImplTest {
         ReflectionTestUtils.setField(service, "productionPlanMapper", planMapper);
         ReflectionTestUtils.setField(service, "workOrderMapper", workOrderMapper);
         ReflectionTestUtils.setField(service, "workOrderMaterialMapper", materialMapper);
+        scheduleItemMapper = mock(MfgScheduleItemMapper.class);
+        ReflectionTestUtils.setField(service, "scheduleItemMapper", scheduleItemMapper);
+        when(scheduleItemMapper.selectList(any())).thenReturn(List.of());
         ReflectionTestUtils.setField(service, "dispatchOrderMapper", dispatchMapper);
         ReflectionTestUtils.setField(service, "taskMapper", taskMapper);
         ReflectionTestUtils.setField(service, "workReportMapper", workReportMapper);
@@ -94,6 +120,9 @@ class MfgProductionOrderServiceImplTest {
         ReflectionTestUtils.setField(service, "productLotMapper", productLotMapper);
         ReflectionTestUtils.setField(service, "materialUsageMapper", materialUsageMapper);
         ReflectionTestUtils.setField(service, "responsibilityNotificationService", responsibilityNotificationService);
+        // P2B：撤回链要退回未执行的库存预留，这里用桩记录调用，不触碰真实库存。
+        supplyAllocations = mock(com.neuedu.ems.service.mfg.SupplyAllocationService.class);
+        ReflectionTestUtils.setField(service, "supplyAllocations", supplyAllocations);
         when(statusLogMapper.insert(any(SysStatusChangeLog.class))).thenReturn(1);
         when(operationLogMapper.insert(any(SysOperationLog.class))).thenReturn(1);
         when(dispatchMapper.selectList(any())).thenReturn(List.of());
@@ -163,6 +192,8 @@ class MfgProductionOrderServiceImplTest {
         assertEquals(null, workOrderUpdate.getValue().getDeletedFlag());
         verify(statusLogMapper, times(3)).insert(any(SysStatusChangeLog.class));
         verify(operationLogMapper, times(3)).insert(any(SysOperationLog.class));
+        // P2B：撤回未执行工单必须退回库存预留，否则撤单后库存仍被旧承诺占住。
+        verify(supplyAllocations).releaseForWorkOrders(any(), eq(9L), any());
     }
 
     @Test

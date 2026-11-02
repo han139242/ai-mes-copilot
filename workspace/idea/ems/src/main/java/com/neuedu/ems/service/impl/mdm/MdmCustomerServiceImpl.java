@@ -36,12 +36,22 @@ public class MdmCustomerServiceImpl extends ServiceImpl<MdmCustomerMapper, MdmCu
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor=Exception.class)
     public boolean saveCustomer(MdmCustomer customer, String rawContactPhone) {
+        prepareNumberPrefix(customer);
         if (customer.getDeletedFlag() == null) {
             customer.setDeletedFlag(0);
         }
         applyPhone(customer, sensitivePhoneService.prepareCreate(SensitivePhoneField.CUSTOMER, rawContactPhone));
-        return baseMapper.insert(customer) > 0;
+        if(baseMapper.insert(customer)==0)return false;
+        if(customer.getNumberPrefix()==null) {
+            if(customer.getCustomerId()==null)throw new IllegalStateException("客户创建后未返回主键");
+            customer.setNumberPrefix(com.neuedu.ems.service.sys.BusinessNumberService.defaultPrefix(customer.getCustomerId()));
+            prepareNumberPrefix(customer);
+            MdmCustomer prefix=new MdmCustomer();prefix.setCustomerId(customer.getCustomerId());prefix.setNumberPrefix(customer.getNumberPrefix());
+            if(baseMapper.updateById(prefix)!=1)throw new IllegalStateException("客户编号前缀保存失败");
+        }
+        return true;
     }
 
     @Override
@@ -49,6 +59,7 @@ public class MdmCustomerServiceImpl extends ServiceImpl<MdmCustomerMapper, MdmCu
         if (customer.getCustomerId() == null) {
             return false;
         }
+        prepareNumberPrefix(customer);
         PhoneWriteValue phoneWrite = sensitivePhoneService.prepareUpdate(SensitivePhoneField.CUSTOMER, rawContactPhone);
         applyPhone(customer, phoneWrite);
         customer.setDeletedFlag(null);
@@ -98,6 +109,19 @@ public class MdmCustomerServiceImpl extends ServiceImpl<MdmCustomerMapper, MdmCu
 
     @org.springframework.beans.factory.annotation.Autowired
     private SensitivePhoneService sensitivePhoneService;
+
+    private void prepareNumberPrefix(MdmCustomer customer) {
+        String prefix=customer.getNumberPrefix();
+        if(prefix==null || prefix.isBlank()){customer.setNumberPrefix(null);return;}
+        prefix=prefix.trim().toUpperCase(java.util.Locale.ROOT);
+        if(!prefix.matches("[A-Z][A-Z0-9]{0,7}") || "SYS".equals(prefix))
+            throw new com.neuedu.ems.exception.BusinessException(com.neuedu.ems.common.ResultCode.PARAM_ERROR.getCode(),"编号前缀须为 1～8 位大写字母或数字，以字母开头；SYS 保留给公共业务");
+        QueryWrapper<MdmCustomer> query=new QueryWrapper<MdmCustomer>().eq("number_prefix",prefix);
+        if(customer.getCustomerId()!=null)query.ne("customer_id",customer.getCustomerId());
+        if(baseMapper.selectCount(query)>0)
+            throw new com.neuedu.ems.exception.BusinessException(com.neuedu.ems.common.ResultCode.BUSINESS_ERROR.getCode(),"客户编号前缀已被使用，请选择其他前缀");
+        customer.setNumberPrefix(prefix);
+    }
 
     private void applyPhone(MdmCustomer customer, PhoneWriteValue phoneWrite) {
         if (!phoneWrite.changed() || phoneWrite.clear()) {

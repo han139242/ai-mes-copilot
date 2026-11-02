@@ -3,6 +3,7 @@ package com.neuedu.ems.entity.trace;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.TableField;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -27,6 +28,8 @@ public class TraceProductLot {
     private Long sourceReportId;
     private BigDecimal batchQuantity;
     private BigDecimal qualifiedQuantity;
+    @TableField(exist = false)
+    private BigDecimal handedOverQuantity;
     private BigDecimal defectQuantity;
     private String status;
     private String remark;

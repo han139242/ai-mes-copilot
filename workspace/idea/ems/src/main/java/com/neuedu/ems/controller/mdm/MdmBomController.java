@@ -5,6 +5,11 @@ import com.neuedu.ems.common.ResultCode;
 import com.neuedu.ems.common.ResultData;
 import com.neuedu.ems.entity.mdm.MdmBom;
 import com.neuedu.ems.service.mdm.MdmBomService;
+import com.neuedu.ems.service.mdm.BomExpansionService;
+import com.neuedu.ems.service.sys.PermissionService;
+import org.springframework.web.bind.annotation.RequestAttribute;
+import java.math.BigDecimal;
+import java.time.LocalDate;
 import com.neuedu.ems.util.ExcelExportUtil;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -26,6 +31,23 @@ public class MdmBomController {
 
     @Autowired
     private MdmBomService mdmBomService;
+    @Autowired private BomExpansionService bomExpansionService;
+    @Autowired private PermissionService permissionService;
+
+    @GetMapping("/{bomId}/explosion")
+    public ResultData explosion(@PathVariable Long bomId,
+            @RequestParam(defaultValue="1") BigDecimal quantity,
+            @RequestParam(required=false) LocalDate asOf,
+            @RequestParam(defaultValue="false") boolean useSemiStock,
+            @RequestAttribute("userId") Long userId) {
+        if (useSemiStock) {
+            var authorization = permissionService.getContext(userId);
+            if (authorization == null || !authorization.hasPermission("wms:inventory:view")
+                    || !(authorization.isSuperAdmin() || "ALL".equals(authorization.dataScope())))
+                throw new com.neuedu.ems.exception.DataScopeAccessDeniedException();
+        }
+        return ResultData.success(ResultCode.SUCCESS,bomExpansionService.expand(bomId,quantity,asOf,useSemiStock));
+    }
 
     @Autowired
     private ExcelExportUtil excelExportUtil;

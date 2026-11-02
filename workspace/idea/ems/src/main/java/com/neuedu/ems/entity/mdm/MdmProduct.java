@@ -23,6 +23,7 @@ public class MdmProduct {
     private String productCode;
     private String productName;
     private String productModel;
+    private Integer preparationControlled;
     private Long materialId;
     private String status;
     private String remark;

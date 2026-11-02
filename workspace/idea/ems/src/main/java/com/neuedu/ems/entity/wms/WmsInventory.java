@@ -26,6 +26,8 @@ public class WmsInventory {
     private Long locationId;
     private Long materialId;
     private Long batchId;
+    /** 线边库按工单占用；0 表示公共库存。 */
+    private Long workOrderId;
     private BigDecimal availableQuantity;
     private BigDecimal lockedQuantity;
     private BigDecimal inspectionQuantity;

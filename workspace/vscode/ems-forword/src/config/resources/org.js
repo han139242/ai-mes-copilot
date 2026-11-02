@@ -1,38 +1,180 @@
-import { defineResource, optionSets, values } from './helpers'
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ * 本项目为课程实训作品，版权说明按 CodeArts 文件头注释规范补充。
+ */
+import { defineResource, optionSets, values } from './helpers';
 
 // 组织资源：部门、员工、班组、班次和班组成员关系。
 // treeEndpoint表示部门使用树形接口，menu:false表示关联表不单独出现在侧边菜单。
 // 默认导出该业务域的资源数组，由resources/index.js统一汇总。
 export default [
   defineResource({
-    key: 'org-department', domain: 'org', route: 'org/departments', title: '部门管理', icon: 'factory', baseUrl: '/api/org/department', idField: 'departmentId', treeEndpoint: '/api/org/department/tree',
-    fields: ['parentId', 'departmentCode', 'departmentName', 'managerId', 'remark', 'createdTime'], filters: ['keyword'],
-    overrides: { parentId: { type: 'reference', reference: 'org-department' }, departmentCode: { required: true }, departmentName: { required: true }, createdTime: { form: false, width: 170 } }
-  }),
-  defineResource({
-    key: 'org-employee', domain: 'org', route: 'org/employees', title: '员工管理', icon: 'user', baseUrl: '/api/org/employee', idField: 'employeeId',
-    fields: ['employeeNo', 'employeeName', 'departmentId', 'positionName', 'skillLevel', 'phone', 'status', 'remark', 'createdTime'], filters: ['keyword', 'departmentId', 'status'], defaults: { status: 'ENABLE' },
+    key: 'org-department',
+    domain: 'org',
+    route: 'org/departments',
+    title: '部门管理',
+    icon: 'factory',
+    baseUrl: '/api/org/department',
+    idField: 'departmentId',
+    treeEndpoint: '/api/org/department/tree',
+    fields: ['parentId', 'departmentCode', 'departmentName', 'managerId', 'remark', 'createdTime'],
+    filters: ['keyword'],
     overrides: {
-      employeeNo: { required: true }, employeeName: { required: true }, departmentId: { required: true },
-      skillLevel: { type: 'select', options: values([['BEGINNER', '初级', 'info'], ['INTERMEDIATE', '中级', 'primary'], ['ADVANCED', '高级', 'success'], ['EXPERT', '专家', 'warning']]) },
+      parentId: { type: 'reference', reference: 'org-department' },
+      departmentCode: { required: true },
+      departmentName: { required: true },
+      createdTime: { form: false, width: 170 },
+    },
+  }),
+  defineResource({
+    key: 'org-employee',
+    domain: 'org',
+    route: 'org/employees',
+    title: '员工管理',
+    icon: 'user',
+    baseUrl: '/api/org/employee',
+    idField: 'employeeId',
+    fields: [
+      'employeeNo',
+      'employeeName',
+      'departmentId',
+      'positionName',
+      'skillLevel',
+      'phone',
+      'status',
+      'remark',
+      'createdTime',
+    ],
+    filters: ['keyword', 'departmentId', 'status'],
+    defaults: { status: 'ENABLE' },
+    overrides: {
+      employeeNo: { required: true },
+      employeeName: { required: true },
+      departmentId: { required: true },
+      skillLevel: {
+        type: 'select',
+        options: values([
+          ['BEGINNER', '初级', 'info'],
+          ['INTERMEDIATE', '中级', 'primary'],
+          ['ADVANCED', '高级', 'success'],
+          ['EXPERT', '专家', 'warning'],
+        ]),
+      },
       phone: { type: 'tel', writePermission: 'org:employee:phone:write' },
-      status: { type: 'select', options: optionSets.employeeStatus }, createdTime: { form: false, width: 170 }
-    }
+      status: { type: 'select', options: optionSets.employeeStatus },
+      createdTime: { form: false, width: 170 },
+    },
   }),
   defineResource({
-    key: 'org-team', domain: 'org', route: 'org/teams', title: '班组管理', icon: 'users', baseUrl: '/api/org/team', idField: 'teamId',
-    fields: ['teamCode', 'teamName', 'departmentId', 'leaderId', 'remark', 'createdTime'], filters: ['keyword', 'departmentId', 'leaderId'],
-    overrides: { teamCode: { required: true }, teamName: { required: true }, departmentId: { required: true }, createdTime: { form: false, width: 170 } },
-    relations: [{ key: 'members', title: '班组成员', resource: 'org-team-member', parentField: 'teamId', endpoint: (row) => `/api/org/team-member/team/${row.teamId}` }]
+    key: 'org-team',
+    domain: 'org',
+    route: 'org/teams',
+    title: '班组管理',
+    icon: 'users',
+    baseUrl: '/api/org/team',
+    idField: 'teamId',
+    fields: ['teamCode', 'teamName', 'departmentId', 'leaderId', 'remark', 'createdTime'],
+    filters: ['keyword', 'departmentId', 'leaderId'],
+    overrides: {
+      teamCode: { required: true },
+      teamName: { required: true },
+      departmentId: { required: true },
+      createdTime: { form: false, width: 170 },
+    },
+    relations: [
+      {
+        key: 'members',
+        title: '班组成员',
+        resource: 'org-team-member',
+        parentField: 'teamId',
+        endpoint: (row) => `/api/org/team-member/team/${row.teamId}`,
+      },
+    ],
   }),
   defineResource({
-    key: 'org-shift', domain: 'org', route: 'org/shifts', title: '班次管理', icon: 'calendar', baseUrl: '/api/org/shift', idField: 'shiftId',
-    fields: ['shiftCode', 'shiftName', 'startTime', 'endTime', 'remark', 'createdTime'], filters: ['keyword'],
-    overrides: { shiftCode: { required: true }, shiftName: { required: true }, startTime: { required: true, type: 'time' }, endTime: { required: true, type: 'time' }, createdTime: { form: false, width: 170 } }
+    key: 'org-shift',
+    domain: 'org',
+    route: 'org/shifts',
+    title: '班次管理',
+    icon: 'calendar',
+    baseUrl: '/api/org/shift',
+    idField: 'shiftId',
+    fields: ['shiftCode', 'shiftName', 'startTime', 'endTime', 'remark', 'createdTime'],
+    filters: ['keyword'],
+    overrides: {
+      shiftCode: { required: true },
+      shiftName: { required: true },
+      startTime: { required: true, type: 'time' },
+      endTime: { required: true, type: 'time' },
+      createdTime: { form: false, width: 170 },
+    },
   }),
   defineResource({
-    key: 'org-team-member', domain: 'org', route: 'org/team-members', title: '班组成员', baseUrl: '/api/org/team-member', idField: 'id', permissions: { export: false }, menu: false,
-    fields: ['teamId', 'employeeId', 'joinDate', 'leaveDate', 'status'], filters: ['teamId', 'employeeId', 'status'], defaults: { status: 'ENABLE' },
-    overrides: { teamId: { required: true }, employeeId: { required: true }, joinDate: { required: true }, status: { type: 'select', options: optionSets.enable } }
-  })
-]
+    key: 'org-team-member',
+    domain: 'org',
+    route: 'org/team-members',
+    title: '班组成员',
+    baseUrl: '/api/org/team-member',
+    idField: 'id',
+    permissions: { export: false },
+    menu: false,
+    fields: ['teamId', 'employeeId', 'joinDate', 'leaveDate', 'status'],
+    filters: ['teamId', 'employeeId', 'status'],
+    defaults: { status: 'ENABLE' },
+    overrides: {
+      teamId: { required: true },
+      employeeId: { required: true },
+      joinDate: { required: true },
+      status: { type: 'select', options: optionSets.enable },
+    },
+  }),
+  defineResource({
+    key: 'org-team-schedule',
+    domain: 'org',
+    route: 'org/team-schedules',
+    title: '班组排班',
+    icon: 'calendar',
+    baseUrl: '/api/org/team-schedule',
+    idField: 'scheduleId',
+    description: '按班组、产线、班次和日期安排出勤，生效后作为派工与报工的排班依据',
+    fields: [
+      'scheduleNo',
+      'workDate',
+      'teamId',
+      'lineId',
+      'shiftId',
+      'plannedHeadcount',
+      'status',
+      'remark',
+      'createdTime',
+    ],
+    filters: ['workDate', 'teamId', 'lineId'],
+    defaults: { status: 'DRAFT', plannedHeadcount: 1 },
+    overrides: {
+      scheduleNo: { create: false, edit: false, width: 168 },
+      workDate: { required: true, type: 'date', width: 112 },
+      teamId: { required: true, type: 'reference', reference: 'org-team', width: 152 },
+      lineId: { required: true, type: 'reference', reference: 'factory-line', width: 168 },
+      shiftId: { required: true, type: 'reference', reference: 'org-shift', width: 148 },
+      plannedHeadcount: { required: true, type: 'number', min: 1, precision: 0, width: 96 },
+      status: { type: 'select', options: optionSets.teamSchedule, create: false, edit: false, width: 90 },
+      remark: { type: 'textarea', table: false },
+      createdTime: { form: false, width: 170 },
+    },
+    canEdit: (row) => row.status === 'DRAFT',
+    canDelete: (row) => row.status === 'DRAFT',
+    lockedReason: '已生效的排班不能直接修改或删除',
+    actions: [
+      {
+        key: 'release',
+        label: '生效排班',
+        icon: 'check',
+        method: 'put',
+        type: 'success',
+        path: (row) => `/api/org/team-schedule/${row.scheduleId}/release`,
+        visible: (row) => row.status === 'DRAFT',
+        previewPatch: () => ({ status: 'RELEASED' }),
+      },
+    ],
+  }),
+];

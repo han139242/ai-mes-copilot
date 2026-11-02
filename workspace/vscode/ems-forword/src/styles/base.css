@@ -72,6 +72,33 @@ a:focus-visible,
   background: var(--mes-primary);
 }
 
+/* 统一滚动条：细窄、圆角、低对比，避免默认滚动条破坏整体质感。 */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgb(140 160 180 / 46%) transparent;
+}
+
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 8px;
+  background: rgb(140 160 180 / 46%);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgb(120 145 170 / 66%);
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
 /* MES页面、标题和面板的通用布局类，业务页面可以直接复用。 */
 .mes-page {
   width: 100%;
@@ -85,13 +112,13 @@ a:focus-visible,
   align-items: flex-start;
   justify-content: space-between;
   gap: 20px;
-  margin-bottom: 18px;
+  margin-bottom: 16px;
 }
 
 .mes-page-title {
   color: var(--mes-text);
-  font-size: 22px;
-  font-weight: 650;
+  font-size: 21px;
+  font-weight: 700;
   line-height: 1.3;
   letter-spacing: 0;
 }
@@ -102,63 +129,204 @@ a:focus-visible,
   font-size: 13px;
 }
 
+/* 通用卡片：统一 7px 圆角、细边框，不再叠加投影，避免整页发虚。 */
 .mes-panel {
   border: 1px solid var(--mes-border);
   border-radius: var(--mes-radius);
   background: var(--mes-surface);
-  box-shadow: var(--mes-shadow-sm);
 }
 
 .mes-panel-header {
   display: flex;
-  min-height: 48px;
+  min-height: 46px;
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  padding: 0 18px;
+  padding: 0 16px;
   border-bottom: 1px solid var(--mes-border);
 }
 
 .mes-panel-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
   color: var(--mes-text);
-  font-size: 15px;
-  font-weight: 650;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+/* 面板标题左侧的装饰条：纯色细条，不用渐变。 */
+.mes-panel-title::before {
+  width: 2px;
+  height: 13px;
+  border-radius: 1px;
+  background: var(--mes-primary);
+  content: '';
 }
 
 .mes-icon-button.el-button {
-  width: 34px;
-  height: 34px;
+  width: 32px;
+  height: 32px;
   padding: 0;
+}
+
+/* 卡片内的查询区：浅底 + 分隔线，和表格主体形成层次。 */
+.mes-query-card {
+  padding: 13px 15px;
+  border: 1px solid var(--mes-border);
+  border-radius: var(--mes-radius);
+  background: var(--mes-surface);
 }
 
 /* 统一覆盖Element Plus的圆角、表格、按钮和遮罩等基础视觉变量。 */
 .el-card,
 .el-dialog,
-.el-drawer {
+.el-drawer,
+.el-message-box {
   --el-border-radius-base: var(--mes-radius);
 }
 
-.el-button {
-  font-weight: 550;
+.el-card {
+  border-radius: var(--mes-radius);
 }
 
+.el-dialog {
+  overflow: hidden;
+  border-radius: var(--mes-radius-lg);
+  box-shadow: var(--mes-shadow-md);
+}
+
+.el-dialog__header {
+  margin-right: 0;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid var(--mes-border);
+}
+
+.el-dialog__title {
+  font-size: 15px;
+  font-weight: 680;
+}
+
+.el-dialog__body {
+  padding: 20px 22px;
+}
+
+.el-dialog__footer {
+  padding: 12px 22px 16px;
+  border-top: 1px solid var(--mes-border);
+}
+
+.el-button {
+  font-weight: 500;
+  border-radius: 6px;
+}
+
+/* 主按钮不做发光投影，靠颜色本身表达层级。 */
+.el-button--primary {
+  box-shadow: none;
+}
+
+.el-button--primary:hover {
+  box-shadow: none;
+}
+
+.el-button.is-link {
+  box-shadow: none;
+}
+
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  border-radius: 6px;
+  transition: box-shadow 0.18s ease;
+}
+
+.el-input__wrapper:hover,
+.el-select__wrapper:hover {
+  box-shadow: 0 0 0 1px var(--mes-primary-border) inset;
+}
+
+/* 标签统一小圆角，状态列依靠 type 上色。 */
 .el-tag {
-  border-radius: 3px;
-  font-weight: 550;
+  height: 21px;
+  padding: 0 7px;
+  border-radius: 4px;
+  font-weight: 500;
+  font-size: 11px;
+}
+
+.el-tag.is-round {
+  border-radius: 999px;
 }
 
 .el-table {
-  --el-table-header-bg-color: #f5f7fa;
-  --el-table-row-hover-bg-color: var(--mes-primary-soft);
+  --el-table-header-bg-color: #f7f9fc;
+  --el-table-header-text-color: #516070;
+  --el-table-row-hover-bg-color: #f5f8fc;
+  --el-table-border-color: var(--mes-border);
+  --el-table-current-row-bg-color: #f0f6ff;
+  border-radius: var(--mes-radius);
 }
 
 .el-table th.el-table__cell {
-  color: #516070;
-  font-weight: 650;
+  color: #55637a;
+  font-weight: 600;
+  font-size: 12px;
+}
+
+.el-table td.el-table__cell {
+  font-size: 12.5px;
+}
+
+/* 收紧行高，让密集数据表在一屏内多显示几行。 */
+.el-table .el-table__cell {
+  padding: 7px 0;
+}
+
+.el-table .el-table__cell .cell {
+  padding: 0 10px;
+  line-height: 1.45;
+}
+
+/* 斑马纹：默认行白、偶数行极浅灰，保证长表格可读。 */
+.el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
+  background: #fafbfd;
+}
+
+.el-table--striped .el-table__body tr.el-table__row--striped:hover td.el-table__cell {
+  background: #f5f8fc;
+}
+
+/* 固定列加一道阴影，滚动时操作列和主体之间有明确边界。 */
+.el-table .el-table-fixed-column--right {
+  box-shadow: -6px 0 12px -8px rgb(15 35 60 / 24%);
+}
+
+.el-pagination.is-background .el-pager li {
+  border-radius: 6px;
+}
+
+.el-pagination.is-background .btn-prev,
+.el-pagination.is-background .btn-next {
+  border-radius: 6px;
 }
 
 .el-overlay {
   backdrop-filter: blur(2px);
+}
+
+.el-drawer__header {
+  margin-bottom: 0;
+}
+
+.el-message {
+  border-radius: 8px;
+  box-shadow: var(--mes-shadow-md);
+}
+
+.el-tooltip__popper,
+.el-popper {
+  border-radius: 6px;
 }
 
 /* 小屏幕下标题区改为上下排列，避免标题和操作按钮互相挤压。 */
@@ -170,6 +338,6 @@ a:focus-visible,
   }
 
   .mes-page-title {
-    font-size: 20px;
+    font-size: 19px;
   }
 }

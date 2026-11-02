@@ -49,10 +49,18 @@ class WmsInboundOrderServiceImplTest {
     private WmsResponsibilityNotificationService notificationService;
     private TraceProductLotMapper productLotMapper;
     private MdmProductMapper productMapper;
+    private com.neuedu.ems.mapper.mdm.MdmMaterialMapper materialMapper;
+    private com.neuedu.ems.mapper.mdm.MdmBomMapper bomMapper;
+    private com.neuedu.ems.mapper.mdm.MdmBomItemMapper bomItemMapper;
+    private com.neuedu.ems.mapper.qms.QmsInspectionSchemeMapper schemeMapper;
+    private com.neuedu.ems.mapper.qms.QmsInspectionOrderMapper inspectionOrderMapper;
+    private com.neuedu.ems.service.qms.QmsInspectionOrderService inspectionService;
 
     @BeforeEach
     void setUp() {
         service = new WmsInboundOrderServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
+        ReflectionTestUtils.setField(service, "executionQuantities", mock(com.neuedu.ems.service.mdm.MaterialExecutionQuantityService.class));
         orderMapper = mock(WmsInboundOrderMapper.class);
         detailMapper = mock(WmsInboundDetailMapper.class);
         inventoryMapper = mock(WmsInventoryMapper.class);
@@ -68,12 +76,32 @@ class WmsInboundOrderServiceImplTest {
         ReflectionTestUtils.setField(service, "wmsInventoryMapper", inventoryMapper);
         ReflectionTestUtils.setField(service, "wmsStockMovementMapper", movementMapper);
         ReflectionTestUtils.setField(service, "wmsMaterialBatchMapper", batchMapper);
+        var locationMapper = mock(com.neuedu.ems.mapper.wms.WmsLocationMapper.class);
+        var location = new com.neuedu.ems.entity.wms.WmsLocation();
+        location.setLocationId(8L);
+        location.setWarehouseId(2L);
+        location.setDeletedFlag(0);
+        when(locationMapper.selectById(any(java.io.Serializable.class))).thenReturn(location);
+        ReflectionTestUtils.setField(service, "inboundLocationMapper", locationMapper);
         ReflectionTestUtils.setField(service, "traceProductLotMapper", productLotMapper);
         ReflectionTestUtils.setField(service, "mdmProductMapper", productMapper);
         ReflectionTestUtils.setField(service, "sysStatusChangeLogMapper", statusLogMapper);
         ReflectionTestUtils.setField(service, "sysOperationLogMapper", operationLogMapper);
         notificationService = mock(WmsResponsibilityNotificationService.class);
         ReflectionTestUtils.setField(service, "responsibilityNotificationService", notificationService);
+
+        materialMapper = mock(com.neuedu.ems.mapper.mdm.MdmMaterialMapper.class);
+        bomMapper = mock(com.neuedu.ems.mapper.mdm.MdmBomMapper.class);
+        bomItemMapper = mock(com.neuedu.ems.mapper.mdm.MdmBomItemMapper.class);
+        schemeMapper = mock(com.neuedu.ems.mapper.qms.QmsInspectionSchemeMapper.class);
+        inspectionOrderMapper = mock(com.neuedu.ems.mapper.qms.QmsInspectionOrderMapper.class);
+        inspectionService = mock(com.neuedu.ems.service.qms.QmsInspectionOrderService.class);
+        ReflectionTestUtils.setField(service, "mdmMaterialMapper", materialMapper);
+        ReflectionTestUtils.setField(service, "mdmBomMapper", bomMapper);
+        ReflectionTestUtils.setField(service, "mdmBomItemMapper", bomItemMapper);
+        ReflectionTestUtils.setField(service, "qmsInspectionSchemeMapper", schemeMapper);
+        ReflectionTestUtils.setField(service, "qmsInspectionOrderMapper", inspectionOrderMapper);
+        ReflectionTestUtils.setField(service, "qmsInspectionOrderService", inspectionService);
 
         when(detailMapper.selectList(any())).thenReturn(List.of(detail()));
         when(inventoryMapper.insert(any(WmsInventory.class))).thenReturn(1);
@@ -270,6 +298,122 @@ class WmsInboundOrderServiceImplTest {
         assertEquals("STORED", update.getValue().getStatus());
     }
 
+    @Test
+    void incomingSchemePrefersComponentSchemeOverAssemblyScheme() {
+        var assembly = new com.neuedu.ems.entity.qms.QmsInspectionScheme();
+        assembly.setSchemeId(28L); assembly.setProductId(5L);
+        var component = new com.neuedu.ems.entity.qms.QmsInspectionScheme();
+        component.setSchemeId(29L); component.setProductId(6L);
+        when(schemeMapper.selectList(any())).thenReturn(List.of(assembly, component));
+        var root = new com.neuedu.ems.entity.mdm.MdmBom(); root.setBomId(5L);
+        var childBom = new com.neuedu.ems.entity.mdm.MdmBom(); childBom.setBomId(6L);
+        when(bomMapper.selectList(any())).thenReturn(List.of(root), List.of(childBom));
+        var child = new com.neuedu.ems.entity.mdm.MdmBomItem(); child.setChildBomId(6L);
+        when(bomItemMapper.selectList(any())).thenReturn(List.of(child));
+        when(bomItemMapper.selectCount(any())).thenReturn(0L, 1L, 1L);
+        assertEquals(29L, (Long) org.springframework.test.util.ReflectionTestUtils.invokeMethod(
+                service, "firstMatchingSchemeId", 11L));
+    }
+
+    @Test
+    void incomingSchemeFindsComponentRawMaterialBelowRootBom() {
+        var child = new com.neuedu.ems.entity.mdm.MdmBomItem();
+        child.setChildBomId(6L);
+        when(bomItemMapper.selectCount(any())).thenReturn(0L, 1L);
+        when(bomItemMapper.selectList(any())).thenReturn(List.of(child));
+        assertEquals(1, (Integer) org.springframework.test.util.ReflectionTestUtils.invokeMethod(
+                service, "materialDepth", 5L, 11L));
+    }
+
+    @Test
+    void incomingSchemeStopsAtCyclicBomWithoutMatchingMaterial() {
+        var child = new com.neuedu.ems.entity.mdm.MdmBomItem();
+        child.setChildBomId(5L);
+        when(bomItemMapper.selectCount(any())).thenReturn(0L);
+        when(bomItemMapper.selectList(any())).thenReturn(List.of(child));
+        assertEquals(-1, (Integer) org.springframework.test.util.ReflectionTestUtils.invokeMethod(
+                service, "materialDepth", 5L, 11L));
+        verify(bomItemMapper, org.mockito.Mockito.times(1)).selectCount(any());
+    }
+
+    @Test
+    void purchaseInboundConfirmIssuesIncomingInspectionForRawMaterialBatch() {
+        WmsInboundOrder order = order();
+        order.setInboundType("PURCHASE");
+        order.setInboundNo("IN-PURCHASE-1");
+        when(orderMapper.selectOne(any())).thenReturn(order);
+        when(batchMapper.selectOne(any())).thenReturn(batch(BusinessStatus.Quality.PASS, "AVAILABLE"));
+        when(batchMapper.selectById(7L)).thenReturn(batch(BusinessStatus.Quality.PASS, "AVAILABLE"));
+        when(inventoryMapper.selectOne(any())).thenReturn(null);
+        when(orderMapper.updateById(any(WmsInboundOrder.class))).thenReturn(1);
+        com.neuedu.ems.entity.mdm.MdmMaterial material = new com.neuedu.ems.entity.mdm.MdmMaterial();
+        material.setMaterialId(11L);
+        material.setMaterialType("RAW");
+        when(materialMapper.selectById(11L)).thenReturn(material);
+        when(inspectionOrderMapper.selectCount(any())).thenReturn(0L);
+        com.neuedu.ems.entity.qms.QmsInspectionScheme scheme = new com.neuedu.ems.entity.qms.QmsInspectionScheme();
+        scheme.setSchemeId(28L);
+        scheme.setProductId(5L);
+        scheme.setInspectionType("INCOMING");
+        when(schemeMapper.selectList(any())).thenReturn(List.of(scheme));
+        com.neuedu.ems.entity.mdm.MdmBom bom = new com.neuedu.ems.entity.mdm.MdmBom();
+        bom.setBomId(5L);
+        when(bomMapper.selectList(any())).thenReturn(List.of(bom));
+        when(bomItemMapper.selectCount(any())).thenReturn(1L);
+        when(inspectionService.saveInspectionOrder(any())).thenReturn(true);
+
+        assertTrue(service.confirmInboundOrder(1L, 9L, null));
+
+        ArgumentCaptor<com.neuedu.ems.entity.qms.QmsInspectionOrder> issued =
+                ArgumentCaptor.forClass(com.neuedu.ems.entity.qms.QmsInspectionOrder.class);
+        verify(inspectionService).saveInspectionOrder(issued.capture());
+        assertEquals("INCOMING", issued.getValue().getInspectionType());
+        assertEquals(7L, issued.getValue().getBatchId());
+        assertEquals(28L, issued.getValue().getSchemeId());
+        assertEquals(new BigDecimal("12.0000"), issued.getValue().getSampleQuantity());
+    }
+
+    @Test
+    void purchaseInboundConfirmSkipsIncomingInspectionWhenBatchAlreadyInspected() {
+        WmsInboundOrder order = order();
+        order.setInboundType("PURCHASE");
+        when(orderMapper.selectOne(any())).thenReturn(order);
+        when(batchMapper.selectOne(any())).thenReturn(batch(BusinessStatus.Quality.PASS, "AVAILABLE"));
+        when(inventoryMapper.selectOne(any())).thenReturn(null);
+        when(orderMapper.updateById(any(WmsInboundOrder.class))).thenReturn(1);
+        com.neuedu.ems.entity.mdm.MdmMaterial material = new com.neuedu.ems.entity.mdm.MdmMaterial();
+        material.setMaterialId(11L);
+        material.setMaterialType("AUXILIARY");
+        when(materialMapper.selectById(11L)).thenReturn(material);
+        when(inspectionOrderMapper.selectCount(any())).thenReturn(1L);
+
+        assertTrue(service.confirmInboundOrder(1L, 9L, null));
+
+        verify(inspectionService, never()).saveInspectionOrder(any());
+    }
+
+    @Test
+    void productionInboundDoesNotIssueIncomingInspection() {
+        WmsInboundOrder order = order();
+        order.setInboundType("PRODUCTION");
+        order.setSourceOrderType("PRODUCT_LOT");
+        order.setSourceOrderId(31L);
+        WmsMaterialBatch batch = batch(BusinessStatus.Quality.PASS, "AVAILABLE");
+        batch.setSourceProductLotId(31L);
+        when(orderMapper.selectOne(any())).thenReturn(order);
+        when(detailMapper.selectList(any())).thenReturn(List.of(detail()), List.of());
+        when(batchMapper.selectOne(any())).thenReturn(batch);
+        when(productLotMapper.selectOne(any())).thenReturn(productLot("12.0000", BusinessStatus.Quality.PASS));
+        when(productMapper.selectOne(any())).thenReturn(product());
+        when(inventoryMapper.selectOne(any())).thenReturn(null);
+        when(orderMapper.updateById(any(WmsInboundOrder.class))).thenReturn(1);
+        when(productLotMapper.updateById(any(TraceProductLot.class))).thenReturn(1);
+
+        assertTrue(service.confirmInboundOrder(1L, 9L, null));
+
+        verify(inspectionService, never()).saveInspectionOrder(any());
+    }
+
     private WmsInboundOrder order() {
         WmsInboundOrder order = new WmsInboundOrder();
         order.setInboundId(1L);
@@ -277,6 +421,51 @@ class WmsInboundOrderServiceImplTest {
         order.setAuditStatus(BusinessStatus.Document.SUBMITTED);
         order.setVersion(3);
         return order;
+    }
+
+    @Test
+    void productionInboundPairsItsReceiptWithTheExistingLineSideTransfer() {
+        stubProductionReceipt();
+        WmsStockMovement source = new WmsStockMovement();
+        source.setMaterialId(11L);
+        source.setBatchId(7L);
+        source.setQuantity(new BigDecimal("12.0000"));
+        when(movementMapper.selectOne(any())).thenReturn(source);
+        assertTrue(service.confirmInboundOrder(1L, 9L, null));
+        ArgumentCaptor<WmsStockMovement> receipt = ArgumentCaptor.forClass(WmsStockMovement.class);
+        verify(movementMapper).insert(receipt.capture());
+        assertEquals("LI-1-4", receipt.getValue().getPairNo());
+        assertEquals("IN", receipt.getValue().getDirection());
+        assertEquals(new BigDecimal("12.0000"), receipt.getValue().getQuantity());
+    }
+
+    @Test
+    void productionReceiptRejectsAMismatchedLineSideQuantity() {
+        stubProductionReceipt();
+        WmsStockMovement source = new WmsStockMovement();
+        source.setMaterialId(11L);
+        source.setBatchId(7L);
+        source.setQuantity(BigDecimal.ONE);
+        when(movementMapper.selectOne(any())).thenReturn(source);
+        assertThrows(BusinessException.class, () -> service.confirmInboundOrder(1L, 9L, null));
+        verify(movementMapper, never()).insert(any(WmsStockMovement.class));
+    }
+
+    private void stubProductionReceipt() {
+        WmsInboundOrder order = order();
+        order.setInboundType("PRODUCTION");
+        order.setSourceOrderType("PRODUCT_LOT");
+        order.setSourceOrderId(31L);
+        WmsMaterialBatch batch = batch(BusinessStatus.Quality.PASS, "AVAILABLE");
+        batch.setSourceProductLotId(31L);
+        when(orderMapper.selectOne(any())).thenReturn(order);
+        when(detailMapper.selectList(any())).thenReturn(List.of(detail()), List.of());
+        when(batchMapper.selectOne(any())).thenReturn(batch);
+        when(productLotMapper.selectOne(any())).thenReturn(productLot("12.0000", BusinessStatus.Quality.PASS));
+        when(productMapper.selectOne(any())).thenReturn(product());
+        when(inventoryMapper.selectOne(any())).thenReturn(null);
+        when(orderMapper.updateById(any(WmsInboundOrder.class))).thenReturn(1);
+        when(productLotMapper.updateById(any(TraceProductLot.class))).thenReturn(1);
     }
 
     private WmsInboundDetail detail() {

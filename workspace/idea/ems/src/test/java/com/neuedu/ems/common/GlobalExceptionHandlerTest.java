@@ -40,6 +40,27 @@ class GlobalExceptionHandlerTest {
     }
 
     @Test
+    void reportsDatabaseUnavailableInsteadOfGenericFailure() {
+        ResultData result = handler.handleMyBatisSystemException(new MyBatisSystemException(
+                "db down", new org.springframework.jdbc.CannotGetJdbcConnectionException("refused")));
+
+        assertEquals(ResultCode.FAILED.getCode(), result.get("code"));
+        String message = String.valueOf(((Map<?, ?>) result.get("data")).get("message"));
+        assertEquals(true, message.contains("数据库"));
+        assertEquals(true, message.contains("重试"));
+    }
+
+    @Test
+    void reportsDatabaseUnavailableOnCannotCreateTransaction() {
+        ResultData result = handler.handleConnectionUnavailable(
+                new org.springframework.transaction.CannotCreateTransactionException("no connection"), null);
+
+        String message = String.valueOf(((Map<?, ?>) result.get("data")).get("message"));
+        assertEquals(true, message.contains("数据库"));
+        assertEquals(true, message.contains("没有生效"));
+    }
+
+    @Test
     void returnsForbiddenForOutOfScopeData() {
         ResultData result = handler.handleDataScopeAccessDenied(new DataScopeAccessDeniedException());
 

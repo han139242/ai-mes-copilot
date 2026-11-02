@@ -1,173 +1,218 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import dayjs from 'dayjs'
-import { ElNotification } from 'element-plus'
-import AppIcon from '@/components/common/AppIcon.vue'
-import ThemeDrawer from '@/components/layout/ThemeDrawer.vue'
-import { clearAuth, getCurrentUser, isFrameworkPreview } from '@/utils/auth'
-import { firstAccessiblePath, getModuleDefinition, getNavigationItems } from '@/config/navigation'
-import { openAiAssistant } from '@/utils/app-events'
-import { activeTheme } from '@/utils/theme'
-import { getCurrentUserInfo, logout } from '@/api/auth'
-import {
-  getNotificationPage,
-  getNotificationUnreadCount,
-  markNotificationRead
-} from '@/api/sys/notification'
-import { setCurrentUser } from '@/utils/auth'
-import { hasPermission } from '@/utils/permission'
+import { appName } from '@/config/branding';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import dayjs from 'dayjs';
+import { ElNotification } from 'element-plus';
+import AppIcon from '@/components/common/AppIcon.vue';
+import ThemeDrawer from '@/components/layout/ThemeDrawer.vue';
+import { clearAuth, getCurrentUser, isFrameworkPreview } from '@/utils/auth';
+import { firstAccessiblePath, getModuleDefinition, getNavigationItems } from '@/config/navigation';
+import { openAiAssistant } from '@/utils/app-events';
+import { activeTheme } from '@/utils/theme';
+import { getCurrentUserInfo, logout } from '@/api/auth';
+import { getNotificationPage, getNotificationUnreadCount, markNotificationRead } from '@/api/sys/notification';
+import { alertStreamUrl, getAlertPending } from '@/api/ai/alert';
+import { setCurrentUser } from '@/utils/auth';
+import { hasPermission } from '@/utils/permission';
 
 // 顶部栏负责菜单开关、全局搜索、通知、全屏、主题和用户退出。
 defineProps({
-  mobile: { type: Boolean, default: false }
-})
+  mobile: { type: Boolean, default: false },
+});
 
 // toggle事件通知父布局切换桌面侧栏或移动端菜单。
-const emit = defineEmits(['toggle'])
-const route = useRoute()
-const router = useRouter()
-const searchOpen = ref(false)
-const searchKeyword = ref('')
-const themeOpen = ref(false)
-const notificationOpen = ref(false)
-const now = ref(dayjs())
-const currentUser = ref(getCurrentUser())
-const notificationSummary = ref({ total: 0, categories: {} })
-const recentNotifications = ref([])
-const notificationLoading = ref(false)
+const emit = defineEmits(['toggle']);
+const route = useRoute();
+const router = useRouter();
+const searchOpen = ref(false);
+const searchKeyword = ref('');
+const themeOpen = ref(false);
+const fullscreenActive = ref(Boolean(document.fullscreenElement));
+const fullscreenPending = ref(false);
+const fullscreenLabel = computed(() => (fullscreenActive.value ? '退出全屏' : '全屏'));
+const notificationOpen = ref(false);
+const now = ref(dayjs());
+const currentUser = ref(getCurrentUser());
+const notificationSummary = ref({ total: 0, categories: {} });
+const recentNotifications = ref([]);
+const notificationLoading = ref(false);
+// 预警中心未关闭数量，供顶栏独立角标显示；与消息中心的未读数是两套口径。
+const alertPending = ref({ open: 0, acknowledged: 0, critical: 0 });
 // 定时器和Element Plus通知实例不参与模板渲染，因此使用普通变量保存。
-let clockTimer
-let notificationTimer
-let urgentNotification
+let clockTimer;
+let notificationTimer;
+let urgentNotification;
+// 预警中心：长连接、重连定时器、当前弹窗实例与去重记录。
+let alertStream;
+let alertReconnectTimer;
+let alertReconnectDelay = 3000;
+let alertNotification;
+let alertPendingTimer;
+const alertSeen = new Map();
 
-const NOTIFICATION_INTERVAL = 60_000
+const NOTIFICATION_INTERVAL = 60_000;
 
 // 用户显示名称按真实姓名、昵称、用户名依次降级；computed会在用户信息更新后自动重算。
-const displayName = computed(() => currentUser.value.realName || currentUser.value.nickname || currentUser.value.username || 'MES 用户')
+const displayName = computed(
+  () => currentUser.value.realName || currentUser.value.nickname || currentUser.value.username || 'MES 用户',
+);
 // 用户头像没有图片时显示名称首字母。
-const displayInitial = computed(() => displayName.value.slice(0, 1).toUpperCase())
+const displayInitial = computed(() => displayName.value.slice(0, 1).toUpperCase());
 // 顶部栏日期和时间都从每30秒更新一次的now派生。
-const dateText = computed(() => now.value.format('YYYY.MM.DD'))
+const dateText = computed(() => now.value.format('YYYY.MM.DD'));
 // 格式化顶部栏当前时分。
-const timeText = computed(() => now.value.format('HH:mm'))
-const previewMode = isFrameworkPreview()
+const timeText = computed(() => now.value.format('HH:mm'));
+const previewMode = isFrameworkPreview();
 // 三个computed分别控制AI入口、通知入口和标记已读操作的权限。
-const canUseAi = computed(() => hasPermission('ai:assistant:use'))
+const canUseAi = computed(() => hasPermission('ai:assistant:use'));
 // 判断当前账号是否能看到通知入口和通知列表。
-const canViewNotifications = computed(() => hasPermission('sys:notification:view'))
+const canViewNotifications = computed(() => hasPermission('sys:notification:view'));
 // 判断当前账号是否能把通知标记为已读。
-const canReadNotifications = computed(() => hasPermission('sys:notification:read'))
+const canReadNotifications = computed(() => hasPermission('sys:notification:read'));
 // 将通知统计中的total规范化为数字，供角标显示。
-const unreadNotificationCount = computed(() => Number(notificationSummary.value.total || 0))
+const unreadNotificationCount = computed(() => Number(notificationSummary.value.total || 0));
+// 预警角标：未关闭 + 已确认待恢复，严重级别单独配色。
+const alertBadgeCount = computed(() => {
+  const openCount = Number(alertPending.value.open || 0);
+  const acknowledgedCount = Number(alertPending.value.acknowledged || 0);
+  return openCount + acknowledgedCount;
+});
+// 是否可以直接进入预警中心（与 AI 入口同一套权限）。
+const canViewAlerts = computed(() => hasPermission('ai:assistant:use'));
 
 // 面包屑标题通常来自路由meta，动态模块首页则从navigation配置中取标题。
 const breadcrumbTitle = computed(() => {
   if (route.name === 'ModuleHub') {
-    return getModuleDefinition(route.params.moduleKey).title
+    return getModuleDefinition(route.params.moduleKey).title;
   }
-  return route.meta.title || '首页'
-})
+  return route.meta.title || '首页';
+});
 
 // 根据关键词从当前用户可见菜单中筛选顶部全局搜索结果。
 const searchResults = computed(() => {
   // 未输入关键词时展示常用入口，输入后在当前账号可见菜单中搜索。
-  const keyword = searchKeyword.value.trim().toLowerCase()
-  const items = getNavigationItems()
+  const keyword = searchKeyword.value.trim().toLowerCase();
+  const items = getNavigationItems();
   if (!keyword) {
-    return items.slice(0, 7)
+    return items.slice(0, 7);
   }
-  return items.filter((item) => item.label.toLowerCase().includes(keyword)).slice(0, 8)
-})
+  return items.filter((item) => [item.label, item.description].some((value) =>
+    String(value || '').toLowerCase().includes(keyword),
+  )).slice(0, 8);
+});
 
 // 打开全局搜索对话框。
 function openSearch() {
-  searchOpen.value = true
+  searchOpen.value = true;
 }
 
 // 点击搜索结果后关闭搜索，并根据入口类型执行路由跳转或打开AI助手。
 async function navigateTo(item) {
-  searchOpen.value = false
-  searchKeyword.value = ''
+  searchOpen.value = false;
+  searchKeyword.value = '';
   if (item.action === 'ai') {
-    openAiAssistant()
+    openAiAssistant();
   } else if (item.path) {
-    await router.push(item.path)
+    await router.push(item.path);
   }
+}
+
+// 同步浏览器状态，按 Esc 退出时也更新按钮。
+function syncFullscreen() {
+  fullscreenActive.value = Boolean(document.fullscreenElement);
 }
 
 // 在浏览器普通模式和全屏模式之间切换。
 async function toggleFullscreen() {
-  // Fullscreen API是浏览器原生能力；可选链兼容不支持该API的环境。
-  if (!document.fullscreenElement) {
-    await document.documentElement.requestFullscreen?.()
-  } else {
-    await document.exitFullscreen?.()
+  if (fullscreenPending.value) {
+    return;
+  }
+  const exiting = Boolean(document.fullscreenElement);
+  const target = exiting ? document : document.documentElement;
+  const action = exiting ? document.exitFullscreen : document.documentElement.requestFullscreen;
+  if (typeof action !== 'function' || (!exiting && document.fullscreenEnabled === false)) {
+    ElNotification.warning({ title: '全屏提示', message: '当前浏览器环境不支持网页全屏，可尝试按 F11。' });
+    return;
+  }
+  fullscreenPending.value = true;
+  try {
+    await action.call(target);
+  } catch {
+    ElNotification.warning({
+      title: '全屏提示',
+      message: exiting ? '退出全屏失败，请按 Esc 后重试。' : '浏览器未允许进入全屏，请重新点击或按 F11。',
+    });
+  } finally {
+    syncFullscreen();
+    fullscreenPending.value = false;
   }
 }
 
 // 关闭当前Element Plus紧急通知实例，并清空引用。
 function closeUrgentNotification() {
-  urgentNotification?.close()
-  urgentNotification = undefined
+  urgentNotification?.close();
+  urgentNotification = undefined;
 }
 
 // 打开一条通知：必要时标记已读、安全跳转业务页，然后刷新未读统计。
 async function openNotification(item) {
   // 打开通知时先按权限标记已读，只允许跳转到经过校验的站内路由。
-  notificationOpen.value = false
-  closeUrgentNotification()
+  notificationOpen.value = false;
+  closeUrgentNotification();
   if (item?.readStatus === 'UNREAD' && canReadNotifications.value) {
-    await markNotificationRead(item.recipientId)
+    await markNotificationRead(item.recipientId);
   }
-  rememberUrgentNotification(item?.recipientId)
+  rememberUrgentNotification(item?.recipientId);
   if (isSafeNotificationRoute(item?.routePath)) {
-    await router.push(item.routePath)
+    await router.push(item.routePath);
   }
-  await loadNotifications()
+  await loadNotifications();
 }
 
 // 关闭通知下拉并进入完整消息中心页面。
 async function openNotificationCenter() {
-  notificationOpen.value = false
-  closeUrgentNotification()
-  await router.push('/notifications')
+  notificationOpen.value = false;
+  closeUrgentNotification();
+  await router.push('/notifications');
 }
 
 // 判断通知携带的地址是否为安全站内路由。
 function isSafeNotificationRoute(path) {
   // 禁止//开头的协议相对URL，避免通知数据把用户带到站外地址。
-  return typeof path === 'string' && path.startsWith('/') && !path.startsWith('//')
+  return typeof path === 'string' && path.startsWith('/') && !path.startsWith('//');
 }
 
 async function redirectIfCurrentRouteForbidden() {
-  const requiredPermission = route.meta.permission
-    || (route.name === 'ModuleHub' ? `module:${route.params.moduleKey}:view` : '')
+  const requiredPermission =
+    route.meta.permission || (route.name === 'ModuleHub' ? `module:${route.params.moduleKey}:view` : '');
   if (requiredPermission && !hasPermission(requiredPermission)) {
-    await router.replace(firstAccessiblePath('/forbidden'))
+    await router.replace(firstAccessiblePath('/forbidden'));
   }
 }
 
 // 按当前用户生成紧急通知去重所需的localStorage键。
 function urgentStorageKey() {
-  const identity = currentUser.value.userId || currentUser.value.username || 'unknown'
-  return `mes:urgent-notification:${identity}`
+  const identity = currentUser.value.userId || currentUser.value.username || 'unknown';
+  return `mes:urgent-notification:${identity}`;
 }
 
 // 读取该用户上一次已经弹出过的紧急通知ID。
 function storedUrgentNotification() {
   try {
-    return window.localStorage.getItem(urgentStorageKey()) || ''
+    return window.localStorage.getItem(urgentStorageKey()) || '';
   } catch {
-    return ''
+    return '';
   }
 }
 
 // 记录已经弹出的通知ID，防止每分钟轮询都重复提醒同一条消息。
 function rememberUrgentNotification(recipientId) {
-  if (!recipientId) return
+  if (!recipientId) {
+    return;
+  }
   try {
-    window.localStorage.setItem(urgentStorageKey(), String(recipientId))
+    window.localStorage.setItem(urgentStorageKey(), String(recipientId));
   } catch {
     // 浏览器禁用持久化时只影响跨标签页去重。
   }
@@ -176,8 +221,10 @@ function rememberUrgentNotification(recipientId) {
 // 使用Element Plus在右下角显示高优先级或严重通知。
 function showUrgentNotification(item) {
   // 高优先级通知使用Element Plus桌面弹窗，严重告警保持显示直到用户处理。
-  if (!item || route.path === item.routePath) return
-  closeUrgentNotification()
+  if (!item || route.path === item.routePath) {
+    return;
+  }
+  closeUrgentNotification();
   urgentNotification = ElNotification({
     title: item.title,
     message: item.summary || item.bizNo || '业务状态已更新',
@@ -185,51 +232,52 @@ function showUrgentNotification(item) {
     position: 'bottom-right',
     duration: item.severity === 'CRITICAL' ? 0 : 8000,
     offset: 18,
-    onClick: () => openNotification(item)
-  })
-  rememberUrgentNotification(item.recipientId)
+    onClick: () => openNotification(item),
+  });
+  rememberUrgentNotification(item.recipientId);
 }
 
 // 并行加载未读总数和最近6条通知，可选地触发紧急通知弹窗。
 async function loadNotifications({ notify = false } = {}) {
   // 未读总数与最近通知并行加载；notify=true时额外检查是否弹出高优先级提醒。
   if (previewMode || !canViewNotifications.value || notificationLoading.value) {
-    return
+    return;
   }
-  notificationLoading.value = true
+  notificationLoading.value = true;
   try {
     const [countResult, pageResult] = await Promise.all([
-      getNotificationUnreadCount(),
-      getNotificationPage({ current: 1, size: 6, readStatus: 'UNREAD' })
-    ])
+      // 轮询静默失败：后端短暂不可达时保留上一次角标，不弹提示。
+      getNotificationUnreadCount({ suppressErrorMessage: true }),
+      getNotificationPage({ current: 1, size: 6, readStatus: 'UNREAD' }, { suppressErrorMessage: true }),
+    ]);
     notificationSummary.value = {
       total: Number(countResult?.data?.total || 0),
-      categories: countResult?.data?.categories || {}
-    }
-    recentNotifications.value = pageResult?.data?.records || []
+      categories: countResult?.data?.categories || {},
+    };
+    recentNotifications.value = pageResult?.data?.records || [];
     if (!unreadNotificationCount.value) {
-      closeUrgentNotification()
+      closeUrgentNotification();
     } else if (notify) {
-      const urgent = recentNotifications.value.find((item) => ['HIGH', 'CRITICAL'].includes(item.severity))
+      const urgent = recentNotifications.value.find((item) => ['HIGH', 'CRITICAL'].includes(item.severity));
       if (urgent && String(urgent.recipientId) !== storedUrgentNotification()) {
-        showUrgentNotification(urgent)
+        showUrgentNotification(urgent);
       }
     }
   } catch {
     // 请求层统一展示错误，保留上一次成功的未读数量。
   } finally {
-    notificationLoading.value = false
+    notificationLoading.value = false;
   }
 }
 
 // 将通知业务分类编码转换成中文名称。
 function categoryLabel(value) {
-  return { SYSTEM: '系统', MFG: '生产', PLAN: '计划', QMS: '质量', WMS: '仓储', EAM: '设备' }[value] || '业务'
+  return { SYSTEM: '系统', MFG: '生产', PLAN: '计划', QMS: '质量', WMS: '仓储', EAM: '设备' }[value] || '业务';
 }
 
 // 将通知创建时间格式化为月日和时分。
 function notificationTime(value) {
-  return value ? dayjs(value).format('MM-DD HH:mm') : '--'
+  return value ? dayjs(value).format('MM-DD HH:mm') : '--';
 }
 
 // 处理用户菜单命令，目前logout会调用后端退出并无条件清理本地认证状态。
@@ -237,56 +285,219 @@ async function handleCommand(command) {
   // 退出时无论后端logout是否成功都清理本地Token，避免用户继续停留在受保护页面。
   if (command === 'logout') {
     try {
-      if (!previewMode) await logout()
+      if (!previewMode) {
+        await logout();
+      }
     } catch {
       // 本地登录态仍需清理，请求层已经展示服务端错误。
     } finally {
-      clearAuth()
-      await router.replace('/login')
+      clearAuth();
+      await router.replace('/login');
     }
   }
+}
+
+// ======================================================================
+// 预警中心：SSE 长连接 + 全局弹窗
+// ======================================================================
+
+// 预警角标数据来自独立接口，与消息中心的未读数互不影响。
+async function loadAlertPending() {
+  if (previewMode || !canViewAlerts.value) {
+    return;
+  }
+  try {
+    const result = await getAlertPending();
+    alertPending.value = result?.data || { open: 0, acknowledged: 0, critical: 0 };
+  } catch {
+    // 预警接口不可用时保持上一次数字，不打断顶部栏。
+  }
+}
+
+function closeAlertNotification() {
+  alertNotification?.close();
+  alertNotification = undefined;
+}
+
+// 同一条预警在短时间内可能被多次推送（升级、重复命中），按 alertId + 状态去重。
+function alertDedupeKey(payload) {
+  return `${payload?.alertId || ''}:${payload?.status || ''}:${payload?.severity || ''}:${payload?.occurrenceCount || 1}`;
+}
+
+function rememberAlert(key) {
+  if (!key) {
+    return;
+  }
+  alertSeen.set(key, Date.now());
+  // 只保留最近 200 条，避免长时间挂机把内存撑大。
+  if (alertSeen.size > 200) {
+    const oldest = [...alertSeen.entries()].sort((a, b) => a[1] - b[1]).slice(0, 60);
+    oldest.forEach(([item]) => alertSeen.delete(item));
+  }
+}
+
+// 全局弹窗：严重级常驻直到处理，预警级 12 秒后自动消失，点击直达业务页。
+function showAlertNotification(payload) {
+  if (!payload) {
+    return;
+  }
+  const key = alertDedupeKey(payload);
+  if (alertSeen.has(key)) {
+    return;
+  }
+  rememberAlert(key);
+  const critical = payload.severity === 'CRITICAL';
+  const recovered = payload.status === 'CLOSED';
+  // 弹窗样式与停留时长按「已恢复 / 严重 / 一般」三档决定，避免嵌套三元。
+  let notifyType = 'warning';
+  let notifyDuration = 12000;
+  if (recovered) {
+    notifyType = 'success';
+    notifyDuration = 6000;
+  } else if (critical) {
+    notifyType = 'error';
+    notifyDuration = 0;
+  }
+  closeAlertNotification();
+  alertNotification = ElNotification({
+    title: recovered ? `已恢复：${payload.title || '指标回到限度内'}` : payload.title || '生产预警',
+    dangerouslyUseHTMLString: false,
+    message: payload.summary || '指标已越过设定限度',
+    type: notifyType,
+    position: 'bottom-right',
+    duration: notifyDuration,
+    offset: 18,
+    customClass: 'alert-notification',
+    onClick: () => {
+      if (payload.routePath && isSafeNotificationRoute(payload.routePath)) {
+        router.push(payload.routePath);
+      } else {
+        router.push('/ai/alert');
+      }
+      closeAlertNotification();
+    }
+  });
+  loadAlertPending();
+}
+
+// 建立 SSE 长连接；浏览器断线后按指数退避重连，最长 60 秒一次。
+function connectAlertStream() {
+  if (previewMode) {
+    return;
+  }
+  if (!canViewAlerts.value) {
+    return;
+  }
+  if (typeof window === 'undefined' || !window.EventSource) {
+    return;
+  }
+  disconnectAlertStream();
+  const url = alertStreamUrl();
+  if (!url) {
+    return;
+  }
+  try {
+    alertStream = new window.EventSource(url);
+  } catch {
+    scheduleAlertReconnect();
+    return;
+  }
+  alertStream.addEventListener('connected', () => {
+    // 连接建立后把退避重置，避免一次抖动后长期用慢间隔。
+    alertReconnectDelay = 3000;
+    loadAlertPending();
+  });
+  alertStream.addEventListener('alert', (event) => {
+    try {
+      showAlertNotification(JSON.parse(event.data));
+    } catch {
+      // 报文异常时忽略这一条，不影响后续推送。
+    }
+  });
+  alertStream.onerror = () => {
+    // EventSource 会自动重连，但服务端重启后旧连接可能一直失败，这里主动接管重连节奏。
+    scheduleAlertReconnect();
+  };
+}
+
+function disconnectAlertStream() {
+  if (alertStream) {
+    alertStream.close();
+    alertStream = undefined;
+  }
+  if (alertReconnectTimer) {
+    window.clearTimeout(alertReconnectTimer);
+    alertReconnectTimer = undefined;
+  }
+}
+
+function scheduleAlertReconnect() {
+  if (alertReconnectTimer) {
+    return;
+  }
+  disconnectAlertStream();
+  alertReconnectTimer = window.setTimeout(() => {
+    alertReconnectTimer = undefined;
+    connectAlertStream();
+  }, alertReconnectDelay);
+  alertReconnectDelay = Math.min(alertReconnectDelay * 2, 60000);
 }
 
 // 处理全局Ctrl/Cmd+K快捷键并阻止浏览器默认行为。
 function handleShortcut(event) {
   // Ctrl/Cmd + K打开全局菜单搜索。
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
-    event.preventDefault()
-    openSearch()
+    event.preventDefault();
+    openSearch();
   }
 }
 
 // 挂载后刷新用户、首次加载通知，并启动时钟和通知轮询。
 onMounted(async () => {
+  syncFullscreen();
+  document.addEventListener('fullscreenchange', syncFullscreen);
   // 进入后台后刷新当前用户信息，并启动时钟和通知轮询。
   if (!previewMode) {
     try {
-      const result = await getCurrentUserInfo()
-      currentUser.value = result.data || {}
-      setCurrentUser(currentUser.value)
-      await redirectIfCurrentRouteForbidden()
+      const result = await getCurrentUserInfo();
+      currentUser.value = result.data || {};
+      setCurrentUser(currentUser.value);
+      await redirectIfCurrentRouteForbidden();
     } catch {
       // 请求层负责处理失效登录；其他错误下继续使用本地用户信息。
     }
   }
-  await loadNotifications({ notify: true })
+  await loadNotifications({ notify: true });
   clockTimer = window.setInterval(() => {
-    now.value = dayjs()
-  }, 30000)
+    now.value = dayjs();
+  }, 30000);
   if (!previewMode && canViewNotifications.value) {
-    notificationTimer = window.setInterval(() => loadNotifications({ notify: true }), NOTIFICATION_INTERVAL)
+    notificationTimer = window.setInterval(() => loadNotifications({ notify: true }), NOTIFICATION_INTERVAL);
   }
-  window.addEventListener('keydown', handleShortcut)
-})
+  // 预警角标每 60 秒兜底刷新一次；实时弹窗走 SSE，不依赖这个轮询。
+  await loadAlertPending();
+  connectAlertStream();
+  alertPendingTimer = window.setInterval(() => {
+    if (document.hidden) {
+      return;
+    }
+    loadAlertPending();
+  }, NOTIFICATION_INTERVAL);
+  window.addEventListener('keydown', handleShortcut);
+});
 
 // 卸载前释放定时器、通知实例和键盘事件。
 onBeforeUnmount(() => {
+  document.removeEventListener('fullscreenchange', syncFullscreen);
   // 布局销毁时清除定时器、通知实例和键盘监听。
-  window.clearInterval(clockTimer)
-  window.clearInterval(notificationTimer)
-  closeUrgentNotification()
-  window.removeEventListener('keydown', handleShortcut)
-})
+  window.clearInterval(clockTimer);
+  window.clearInterval(notificationTimer);
+  window.clearInterval(alertPendingTimer);
+  closeUrgentNotification();
+  closeAlertNotification();
+  disconnectAlertStream();
+  window.removeEventListener('keydown', handleShortcut);
+});
 </script>
 
 <template>
@@ -300,7 +511,7 @@ onBeforeUnmount(() => {
       </el-tooltip>
 
       <div class="breadcrumb">
-        <span>羽球智造</span>
+        <span>{{ appName }}</span>
         <AppIcon name="right" :size="14" />
         <strong>{{ breadcrumbTitle }}</strong>
       </div>
@@ -317,8 +528,15 @@ onBeforeUnmount(() => {
         <span>{{ dateText }}</span>
       </div>
 
-      <el-tooltip content="全屏" placement="bottom">
-        <el-button class="header-icon-button hide-mobile" text aria-label="全屏" @click="toggleFullscreen">
+      <el-tooltip :content="fullscreenLabel" placement="bottom">
+        <el-button
+          class="header-icon-button hide-mobile"
+          text
+          :aria-label="fullscreenLabel"
+          :aria-pressed="fullscreenActive"
+          :disabled="fullscreenPending"
+          @click="toggleFullscreen"
+        >
           <AppIcon name="fullscreen" :size="18" />
         </el-button>
       </el-tooltip>
@@ -381,6 +599,20 @@ onBeforeUnmount(() => {
         </div>
       </el-popover>
 
+      <el-tooltip v-if="canViewAlerts" content="预警中心" placement="bottom">
+        <el-badge
+          class="notification-badge"
+          :value="alertBadgeCount"
+          :max="99"
+          :hidden="alertBadgeCount === 0"
+          :type="alertPending.critical > 0 ? 'danger' : 'warning'"
+        >
+          <el-button class="header-icon-button" text aria-label="预警中心" @click="router.push('/ai/alert')">
+            <AppIcon name="alert" :size="18" />
+          </el-button>
+        </el-badge>
+      </el-tooltip>
+
       <el-tooltip v-if="canUseAi" content="AI 工作台" placement="bottom">
         <el-button class="header-icon-button" text aria-label="AI 工作台" @click="openAiAssistant">
           <AppIcon name="bot" :size="18" />
@@ -412,12 +644,7 @@ onBeforeUnmount(() => {
         <template #prefix><AppIcon name="search" :size="18" /></template>
       </el-input>
       <div class="search-results">
-        <button
-          v-for="item in searchResults"
-          :key="item.path || item.action"
-          type="button"
-          @click="navigateTo(item)"
-        >
+        <button v-for="item in searchResults" :key="item.path || item.action" type="button" @click="navigateTo(item)">
           <span class="search-result-icon"><AppIcon :name="item.icon" :size="18" /></span>
           <span>{{ item.label }}</span>
           <AppIcon name="right" :size="15" />
@@ -446,7 +673,6 @@ onBeforeUnmount(() => {
   color: var(--mes-header-text);
   border-bottom: 1px solid var(--mes-header-border);
   background: var(--mes-header-bg);
-  box-shadow: 0 2px 10px rgb(32 42 54 / 10%);
 }
 
 .header-left,
@@ -490,28 +716,28 @@ onBeforeUnmount(() => {
 .breadcrumb strong {
   overflow: hidden;
   color: var(--mes-header-text);
-  font-size: 14px;
-  font-weight: 620;
+  font-size: 13.5px;
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .global-search {
   width: 172px;
-  height: 36px;
+  height: 32px;
   gap: 8px;
-  padding: 0 12px;
+  padding: 0 10px;
   color: var(--mes-header-control-text);
-  border: 1px solid rgb(255 255 255 / 34%);
-  border-radius: var(--mes-radius-sm);
+  border: 1px solid var(--mes-header-border);
+  border-radius: 6px;
   background: var(--mes-header-control-bg);
   cursor: pointer;
 }
 
 .global-search:hover {
-  color: var(--mes-primary);
-  border-color: rgb(255 255 255 / 72%);
-  background: var(--mes-surface);
+  color: var(--mes-header-text);
+  border-color: rgb(255 255 255 / 22%);
+  background: rgb(255 255 255 / 10%);
 }
 
 .global-search span {
@@ -555,17 +781,17 @@ onBeforeUnmount(() => {
 
 .user-avatar {
   display: inline-flex;
-  width: 32px;
-  height: 32px;
+  width: 30px;
+  height: 30px;
   flex: none;
   align-items: center;
   justify-content: center;
-  color: #fff;
-  border: 1px solid rgb(255 255 255 / 66%);
+  color: #e2e8f0;
+  border: 1px solid rgb(255 255 255 / 16%);
   border-radius: 50%;
-  background: rgb(255 255 255 / 15%);
-  font-size: 12px;
-  font-weight: 700;
+  background: rgb(255 255 255 / 8%);
+  font-size: 11.5px;
+  font-weight: 500;
 }
 
 .user-copy {
@@ -580,8 +806,8 @@ onBeforeUnmount(() => {
 .user-copy strong {
   max-width: 78px;
   overflow: hidden;
-  font-size: 13px;
-  font-weight: 650;
+  font-size: 12.5px;
+  font-weight: 500;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

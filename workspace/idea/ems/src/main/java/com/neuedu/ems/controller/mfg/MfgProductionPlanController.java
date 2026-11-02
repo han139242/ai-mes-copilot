@@ -34,6 +34,9 @@ public class MfgProductionPlanController {
     private MfgProductionPlanService mfgProductionPlanService;
 
     @Autowired
+    private com.neuedu.ems.service.mfg.ResourceConflictService resourceConflictService;
+
+    @Autowired
     private ExcelExportUtil excelExportUtil;
 
     /**
@@ -66,6 +69,24 @@ public class MfgProductionPlanController {
     public ResultData getPlan(@PathVariable("planId") Long planId) {
         MfgProductionPlan plan = mfgProductionPlanService.getPlanById(planId);
         return ResultData.success(ResultCode.SUCCESS, plan);
+    }
+
+    /**
+     * 跨层资源冲突检查：组件计划晚于父工单开工、同线时段重叠。
+     *
+     * <p>只识别并解释，不改任何计划；是否调整时间由计划员决定。</p>
+     *
+     * @param from 窗口开始时间（ISO，可空）
+     * @param to   窗口结束时间（ISO，可空）
+     */
+    @GetMapping("/conflicts")
+    public ResultData conflicts(@RequestParam(required = false)
+                                @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME)
+                                java.time.LocalDateTime from,
+                                @RequestParam(required = false)
+                                @org.springframework.format.annotation.DateTimeFormat(iso = org.springframework.format.annotation.DateTimeFormat.ISO.DATE_TIME)
+                                java.time.LocalDateTime to) {
+        return ResultData.success(ResultCode.SUCCESS, resourceConflictService.scan(from, to));
     }
 
     /**

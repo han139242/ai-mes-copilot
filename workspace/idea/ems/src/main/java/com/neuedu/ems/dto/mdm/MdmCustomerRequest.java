@@ -10,6 +10,7 @@ public class MdmCustomerRequest {
     private Long customerId;
     private String customerCode;
     private String customerName;
+    private String numberPrefix;
     private String contactName;
     private String contactPhone;
     private String status;

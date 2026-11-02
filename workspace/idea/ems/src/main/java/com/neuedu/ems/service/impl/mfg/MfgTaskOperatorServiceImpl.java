@@ -219,7 +219,7 @@ public class MfgTaskOperatorServiceImpl extends ServiceImpl<MfgTaskOperatorMappe
     }
 
     private String displayEmployee(MfgTaskOperator operator) {
-        return List.of(operator.getEmployeeName(), operator.getEmployeeNo(), operator.getUsername()).stream()
+        return java.util.stream.Stream.of(operator.getEmployeeName(), operator.getEmployeeNo(), operator.getUsername())
                 .filter(StringUtils::hasText)
                 .collect(Collectors.joining(" / "));
     }

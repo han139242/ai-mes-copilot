@@ -10,6 +10,13 @@ class PermissionCodeResolverTest {
     private final PermissionCodeResolver resolver = new PermissionCodeResolver();
 
     @Test
+    void separatesSalesConfirmationAndScheduleReleaseFromGenericUpdate() {
+        assertEquals("wms:sales-outbound:confirm", resolver.resolve("PUT", "/api/wms/sales-outbound/7/confirm").orElseThrow());
+        assertEquals("wms:sales-outbound:inspection", resolver.resolve("POST", "/api/wms/sales-outbound/7/inspection").orElseThrow());
+        assertEquals("org:team-schedule:release", resolver.resolve("PUT", "/api/org/team-schedule/7/release").orElseThrow());
+    }
+
+    @Test
     void resolvesGenericCrudAndExportPermissions() {
         assertEquals("sys:user:view", resolver.resolve("GET", "/api/sys/user/page").orElseThrow());
         assertEquals("mdm:product:create", resolver.resolve("POST", "/api/mdm/product").orElseThrow());
@@ -22,6 +29,8 @@ class PermissionCodeResolverTest {
 
     @Test
     void resolvesHighRiskActionsBeforeGenericMethodMapping() {
+        assertEquals("mfg:dispatch-order:generate",
+                resolver.resolve("GET", "/api/mfg/dispatch-order/preview/7").orElseThrow());
         assertEquals("sys:role:assign-menu",
                 resolver.resolve("PUT", "/api/sys/role/3/menus").orElseThrow());
         assertEquals("sys:notification:read",
@@ -36,6 +45,8 @@ class PermissionCodeResolverTest {
                 resolver.resolve("PUT", "/api/mfg/task/12/start").orElseThrow());
         assertEquals("wms:outbound-order:confirm",
                 resolver.resolve("PUT", "/api/wms/outbound-order/9/confirm").orElseThrow());
+        assertEquals("wms:outbound-order:confirm",
+                resolver.resolve("PUT", "/api/wms/outbound-order/9/transfer-to-line-side").orElseThrow());
         assertEquals("wms:inbound-order:create",
                 resolver.resolve("POST", "/api/wms/inbound-order/generate-production/31").orElseThrow());
         assertEquals("qms:inspection-result:batch-save",
@@ -84,6 +95,8 @@ class PermissionCodeResolverTest {
                 resolver.resolve("POST", "/api/mfg/work-order/generate/6").orElseThrow());
         assertEquals("mfg:work-order:material-issue",
                 resolver.resolve("POST", "/api/mfg/work-order/6/generate-material-issue").orElseThrow());
+        assertEquals("mfg:work-order:material-issue",
+                resolver.resolve("PUT", "/api/mfg/work-order/6/sync-component-handover").orElseThrow());
         assertEquals("mfg:work-order:release",
                 resolver.resolve("PUT", "/api/mfg/work-order/6/release").orElseThrow());
         assertEquals("mfg:dispatch-order:generate",
@@ -125,5 +138,11 @@ class PermissionCodeResolverTest {
         assertTrue(resolver.isPermissionExempt("/api/auth/info"));
         assertTrue(resolver.resolve("GET", "/api/unknown/resource").isEmpty());
         assertTrue(resolver.resolve("HEAD", "/api/sys/user/page").isEmpty());
+    }
+
+    @Test
+    void pieceInspectionUsesSubmitPermission() {
+        assertEquals("qms:inspection-order:submit",resolver.resolve("PUT","/api/qms/inspection-order/7/submit-piece").orElseThrow());
+        assertEquals("qms:inspection-order:view",resolver.resolve("GET","/api/qms/inspection-order/7/piece-results").orElseThrow());
     }
 }

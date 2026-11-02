@@ -9,6 +9,7 @@ import com.neuedu.ems.entity.mfg.MfgTask;
 import com.neuedu.ems.entity.mfg.MfgWorkOrder;
 import com.neuedu.ems.entity.mfg.MfgWorkReport;
 import com.neuedu.ems.entity.process.ProcessOperation;
+import com.neuedu.ems.entity.process.ProcessRouteItem;
 import com.neuedu.ems.entity.qms.QmsInspectionOrder;
 import com.neuedu.ems.entity.wms.WmsReplenishmentSuggestion;
 import com.neuedu.ems.mapper.eam.EamEquipmentMapper;
@@ -17,6 +18,7 @@ import com.neuedu.ems.mapper.mfg.MfgTaskMapper;
 import com.neuedu.ems.mapper.mfg.MfgWorkOrderMapper;
 import com.neuedu.ems.mapper.mfg.MfgWorkReportMapper;
 import com.neuedu.ems.mapper.process.ProcessOperationMapper;
+import com.neuedu.ems.mapper.process.ProcessRouteItemMapper;
 import com.neuedu.ems.mapper.qms.QmsInspectionOrderMapper;
 import com.neuedu.ems.mapper.wms.WmsReplenishmentSuggestionMapper;
 import com.neuedu.ems.service.dashboard.DashboardService;
@@ -42,7 +44,11 @@ import java.util.stream.Collectors;
 @Service
 public class DashboardServiceImpl implements DashboardService {
 
-    private static final String FINAL_OUTPUT_OPERATION_CODE = "OP-PACK";
+    /**
+     * 最终包装工序编码。历史羽毛球场景用 OP-PACK，台灯场景改成带产品前缀的 LAMP-OP-PACK，
+     * 这里按候选值依次匹配，避免换产品后看板产量恒为 0。
+     */
+    private static final List<String> FINAL_OUTPUT_OPERATION_CODES = List.of("LAMP-OP-PACK", "OP-PACK");
 
     @Autowired
     private MfgProductionOrderMapper mfgProductionOrderMapper;
@@ -58,6 +64,9 @@ public class DashboardServiceImpl implements DashboardService {
 
     @Autowired
     private ProcessOperationMapper processOperationMapper;
+
+    @Autowired
+    private ProcessRouteItemMapper processRouteItemMapper;
 
     @Autowired
     private WmsReplenishmentSuggestionMapper wmsReplenishmentSuggestionMapper;
@@ -143,9 +152,11 @@ public class DashboardServiceImpl implements DashboardService {
         LocalDateTime start = normalizeStart(beginDate, endDate);
         LocalDateTime end = normalizeEnd(beginDate, endDate);
         LambdaQueryWrapper<QmsInspectionOrder> queryWrapper = new LambdaQueryWrapper<>();
+        // 检验单的业务时间优先取检验完成时刻，没完成的退回建单时刻，最后才用更新时刻。
+        // 只按 created_time 过滤会把历史导入的检验单全部漏掉：那批单据是直接写库来的，
+        // 创建时间留空，检验时间却是真实的，看板质量概况就会少算一大截。
         queryWrapper.eq(QmsInspectionOrder::getDeletedFlag, 0)
-                .ge(QmsInspectionOrder::getCreatedTime, start)
-                .le(QmsInspectionOrder::getCreatedTime, end);
+                .apply("COALESCE(inspection_time, created_time, updated_time) BETWEEN {0} AND {1}", start, end);
         List<QmsInspectionOrder> orders = qmsInspectionOrderMapper.selectList(queryWrapper);
         long inspectionCount = orders.size();
         long qualifiedCount = orders.stream()
@@ -184,6 +195,8 @@ public class DashboardServiceImpl implements DashboardService {
         result.put("fault", countEquipmentByStatus(BusinessStatus.Equipment.FAULT));
         result.put("maintenance", countEquipmentByStatuses(
                 BusinessStatus.Equipment.MAINTAINING, BusinessStatus.Equipment.REPAIRING));
+        // 修好待复用的设备既不算运行也不算保养，单列一栏，否则设备总数对不上台账。
+        result.put("repaired", countEquipmentByStatus(BusinessStatus.Equipment.REPAIRED));
         return result;
     }
 
@@ -274,18 +287,36 @@ public class DashboardServiceImpl implements DashboardService {
      * @return 最终产出报工
      */
     private List<MfgWorkReport> listApprovedFinalOutputReports(LocalDateTime start, LocalDateTime end) {
+        // 最终产出工序 = 各工艺路线中序号最大的那道工序，另外兼容历史固定编码 OP-PACK。
+        // 只按固定编码查会在换产品后取不到任何工序，看板产量会恒为 0。
+        List<Long> operationIds = new ArrayList<>();
+        LambdaQueryWrapper<ProcessRouteItem> itemQuery = new LambdaQueryWrapper<>();
+        itemQuery.eq(ProcessRouteItem::getDeletedFlag, 0)
+                .orderByAsc(ProcessRouteItem::getRouteId)
+                .orderByDesc(ProcessRouteItem::getSequenceNo);
+        Map<Long, Long> lastOperationByRoute = new LinkedHashMap<>();
+        for (ProcessRouteItem item : processRouteItemMapper.selectList(itemQuery)) {
+            if (item.getOperationId() != null && !lastOperationByRoute.containsKey(item.getRouteId())) {
+                lastOperationByRoute.put(item.getRouteId(), item.getOperationId());
+            }
+        }
+        operationIds.addAll(lastOperationByRoute.values());
+
         LambdaQueryWrapper<ProcessOperation> operationQuery = new LambdaQueryWrapper<>();
         operationQuery.eq(ProcessOperation::getDeletedFlag, 0)
-                .eq(ProcessOperation::getOperationCode, FINAL_OUTPUT_OPERATION_CODE)
-                .last("LIMIT 1");
-        ProcessOperation finalOperation = processOperationMapper.selectOne(operationQuery);
-        if (finalOperation == null) {
+                .in(ProcessOperation::getOperationCode, FINAL_OUTPUT_OPERATION_CODES);
+        for (ProcessOperation operation : processOperationMapper.selectList(operationQuery)) {
+            if (!operationIds.contains(operation.getOperationId())) {
+                operationIds.add(operation.getOperationId());
+            }
+        }
+        if (operationIds.isEmpty()) {
             return List.of();
         }
 
         LambdaQueryWrapper<MfgTask> taskQuery = new LambdaQueryWrapper<>();
         taskQuery.eq(MfgTask::getDeletedFlag, 0)
-                .eq(MfgTask::getOperationId, finalOperation.getOperationId());
+                .in(MfgTask::getOperationId, operationIds);
         List<Long> taskIds = mfgTaskMapper.selectList(taskQuery).stream()
                 .map(MfgTask::getTaskId)
                 .toList();

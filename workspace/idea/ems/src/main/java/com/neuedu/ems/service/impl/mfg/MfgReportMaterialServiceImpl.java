@@ -96,6 +96,22 @@ public class MfgReportMaterialServiceImpl extends ServiceImpl<MfgReportMaterialM
      */
     @Override
     public boolean updateReportMaterial(MfgReportMaterial reportMaterial) {
+        if (!canUpdateReportMaterial(reportMaterial)) {
+            return false;
+        }
+        MfgReportMaterial existing = getReportMaterialById(reportMaterial.getId());
+        fillMissingQuantities(reportMaterial, existing);
+        prepareReportMaterial(reportMaterial);
+        reportMaterial.setDeletedFlag(null);
+        return baseMapper.updateById(reportMaterial) > 0;
+    }
+
+    /**
+     * 判断报工用料是否允许更新：主键必填、原报工单可改、且不允许改挂到其他报工单。
+     * @param reportMaterial 请求中的报工用料
+     * @return 是否允许更新
+     */
+    private boolean canUpdateReportMaterial(MfgReportMaterial reportMaterial) {
         if (reportMaterial.getId() == null) {
             return false;
         }
@@ -103,13 +119,7 @@ public class MfgReportMaterialServiceImpl extends ServiceImpl<MfgReportMaterialM
         if (existing == null || !canChangeReport(existing.getReportId())) {
             return false;
         }
-        if (reportMaterial.getReportId() != null && !canChangeReport(reportMaterial.getReportId())) {
-            return false;
-        }
-        fillMissingQuantities(reportMaterial, existing);
-        prepareReportMaterial(reportMaterial);
-        reportMaterial.setDeletedFlag(null);
-        return baseMapper.updateById(reportMaterial) > 0;
+        return reportMaterial.getReportId() == null || canChangeReport(reportMaterial.getReportId());
     }
 
     /**
@@ -167,6 +177,7 @@ public class MfgReportMaterialServiceImpl extends ServiceImpl<MfgReportMaterialM
      * @param reportMaterial 报工用料实体
      */
     private void prepareReportMaterial(MfgReportMaterial reportMaterial) {
+        com.neuedu.ems.service.mfg.ReportMaterialQuantities.normalize(reportMaterial);
         if (reportMaterial.getUsedQuantity() == null) {
             reportMaterial.setUsedQuantity(BigDecimal.ZERO);
         }
@@ -184,7 +195,7 @@ public class MfgReportMaterialServiceImpl extends ServiceImpl<MfgReportMaterialM
      * @param existing 数据库中已有的报工用料实体
      */
     private void fillMissingQuantities(MfgReportMaterial reportMaterial, MfgReportMaterial existing) {
-        if (reportMaterial.getUsedQuantity() == null) {
+        if (reportMaterial.getUsedQuantity() == null && !reportMaterial.hasDeclaredTotalUsedQuantity()) {
             reportMaterial.setUsedQuantity(existing.getUsedQuantity());
         }
         if (reportMaterial.getScrapQuantity() == null) {

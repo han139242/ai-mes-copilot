@@ -62,6 +62,7 @@ class MfgManualScheduleCandidateCacheTest {
     @BeforeEach
     void setUp() {
         service = new MfgScheduleScenarioServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
         scenarioMapper = mock(MfgScheduleScenarioMapper.class);
         itemMapper = mock(MfgScheduleItemMapper.class);
         MfgProductionOrderMapper orderMapper = mock(MfgProductionOrderMapper.class);
@@ -175,21 +176,28 @@ class MfgManualScheduleCandidateCacheTest {
 
     @Test
     void placesCandidateAfterExistingProductionPlanOnSameLine() {
-        LocalDate today = LocalDate.now();
+        // 固定到下一个同星期几：最早开始时间已经不早于"现在"，用当天会随执行时刻漂移
+        // （当天班次结束后要等到下一个有班次的同星期几）。
+        LocalDate planDate = LocalDate.now().plusWeeks(1);
         MfgProductionPlan plan = new MfgProductionPlan();
         plan.setLineId(601L);
         plan.setStatus("RELEASED");
-        plan.setPlannedStartTime(today.atTime(8, 0));
-        plan.setPlannedEndTime(today.atTime(10, 0));
+        plan.setPlannedStartTime(planDate.atTime(8, 0));
+        plan.setPlannedEndTime(planDate.atTime(10, 0));
         when(planMapper.selectList(any())).thenReturn(List.of(plan));
 
         ManualScheduleCandidateLine candidate = service.listEligibleLines(101L, 201L).getFirst();
 
-        assertEquals(today.atTime(10, 0), candidate.getEarliestStartTime());
+        assertEquals(planDate.atTime(10, 0), candidate.getEarliestStartTime());
     }
 
     @Test
     void returnsWorkingMinutesWithoutCountingNonWorkingTime() {
+        // 使用完整的未来班次，避免在午间等运行时刻被当天剩余产能和秒级取整影响。
+        MfgScheduleScenario future = scenarioMapper.selectOne(new com.baomidou.mybatisplus.core.conditions.query.QueryWrapper<>());
+        future.setHorizonStart(LocalDate.now().plusWeeks(1).atStartOfDay());
+        future.setHorizonEnd(LocalDate.now().plusDays(30).atTime(23, 59, 59));
+        when(scenarioMapper.selectOne(any())).thenReturn(future);
         ManualScheduleCandidateLine candidate = service.listEligibleLines(101L, 201L).getFirst();
 
         assertEquals(6L, candidate.getMinimumWorkingMinutes());
@@ -243,6 +251,8 @@ class MfgManualScheduleCandidateCacheTest {
         when(itemMapper.selectOne(any())).thenReturn(removed);
         when(itemMapper.update(any(), any())).thenReturn(1);
         assertEquals(1, service.listEligibleLines(101L, 201L).size());
+        // 复用旧明细时按 scenario + order 拉全部明细（含已删除）逐个判断是否失效
+        when(itemMapper.selectList(any())).thenReturn(List.of(removed));
 
         MfgScheduleItem result = service.addManualItem(101L, 0, 201L, 601L, 1L);
 

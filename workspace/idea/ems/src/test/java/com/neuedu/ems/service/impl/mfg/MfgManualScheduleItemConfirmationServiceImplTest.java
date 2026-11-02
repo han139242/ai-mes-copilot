@@ -36,6 +36,7 @@ import java.time.LocalTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -55,6 +56,7 @@ class MfgManualScheduleItemConfirmationServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new MfgScheduleScenarioServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
         scenarioMapper = mock(MfgScheduleScenarioMapper.class);
         itemMapper = mock(MfgScheduleItemMapper.class);
         orderMapper = mock(MfgProductionOrderMapper.class);
@@ -138,6 +140,27 @@ class MfgManualScheduleItemConfirmationServiceImplTest {
         assertEquals(501L, result.getPlanId());
         assertEquals("CONFIRMED", itemCaptor.getValue().getStatus());
         assertEquals(501L, itemCaptor.getValue().getPlanId());
+    }
+
+    @Test
+    void dailyNumberDoesNotDependOnReusedScenarioItemSequence() {
+        MfgScheduleScenario scenario = scenario();
+        MfgScheduleItem item = item();
+        MfgProductionOrder order = order();
+        when(scenarioMapper.selectOne(any())).thenReturn(scenario);
+        when(itemMapper.selectOne(any())).thenReturn(item);
+        when(itemMapper.selectList(any())).thenReturn(List.of(item));
+        when(orderMapper.selectOne(any())).thenReturn(order);
+        when(planMapper.selectCount(any())).thenReturn(0L);
+
+        service.confirmManualItem(1L, 11L, 0, 0, "manual confirm", 7L);
+
+        ArgumentCaptor<MfgProductionPlan> planCaptor = ArgumentCaptor.forClass(MfgProductionPlan.class);
+        verify(planMapper).insert(planCaptor.capture());
+        String planNo = planCaptor.getValue().getPlanNo();
+        assertEquals("T-PL-20261027-001", planNo);
+        // 唯一索引上不允许重复，号必须变
+        assertFalse(planNo.equals("SP-1-1"));
     }
 
     private MfgScheduleScenario scenario() {

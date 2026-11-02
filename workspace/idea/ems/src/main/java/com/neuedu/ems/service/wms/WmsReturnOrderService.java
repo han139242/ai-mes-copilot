@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.baomidou.mybatisplus.extension.service.IService;
 import com.neuedu.ems.entity.wms.WmsReturnDetail;
 import com.neuedu.ems.entity.wms.WmsReturnOrder;
+import com.neuedu.ems.vo.wms.WmsReturnableDetailView;
 
 import java.util.List;
 
@@ -43,6 +44,27 @@ public interface WmsReturnOrderService extends IService<WmsReturnOrder> {
      * @return 退料单实体
      */
     WmsReturnOrder getReturnOrderById(Long returnId);
+
+    /**
+     * 列出指定工单当前可退的来源领料明细，供退料界面一次性带出全部可退项。
+     *
+     * <p>只读取数据，不建单、不预占库存。可退量口径与保存退料单时的校验一致，
+     * 因此界面列出的数量就是后端允许提交的上限。</p>
+     * @param workOrderId 生产工单ID
+     * @return 可退明细清单，没有可退项时返回空列表
+     */
+    List<WmsReturnableDetailView> listReturnableDetails(Long workOrderId);
+
+    /**
+     * 查询工单可退明细，并排除指定退料单已占用的数量。
+     *
+     * <p>编辑已有退料单时必须排除它自己，否则本单已填的数量会被重复扣掉，
+     * 界面给出的上限比后端实际允许的更小。<p>
+     * @param workOrderId 生产工单ID
+     * @param excludedReturnId 要排除的退料单ID，新增时可传 null
+     * @return 可退明细清单，没有可退项时返回空列表
+     */
+    List<WmsReturnableDetailView> listReturnableDetails(Long workOrderId, Long excludedReturnId);
 
     /**
      * 新增退料单并保存明细。

@@ -15,6 +15,8 @@ import java.util.List;
  */
 @Service
 public class QmsInspectionSchemeItemServiceImpl extends ServiceImpl<QmsInspectionSchemeItemMapper, QmsInspectionSchemeItem> implements QmsInspectionSchemeItemService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.neuedu.ems.service.qms.InspectionStandardReviewService reviewService;
 
     /**
      * 分页查询检验方案明细列表，支持方案、检验项目和检验标准筛选。
@@ -62,7 +64,9 @@ public class QmsInspectionSchemeItemServiceImpl extends ServiceImpl<QmsInspectio
      * @return 是否成功
      */
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor=Exception.class)
     public boolean saveSchemeItem(QmsInspectionSchemeItem schemeItem) {
+        reviewService.assertSchemeEditable(schemeItem.getSchemeId());
         if (schemeItem.getDeletedFlag() == null) {
             schemeItem.setDeletedFlag(0);
         }
@@ -75,10 +79,16 @@ public class QmsInspectionSchemeItemServiceImpl extends ServiceImpl<QmsInspectio
      * @return 是否成功
      */
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor=Exception.class)
     public boolean updateSchemeItem(QmsInspectionSchemeItem schemeItem) {
         if (schemeItem.getId() == null) {
             return false;
         }
+        var existing=getSchemeItemById(schemeItem.getId());
+        if(existing==null)return false;
+        reviewService.assertSchemeEditable(existing.getSchemeId());
+        if(schemeItem.getSchemeId()!=null && !schemeItem.getSchemeId().equals(existing.getSchemeId()))
+            throw new com.neuedu.ems.exception.BusinessException(com.neuedu.ems.common.ResultCode.BUSINESS_ERROR.getCode(),"方案明细不能转移至其它方案");
         schemeItem.setDeletedFlag(null);
         return baseMapper.updateById(schemeItem) > 0;
     }
@@ -89,7 +99,10 @@ public class QmsInspectionSchemeItemServiceImpl extends ServiceImpl<QmsInspectio
      * @return 是否成功
      */
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor=Exception.class)
     public boolean removeSchemeItemById(Long id) {
+        var existing=getSchemeItemById(id);if(existing==null)return false;
+        reviewService.assertSchemeEditable(existing.getSchemeId());
         QmsInspectionSchemeItem schemeItem = new QmsInspectionSchemeItem();
         schemeItem.setId(id);
         schemeItem.setDeletedFlag(1);
@@ -102,17 +115,13 @@ public class QmsInspectionSchemeItemServiceImpl extends ServiceImpl<QmsInspectio
      * @return 是否成功
      */
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor=Exception.class)
     public boolean removeSchemeItemsByIds(List<Long> ids) {
         if (ids == null || ids.isEmpty()) {
             return false;
         }
-        List<QmsInspectionSchemeItem> schemeItems = ids.stream().map(id -> {
-            QmsInspectionSchemeItem schemeItem = new QmsInspectionSchemeItem();
-            schemeItem.setId(id);
-            schemeItem.setDeletedFlag(1);
-            return schemeItem;
-        }).toList();
-        return updateBatchById(schemeItems);
+        for(Long id:ids)if(!removeSchemeItemById(id))throw new com.neuedu.ems.exception.BusinessException(com.neuedu.ems.common.ResultCode.NOT_FOUND);
+        return true;
     }
 
     /**

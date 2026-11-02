@@ -56,16 +56,20 @@ public class MfgTaskReminderServiceImpl implements MfgTaskReminderService {
 
     @Override
     public TaskReminderSummary getCurrentUserSummary(AuthorizationContext context) {
-        if (context == null || context.employeeId() == null || context.isSuperAdmin()) {
+        if (reminderInapplicable(context)) {
             return TaskReminderSummary.disabled();
         }
         if (context.roles().contains(ROLE_SUPERVISOR)) {
             return supervisorSummary(context);
         }
-        if (context.roles().contains(ROLE_OPERATOR)) {
-            return operatorSummary(context.employeeId());
-        }
-        return TaskReminderSummary.disabled();
+        return context.roles().contains(ROLE_OPERATOR)
+                ? operatorSummary(context.employeeId())
+                : TaskReminderSummary.disabled();
+    }
+
+    /** 游客、超管和没有绑定员工档案的账号不展示待办提醒。 */
+    private boolean reminderInapplicable(AuthorizationContext context) {
+        return context == null || context.employeeId() == null || context.isSuperAdmin();
     }
 
     private TaskReminderSummary operatorSummary(Long employeeId) {
@@ -91,15 +95,10 @@ public class MfgTaskReminderServiceImpl implements MfgTaskReminderService {
         return summary(AUDIENCE_OPERATOR, tasks.size(), waiting, 0, paused, 0, List.of(), items);
     }
 
-    private TaskReminderSummary supervisorSummary(AuthorizationContext context) {
-        if (context.teamIds().isEmpty()) {
-            return emptyEnabled(AUDIENCE_TEAM);
-        }
-        String teamIds = context.teamIds().stream().sorted().map(String::valueOf).collect(Collectors.joining(","));
-        String teamDispatchSql = "SELECT dispatch_id FROM mfg_dispatch_order WHERE deleted_flag = 0 AND team_id IN ("
-                + teamIds + ")";
+    /** 班组长视图只收三类任务：未派工、已暂停、派工已逾期，全部限定在本班组。 */
+    private LambdaQueryWrapper<MfgTask> teamReminderQuery(String teamIds) {
         LambdaQueryWrapper<MfgTask> query = activeTaskQuery();
-        query.inSql(MfgTask::getDispatchId, teamDispatchSql)
+        query.inSql(MfgTask::getDispatchId, teamDispatchSql(teamIds))
                 .and(scope -> scope
                         .and(unassigned -> unassigned.eq(MfgTask::getStatus, BusinessStatus.Production.WAIT_START)
                                 .notExists("SELECT 1 FROM mfg_task_operator reminder_operator "
@@ -109,47 +108,103 @@ public class MfgTaskReminderServiceImpl implements MfgTaskReminderService {
                         .or(overdue -> overdue
                                 .in(MfgTask::getStatus, BusinessStatus.Production.WAIT_START,
                                         BusinessStatus.Production.RUNNING, BusinessStatus.Production.PAUSED)
-                                .inSql(MfgTask::getDispatchId,
-                                        "SELECT dispatch_id FROM mfg_dispatch_order WHERE deleted_flag = 0 "
-                                                + "AND due_time IS NOT NULL AND due_time < NOW() AND team_id IN ("
-                                                + teamIds + ")")))
+                                .inSql(MfgTask::getDispatchId, overdueDispatchSql(teamIds))))
                 .orderByDesc(MfgTask::getUpdatedTime)
                 .orderByDesc(MfgTask::getTaskId);
-        List<MfgTask> tasks = taskMapper.selectList(query);
+        return query;
+    }
+
+    private String teamDispatchSql(String teamIds) {
+        return "SELECT dispatch_id FROM mfg_dispatch_order WHERE deleted_flag = 0 AND team_id IN (" + teamIds + ")";
+    }
+
+    private String overdueDispatchSql(String teamIds) {
+        return "SELECT dispatch_id FROM mfg_dispatch_order WHERE deleted_flag = 0 "
+                + "AND due_time IS NOT NULL AND due_time < NOW() AND team_id IN (" + teamIds + ")";
+    }
+
+    private TaskReminderSummary supervisorSummary(AuthorizationContext context) {
+        if (context.teamIds().isEmpty()) {
+            return emptyEnabled(AUDIENCE_TEAM);
+        }
+        String teamIds = context.teamIds().stream().sorted().map(String::valueOf).collect(Collectors.joining(","));
+        String scopedDispatchSql = teamDispatchSql(teamIds);
+        List<MfgTask> tasks = taskMapper.selectList(teamReminderQuery(teamIds));
 
         Set<Long> taskIds = tasks.stream().map(MfgTask::getTaskId).collect(Collectors.toSet());
         Set<Long> assignedTaskIds = assignedTaskIds(taskIds);
         Map<Long, MfgDispatchOrder> dispatches = dispatchMap(tasks);
         LocalDateTime now = LocalDateTime.now();
+        TeamReminderTally tally = new TeamReminderTally();
+        for (MfgTask task : tasks) {
+            tally.accept(reminderCategories(task, assignedTaskIds, dispatches, now));
+        }
+
+        List<MfgWorkReport> reports = canAuditReports(context)
+                ? submittedTeamReports(scopedDispatchSql) : List.of();
+        return summary(AUDIENCE_TEAM, tally.items.size(), 0, tally.unassigned, tally.paused, tally.overdue,
+                reports, tally.items);
+    }
+
+    /** 一条任务最多命中「未派工」「已暂停」「已超期」三类提醒。 */
+    private TaskReminderCategory reminderCategories(MfgTask task, Set<Long> assignedTaskIds,
+                                                    Map<Long, MfgDispatchOrder> dispatches, LocalDateTime now) {
+        List<String> categories = new ArrayList<>();
         int unassigned = 0;
         int paused = 0;
         int overdue = 0;
-        List<TaskReminderSummary.TaskReminderItem> items = new ArrayList<>();
-        for (MfgTask task : tasks) {
-            List<String> categories = new ArrayList<>();
-            if (BusinessStatus.Production.WAIT_START.equals(task.getStatus())
-                    && !assignedTaskIds.contains(task.getTaskId())) {
-                categories.add("UNASSIGNED");
-                unassigned++;
-            }
-            if (BusinessStatus.Production.PAUSED.equals(task.getStatus())) {
-                categories.add("PAUSED");
-                paused++;
-            }
-            MfgDispatchOrder dispatch = dispatches.get(task.getDispatchId());
-            if (dispatch != null && dispatch.getDueTime() != null && dispatch.getDueTime().isBefore(now)) {
-                categories.add("OVERDUE");
-                overdue++;
-            }
-            if (!categories.isEmpty()) {
-                items.add(reminderItem(task, categories, dispatch == null ? null : dispatch.getDueTime()));
+        if (isUnassigned(task, assignedTaskIds)) {
+            categories.add("UNASSIGNED");
+            unassigned = 1;
+        }
+        if (BusinessStatus.Production.PAUSED.equals(task.getStatus())) {
+            categories.add("PAUSED");
+            paused = 1;
+        }
+        MfgDispatchOrder dispatch = dispatches.get(task.getDispatchId());
+        LocalDateTime dueTime = dispatch == null ? null : dispatch.getDueTime();
+        if (isOverdue(dueTime, now)) {
+            categories.add("OVERDUE");
+            overdue = 1;
+        }
+        return new TaskReminderCategory(task, categories, dueTime, unassigned, paused, overdue);
+    }
+
+    private boolean isUnassigned(MfgTask task, Set<Long> assignedTaskIds) {
+        return BusinessStatus.Production.WAIT_START.equals(task.getStatus())
+                && !assignedTaskIds.contains(task.getTaskId());
+    }
+
+    private boolean isOverdue(LocalDateTime dueTime, LocalDateTime now) {
+        return dueTime != null && dueTime.isBefore(now);
+    }
+
+    private boolean canAuditReports(AuthorizationContext context) {
+        return context.hasPermission("mfg:work-report:audit");
+    }
+
+    /** 一条任务的提醒分类判定结果。 */
+    private record TaskReminderCategory(MfgTask task, List<String> categories, LocalDateTime dueTime,
+                                        int unassigned, int paused, int overdue) {
+    }
+
+    /** 团队提醒的累计结果。 */
+    private static final class TeamReminderTally {
+        private final List<TaskReminderSummary.TaskReminderItem> items = new ArrayList<>();
+        private int unassigned;
+        private int paused;
+        private int overdue;
+
+        void accept(TaskReminderCategory judged) {
+            unassigned += judged.unassigned();
+            paused += judged.paused();
+            overdue += judged.overdue();
+            if (!judged.categories().isEmpty()) {
+                items.add(new TaskReminderSummary.TaskReminderItem(judged.task().getTaskId(),
+                        judged.task().getTaskNo(), judged.task().getStatus(), List.copyOf(judged.categories()),
+                        judged.dueTime(), judged.task().getUpdatedTime()));
             }
         }
-
-        List<MfgWorkReport> reports = context.hasPermission("mfg:work-report:audit")
-                ? submittedTeamReports(teamDispatchSql)
-                : List.of();
-        return summary(AUDIENCE_TEAM, items.size(), 0, unassigned, paused, overdue, reports, items);
     }
 
     private List<MfgWorkReport> submittedTeamReports(String teamDispatchSql) {

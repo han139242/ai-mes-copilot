@@ -158,12 +158,7 @@ public class DataScopeService {
      * 返回当前账号按写入数据范围可操作的任务 ID，用于完整只读视图控制操作按钮。
      */
     public Set<Long> findOperableTaskIds(Collection<Long> taskIds) {
-        if (taskIds == null || taskIds.isEmpty()) {
-            return Set.of();
-        }
-        Set<Long> requestedIds = taskIds.stream()
-                .filter(Objects::nonNull)
-                .collect(Collectors.toSet());
+        Set<Long> requestedIds = normalizeTaskIds(taskIds);
         if (requestedIds.isEmpty()) {
             return Set.of();
         }
@@ -171,6 +166,17 @@ public class DataScopeService {
         if (context == null || "ALL".equals(context.dataScope())) {
             return requestedIds;
         }
+        return selectScopedTaskIds(requestedIds, context);
+    }
+
+    private Set<Long> normalizeTaskIds(Collection<Long> taskIds) {
+        if (taskIds == null || taskIds.isEmpty()) {
+            return Set.of();
+        }
+        return taskIds.stream().filter(Objects::nonNull).collect(Collectors.toSet());
+    }
+
+    private Set<Long> selectScopedTaskIds(Set<Long> requestedIds, AuthorizationContext context) {
         LambdaQueryWrapper<MfgTask> wrapper = new LambdaQueryWrapper<>();
         wrapper.select(MfgTask::getTaskId)
                 .in(MfgTask::getTaskId, requestedIds)

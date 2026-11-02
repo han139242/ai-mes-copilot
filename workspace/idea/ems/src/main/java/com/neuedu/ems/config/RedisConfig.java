@@ -6,15 +6,33 @@ import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.boot.autoconfigure.data.redis.LettuceClientConfigurationBuilderCustomizer;
+import io.lettuce.core.ClientOptions;
+import io.lettuce.core.SocketOptions;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.data.redis.serializer.RedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
 import java.lang.reflect.Constructor;
+import java.time.Duration;
 
 @Configuration
 public class RedisConfig {
+
+    /** 缓存故障必须先于 HTTP 超时返回；断线时不积压鉴权请求，保留现有降级逻辑。 */
+    @Bean
+    public LettuceClientConfigurationBuilderCustomizer boundedRedisWait(
+            @Value("${spring.data.redis.connect-timeout:500ms}") Duration connectTimeout,
+            @Value("${spring.data.redis.timeout:750ms}") Duration commandTimeout) {
+        return builder -> builder.commandTimeout(commandTimeout).clientOptions(ClientOptions.builder()
+                .autoReconnect(true)
+                .disconnectedBehavior(ClientOptions.DisconnectedBehavior.REJECT_COMMANDS)
+                .requestQueueSize(128)
+                .socketOptions(SocketOptions.builder().connectTimeout(connectTimeout).build())
+                .build());
+    }
 
     /**
      *

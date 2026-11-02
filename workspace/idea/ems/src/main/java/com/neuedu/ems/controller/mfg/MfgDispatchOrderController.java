@@ -88,6 +88,11 @@ public class MfgDispatchOrderController {
                 mfgDispatchOrderService.generateDispatchOrder(workOrderId, request, userId));
     }
 
+    @GetMapping("/preview/{workOrderId}")
+    public ResultData preview(@PathVariable Long workOrderId) {
+        return ResultData.success(ResultCode.SUCCESS, mfgDispatchOrderService.previewDispatch(workOrderId));
+    }
+
     /**
      * 更新派工单信息。
      * @param dispatchOrder 派工单实体（JSON格式，必须包含dispatchId）

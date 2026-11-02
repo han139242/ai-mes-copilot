@@ -95,16 +95,14 @@ public class MfgLineCalendarRuleServiceImpl
         if (existing == null) {
             throw notFound("产线周历规则不存在或已删除");
         }
-        if (STATUS_DISABLE.equals(existing.getStatus())) {
-            return true;
-        }
-
-        MfgLineCalendarRule update = new MfgLineCalendarRule();
-        update.setCalendarRuleId(existing.getCalendarRuleId());
-        update.setStatus(STATUS_DISABLE);
-        update.setVersion(existing.getVersion());
-        if (baseMapper.updateById(update) == 0) {
-            throw new OptimisticLockConflictException();
+        if (!STATUS_DISABLE.equals(existing.getStatus())) {
+            MfgLineCalendarRule update = new MfgLineCalendarRule();
+            update.setCalendarRuleId(existing.getCalendarRuleId());
+            update.setStatus(STATUS_DISABLE);
+            update.setVersion(existing.getVersion());
+            if (baseMapper.updateById(update) == 0) {
+                throw new OptimisticLockConflictException();
+            }
         }
         return true;
     }

@@ -5,9 +5,11 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.UUID;
+import java.security.SecureRandom;
 
 /**
  * 企业级文件工具类（专科版）
@@ -15,6 +17,7 @@ import java.util.UUID;
  */
 @Component
 public class FileUtil {
+    private static final SecureRandom PATH_RANDOM = new SecureRandom();
 
     // 根路径
     @Value("${file.upload.root-path}")
@@ -45,7 +48,7 @@ public class FileUtil {
         // 第二层随机字符串（3位）
         String secondLevel = getRandomString(secondLevelLength);
         // 拼接完整路径
-        String twoPath = firstLevel + "/" + secondLevel + "/";
+        String twoPath = Path.of(firstLevel, secondLevel).toString().replace(File.separatorChar, '/') + '/';
 
 
         return twoPath;
@@ -108,8 +111,8 @@ public class FileUtil {
     public String generateUniqueFileName(String originalFileName) {
         // 获取文件后缀
         String suffix = "";
-        if (originalFileName != null && originalFileName.lastIndexOf(".") > 0) {
-            suffix = originalFileName.substring(originalFileName.lastIndexOf("."));
+        if (originalFileName != null && originalFileName.lastIndexOf('.') > 0) {
+            suffix = originalFileName.substring(originalFileName.lastIndexOf('.'));
         }
         // 生成UUID（去掉横线）
         String uuid = UUID.randomUUID().toString().replace("-", "");
@@ -122,13 +125,13 @@ public class FileUtil {
      */
     public void checkAvatarFileType(MultipartFile file) {
         String originalFileName = file.getOriginalFilename();
-        if (originalFileName == null || originalFileName.lastIndexOf(".") <= 0) {
+        if (originalFileName == null || originalFileName.lastIndexOf('.') <= 0) {
             throw new RuntimeException("文件必须包含有效扩展名！");
         }
         String suffix = "";
-        if (originalFileName.lastIndexOf(".") > 0) {
+        if (originalFileName.lastIndexOf('.') > 0) {
             // 转小写，避免JPG/jpg区分
-            suffix = originalFileName.substring(originalFileName.lastIndexOf(".") + 1).toLowerCase();
+            suffix = originalFileName.substring(originalFileName.lastIndexOf('.') + 1).toLowerCase();
         }
         // 校验是否在允许列表
         boolean allowed = java.util.Arrays.stream(allowTypes.split(","))
@@ -240,7 +243,7 @@ public class FileUtil {
         String chars = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";  //62
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < length; i++) {
-            int index = (int) (Math.random() * chars.length());   // 0--61  30
+            int index = PATH_RANDOM.nextInt(chars.length());
             sb.append(chars.charAt(index));   //sC
         }
         return sb.toString();
@@ -250,9 +253,10 @@ public class FileUtil {
      * 5. 删除文件（兜底用）
      */
     public void deleteFile(String filePath) {
-        File file = new File(filePath);
-        if (file.exists()) {
-            file.delete();
+        try {
+            Files.deleteIfExists(Path.of(filePath));
+        } catch (IOException e) {
+            throw new IllegalStateException("删除文件失败", e);
         }
     }
 

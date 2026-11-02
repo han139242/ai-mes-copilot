@@ -34,10 +34,22 @@ __pycache__/
 .DS_Store
 Thumbs.db
 
-# Private runtime material stays local
-.env
-.env.local
+# 本地文档历史备份（体积大、仅用于比对回退，不入库）
+**/*_V19备份.docx
+**/*_V18备份.docx
+# 报告备份（本地比对回退用，不入库）
+**/*.bak.docx
+**/*.bak.pdf
+**/*.bak.pptx
+**/*.json.bak
+**/*.bak
+
+# Private coursework and local publication evidence
+*.docx
+*.doc
+*.pptx
+*.ppt
+*.pdf
+*.clixml
 *.pem
 *.key
-*.log
-__pycache__/

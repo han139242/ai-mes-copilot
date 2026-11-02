@@ -6,6 +6,7 @@ import org.springframework.stereotype.Component;
 
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 import java.util.LinkedHashMap;
@@ -35,10 +36,21 @@ public class PhoneCryptoKeyProvider {
 
     @Autowired
     public PhoneCryptoKeyProvider(Environment environment) {
-        this(environment, PhoneCryptoKeyProvider::readWindowsUserEnvironmentVariable);
+        this(environment, System::getenv, PhoneCryptoKeyProvider::readWindowsUserEnvironmentVariable);
     }
 
+    /**
+     * 测试入口：Spring 环境为空时，只使用调用方给出的解析器，不读取当前进程环境。
+     */
     PhoneCryptoKeyProvider(Environment environment, Function<String, String> externalPropertyResolver) {
+        this(environment, name -> null, externalPropertyResolver);
+    }
+
+    private final Function<String, String> processPropertyResolver;
+
+    PhoneCryptoKeyProvider(Environment environment, Function<String, String> processPropertyResolver,
+                           Function<String, String> externalPropertyResolver) {
+        this.processPropertyResolver = processPropertyResolver;
         this.externalPropertyResolver = externalPropertyResolver;
 
         activeKeyId = require(environment, "PHONE_CRYPTO_ACTIVE_KEY_ID");
@@ -98,7 +110,7 @@ public class PhoneCryptoKeyProvider {
     private String resolveProperty(Environment environment, String name) {
         String value = environment.getProperty(name);
         if (value == null || value.isBlank()) {
-            value = System.getenv(name);
+            value = processPropertyResolver.apply(name);
         }
         if ((value == null || value.isBlank()) && externalPropertyResolver != null) {
             value = externalPropertyResolver.apply(name);
@@ -138,23 +150,42 @@ public class PhoneCryptoKeyProvider {
     }
 
     private static String readWindowsUserEnvironmentVariable(String name) {
-        if (!System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win")) {
+        if (!isWindows()) {
             return null;
         }
+        Process process = null;
         try {
-            Process process = new ProcessBuilder("reg", "query", "HKCU\\Environment", "/v", name)
+            process = new ProcessBuilder("reg", "query", "HKCU\\Environment", "/v", name)
                     .redirectErrorStream(true)
                     .start();
-            if (!process.waitFor(2, TimeUnit.SECONDS) || process.exitValue() != 0) {
-                return null;
+            return readRegistryValue(process, name);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (IOException | RuntimeException e) {
+            // 读不到就按未配置处理，由上层的必填校验给出明确报错。
+        } finally {
+            if (process != null) {
+                process.destroy();
             }
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
-            Pattern pattern = Pattern.compile("^\\s*" + Pattern.quote(name) + "\\s+REG_\\S+\\s+(.+)\\s*$",
-                    Pattern.MULTILINE);
-            java.util.regex.Matcher matcher = pattern.matcher(output);
-            return matcher.find() ? matcher.group(1).trim() : null;
-        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    private static boolean isWindows() {
+        return System.getProperty("os.name", "").toLowerCase(Locale.ROOT).contains("win");
+    }
+
+    /** 从 reg query 的输出里取出目标值；进程超时或返回非零都视为未配置。 */
+    private static String readRegistryValue(Process process, String name)
+            throws IOException, InterruptedException {
+        boolean finished = process.waitFor(2, TimeUnit.SECONDS);
+        if (!finished || process.exitValue() != 0) {
             return null;
         }
+        String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+        Pattern pattern = Pattern.compile("^\\s*" + Pattern.quote(name) + "\\s+REG_\\S+\\s+(.+)\\s*$",
+                Pattern.MULTILINE);
+        java.util.regex.Matcher matcher = pattern.matcher(output);
+        return matcher.find() ? matcher.group(1).trim() : null;
     }
 }

@@ -57,6 +57,23 @@ import static org.mockito.Mockito.when;
 
 class MfgDispatchOrderServiceImplTest {
 
+    @Test
+    void dispatchPrefersAFreeCompatibleStationAndKeepsFallbackWhenAllBusy() {
+        FactoryStationOperation first = new FactoryStationOperation(); first.setStationId(17L);
+        FactoryStationOperation second = new FactoryStationOperation(); second.setStationId(19L);
+        FactoryStation busy = new FactoryStation(); busy.setStationId(17L);
+        FactoryStation free = new FactoryStation(); free.setStationId(19L);
+        when(stationOperationMapper.selectList(any())).thenReturn(List.of(first, second));
+        when(stationMapper.selectOne(any())).thenReturn(busy, free);
+        when(taskMapper.selectCount(any())).thenReturn(1L, 0L);
+        Long selected = ReflectionTestUtils.invokeMethod(service, "resolveDefaultStation", 14L, 4L);
+        assertEquals(Long.valueOf(19L), selected);
+        when(stationMapper.selectOne(any())).thenReturn(busy, free);
+        when(taskMapper.selectCount(any())).thenReturn(1L, 1L);
+        Long fallback = ReflectionTestUtils.invokeMethod(service, "resolveDefaultStation", 14L, 4L);
+        assertEquals(Long.valueOf(17L), fallback);
+    }
+
     private MfgDispatchOrderServiceImpl service;
     private MfgDispatchOrderMapper dispatchMapper;
     private MfgTaskMapper taskMapper;
@@ -78,10 +95,20 @@ class MfgDispatchOrderServiceImplTest {
         TableInfoHelper.initTableInfo(
                 new MapperBuilderAssistant(new MybatisConfiguration(), "factoryStation"), FactoryStation.class);
         service = new MfgDispatchOrderServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
+        var preparation = mock(com.neuedu.ems.service.mfg.DispatchPreparationService.class);
+        ReflectionTestUtils.setField(service, "dispatchPreparation", preparation);
+        when(preparation.prepare(any(), any())).thenAnswer(invocation -> new com.neuedu.ems.vo.mfg.DispatchPreparationVO(
+                3L, "产线", LocalDateTime.now().plusHours(1), LocalDateTime.now().plusHours(4),
+                new BigDecimal("120"), LocalDateTime.now().plusDays(1),
+                List.of(new com.neuedu.ems.vo.mfg.DispatchPreparationVO.TeamOption(7L, "一班")),
+                List.of(), List.of(), List.of()));
+        ReflectionTestUtils.setField(service, "preparationGate", mock(com.neuedu.ems.service.mdm.ManufacturingPreparationGate.class));
         dispatchMapper = mock(MfgDispatchOrderMapper.class);
         taskMapper = mock(MfgTaskMapper.class);
         taskOperatorMapper = mock(MfgTaskOperatorMapper.class);
         workOrderMapper = mock(MfgWorkOrderMapper.class);
+        when(workOrderMapper.updateById(any(MfgWorkOrder.class))).thenReturn(1);
         materialMapper = mock(MfgWorkOrderMaterialMapper.class);
         planMapper = mock(MfgProductionPlanMapper.class);
         productMapper = mock(MdmProductMapper.class);
@@ -140,13 +167,28 @@ class MfgDispatchOrderServiceImplTest {
         assertEquals(3L, generated.getWorkOrderId());
         assertEquals(new BigDecimal("100"), generated.getPlannedQuantity());
         assertEquals("WAIT_DISPATCH", generated.getStatus());
-        assertTrue(generated.getDispatchNo().startsWith("DO-3-"));
+        assertTrue(generated.getDispatchNo().startsWith("T-DO-20261027-"));
     }
 
     @Test
     void detachedDispatchCreationIsRejected() {
         assertThrows(BusinessException.class, () -> service.saveDispatchOrder(new MfgDispatchOrder()));
         verify(dispatchMapper, never()).insert(any(MfgDispatchOrder.class));
+    }
+
+    @Test
+    void ordinaryEditCannotOverrideThePreparedTeamOrCalculatedTime() {
+        when(dispatchMapper.selectOne(any(), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(dispatch("WAIT_DISPATCH"));
+        when(dispatchMapper.updateById(any(MfgDispatchOrder.class))).thenReturn(1);
+        MfgDispatchOrder request = new MfgDispatchOrder();
+        request.setDispatchId(20L); request.setTeamId(999L); request.setDueTime(LocalDateTime.now().plusYears(10));
+        request.setRemark("补充说明");
+        assertTrue(service.updateDispatchOrder(request));
+        ArgumentCaptor<MfgDispatchOrder> update = ArgumentCaptor.forClass(MfgDispatchOrder.class);
+        verify(dispatchMapper).updateById(update.capture());
+        org.junit.jupiter.api.Assertions.assertNull(update.getValue().getTeamId());
+        org.junit.jupiter.api.Assertions.assertNull(update.getValue().getDueTime());
+        assertEquals("补充说明", update.getValue().getRemark());
     }
 
     @Test
@@ -288,12 +330,17 @@ class MfgDispatchOrderServiceImplTest {
     }
 
     @Test
-    void releaseDispatchRejectsExpiredDueTime() {
+    void releaseDispatchRejectsNewlyCalculatedTimeBeyondDeadline() {
         MfgDispatchOrder dispatch = dispatch("WAIT_DISPATCH");
         dispatch.setDueTime(LocalDateTime.now().minusMinutes(1));
         when(dispatchMapper.selectOne(any())).thenReturn(dispatch);
         when(workOrderMapper.selectOne(any())).thenReturn(workOrder());
         when(planMapper.selectOne(any())).thenReturn(plan());
+        var preparation = (com.neuedu.ems.service.mfg.DispatchPreparationService)
+                ReflectionTestUtils.getField(service, "dispatchPreparation");
+        when(preparation.prepare(any(), any())).thenReturn(new com.neuedu.ems.vo.mfg.DispatchPreparationVO(
+                3L, "产线", LocalDateTime.now(), LocalDateTime.now().plusDays(2), BigDecimal.TEN,
+                LocalDateTime.now().plusDays(1), List.of(), List.of(), List.of("超过计划截止时间"), List.of()));
 
         assertThrows(BusinessException.class, () -> service.releaseDispatchOrder(20L, 9L, null));
 
@@ -312,6 +359,19 @@ class MfgDispatchOrderServiceImplTest {
         assertThrows(BusinessException.class, () -> service.releaseDispatchOrder(20L, 9L, null));
 
         verify(taskMapper, never()).insert(any(MfgTask.class));
+    }
+
+    @Test
+    void dispatchMaterialPrecheckRequiresActuallyIssuedMaterialsWithoutWriting() {
+        when(workOrderMapper.selectOne(any())).thenReturn(workOrder());
+        service.validateDispatchMaterials(3L);
+        MfgWorkOrderMaterial shortage = readyRequirement();
+        shortage.setIssuedQuantity(new BigDecimal("20"));
+        when(materialMapper.selectList(any())).thenReturn(List.of(shortage));
+        BusinessException error = assertThrows(BusinessException.class, () -> service.validateDispatchMaterials(3L));
+        assertTrue(error.getMessage().contains("用料尚未实际到位"));
+        verify(dispatchMapper, never()).insert(any(MfgDispatchOrder.class));
+        verify(workOrderMapper, never()).updateById(any(MfgWorkOrder.class));
     }
 
     @Test

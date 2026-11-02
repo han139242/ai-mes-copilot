@@ -101,20 +101,33 @@ public class WmsStocktakeDetailServiceImpl extends ServiceImpl<WmsStocktakeDetai
      */
     @Override
     public boolean updateStocktakeDetail(WmsStocktakeDetail stocktakeDetail) {
-        if (stocktakeDetail.getDetailId() == null) {
-            return false;
-        }
-        WmsStocktakeDetail existing = getStocktakeDetailById(stocktakeDetail.getDetailId());
-        if (existing == null || !canChangeStocktakeOrder(existing.getStocktakeId())) {
-            return false;
-        }
-        if (stocktakeDetail.getStocktakeId() != null && !canChangeStocktakeOrder(stocktakeDetail.getStocktakeId())) {
+        WmsStocktakeDetail existing = updatableStocktakeDetail(stocktakeDetail);
+        if (existing == null) {
             return false;
         }
         fillMissingQuantities(stocktakeDetail, existing);
         setDefaultStocktakeQuantities(stocktakeDetail);
         stocktakeDetail.setDeletedFlag(null);
         return baseMapper.updateById(stocktakeDetail) > 0;
+    }
+
+    /**
+     * 取出允许更新的盘点明细现有记录：主键必填、原单据可改、且不允许改挂到其他盘点单。
+     * @param stocktakeDetail 请求中的盘点明细
+     * @return 允许更新时返回库中现有记录，否则返回 null
+     */
+    private WmsStocktakeDetail updatableStocktakeDetail(WmsStocktakeDetail stocktakeDetail) {
+        WmsStocktakeDetail existing = stocktakeDetail.getDetailId() == null
+                ? null : getStocktakeDetailById(stocktakeDetail.getDetailId());
+        return isUpdatableTarget(existing, stocktakeDetail.getStocktakeId()) ? existing : null;
+    }
+
+    /** 原明细与目标盘点单都必须处于可改状态，且不允许改挂到其他盘点单。 */
+    private boolean isUpdatableTarget(WmsStocktakeDetail existing, Long targetStocktakeId) {
+        if (existing == null || !canChangeStocktakeOrder(existing.getStocktakeId())) {
+            return false;
+        }
+        return targetStocktakeId == null || canChangeStocktakeOrder(targetStocktakeId);
     }
 
     /**

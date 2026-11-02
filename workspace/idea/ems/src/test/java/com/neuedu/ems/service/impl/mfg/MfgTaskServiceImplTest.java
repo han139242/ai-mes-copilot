@@ -82,6 +82,8 @@ class MfgTaskServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new MfgTaskServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
+        ReflectionTestUtils.setField(service, "preparationGate", mock(com.neuedu.ems.service.mdm.ManufacturingPreparationGate.class));
         taskMapper = mock(MfgTaskMapper.class);
         statusLogMapper = mock(SysStatusChangeLogMapper.class);
         operationLogMapper = mock(SysOperationLogMapper.class);
@@ -309,6 +311,32 @@ class MfgTaskServiceImplTest {
     }
 
     @Test
+    void startRejectsStationAlreadyRunningAnotherTask() {
+        when(taskMapper.selectOne(any())).thenReturn(task(BusinessStatus.Production.WAIT_START));
+        prepareStartGate();
+        // 该工位已有别的任务在 RUNNING，同一工位同一时间不允许两道工序。
+        when(taskMapper.selectCount(any())).thenReturn(1L);
+
+        BusinessException exception = assertThrows(BusinessException.class,
+                () -> service.startTask(1L, 2L, 9L));
+
+        assertTrue(exception.getMessage().contains("当前工位已有任务在生产"));
+        verify(taskMapper, never()).update(any(MfgTask.class), any());
+    }
+
+    @Test
+    void startAllowsStationWhenNoOtherTaskIsRunning() {
+        when(taskMapper.selectOne(any())).thenReturn(task(BusinessStatus.Production.WAIT_START));
+        prepareStartGate();
+        when(taskMapper.selectCount(any())).thenReturn(0L);
+        when(taskMapper.update(any(MfgTask.class), any())).thenReturn(1);
+
+        assertTrue(service.startTask(1L, 2L, 9L));
+
+        verify(taskMapper).update(any(MfgTask.class), any());
+    }
+
+    @Test
     void startRejectsUnfinishedPredecessor() {
         when(taskMapper.selectOne(any())).thenReturn(task(BusinessStatus.Production.WAIT_START));
         prepareStartGate();
@@ -321,6 +349,20 @@ class MfgTaskServiceImplTest {
                 () -> service.startTask(1L, null, 9L));
 
         assertTrue(exception.getMessage().contains("前置工序尚未完成"));
+    }
+
+    @Test
+    void predecessorCheckUsesFrozenDomainRulesWithoutUpdatingProductionState() {
+        when(taskMapper.selectOne(any())).thenReturn(task(BusinessStatus.Production.WAIT_START));
+        prepareStartGate();
+        when(routeItemMapper.selectList(any())).thenReturn(List.of(routeItem(3L, 10), routeItem(4L, 20)));
+        when(taskMapper.selectCount(any())).thenReturn(1L);
+        BusinessException failure = assertThrows(BusinessException.class, () -> service.checkTaskPredecessors(1L));
+        assertTrue(failure.getMessage().contains("前置工序尚未完成"));
+        verify(taskMapper, never()).update(any(MfgTask.class), any());
+        verify(workOrderMapper, never()).updateById(any(MfgWorkOrder.class));
+        verify(productionPlanMapper, never()).updateById(any(MfgProductionPlan.class));
+        verify(productionOrderMapper, never()).updateById(any(MfgProductionOrder.class));
     }
 
     @Test

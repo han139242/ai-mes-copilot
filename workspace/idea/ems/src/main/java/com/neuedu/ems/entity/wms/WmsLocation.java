@@ -23,6 +23,8 @@ public class WmsLocation {
     private String locationCode;
     private String locationName;
     private Long warehouseId;
+    /** 线边库位所属产线；空值为共享线边库位。 */
+    private Long lineId;
     private String locationType;
     private String status;
     private String remark;

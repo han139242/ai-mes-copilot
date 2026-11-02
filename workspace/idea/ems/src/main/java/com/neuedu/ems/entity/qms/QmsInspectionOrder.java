@@ -2,6 +2,7 @@ package com.neuedu.ems.entity.qms;
 
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
+import com.baomidou.mybatisplus.annotation.TableField;
 import com.baomidou.mybatisplus.annotation.TableName;
 import com.baomidou.mybatisplus.annotation.Version;
 import lombok.AllArgsConstructor;
@@ -22,6 +23,21 @@ public class QmsInspectionOrder {
 
     @TableId(value = "inspection_id", type = IdType.AUTO)
     private Long inspectionId;
+    @TableField(exist=false)
+    private Boolean stockReleaseInspection;
+    @TableField(exist=false)
+    private BigDecimal sourceDefectQuantity;
+    @TableField(exist=false)
+    private String sourceDefectDescription;
+    @TableField(exist=false)
+    private String sourceReportNo;
+    @TableField(exist=false)
+    private Boolean productionDefectConflict;
+    /** 已存在的处置单（包含已关闭），用于引导查看，避免重复发起。 */
+    @TableField(exist=false)
+    private Long nonconformingOrderId;
+    @TableField(exist=false)
+    private String nonconformingOrderStatus;
     private String inspectionNo;
     private String inspectionType;
     private Long schemeId;

@@ -84,7 +84,7 @@ class SensitivePhoneServiceTest {
     @Test
     void rejectsInvalidOrCiphertextShapedInput() {
         assertThrows(IllegalStateException.class,
-                () -> new PhoneCryptoKeyProvider(new MockEnvironment(), name -> null));
+                () -> new PhoneCryptoKeyProvider(new MockEnvironment(), name -> null, name -> null));
         assertThrows(com.neuedu.ems.exception.BusinessException.class,
                 () -> phoneService.prepareCreate(SensitivePhoneField.EMPLOYEE, "138****0001"));
         assertThrows(com.neuedu.ems.exception.BusinessException.class,

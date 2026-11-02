@@ -102,6 +102,30 @@ class MfgLineProductCapabilityServiceImplTest {
         assertNull(update.getValue().getDeletedFlag());
     }
 
+    @Test
+    void repeatedDisableDoesNotWriteAgain() {
+        MfgLineProductCapability existing = capability();
+        existing.setCapabilityId(8L);
+        existing.setStatus("DISABLE");
+        when(capabilityMapper.selectOne(any())).thenReturn(existing);
+
+        assertTrue(service.disableCapability(8L));
+
+        verify(capabilityMapper, org.mockito.Mockito.never()).updateById(any(MfgLineProductCapability.class));
+    }
+
+    @Test
+    void disableRetainsOptimisticLockFailure() {
+        MfgLineProductCapability existing = capability();
+        existing.setCapabilityId(8L);
+        existing.setStatus("ENABLE");
+        when(capabilityMapper.selectOne(any())).thenReturn(existing);
+        when(capabilityMapper.updateById(any(MfgLineProductCapability.class))).thenReturn(0);
+
+        assertThrows(com.neuedu.ems.exception.OptimisticLockConflictException.class,
+                () -> service.disableCapability(8L));
+    }
+
     private void stubValidReferences(Long routeProductId) {
         when(lineMapper.selectOne(any())).thenReturn(new FactoryLine());
         when(productMapper.selectOne(any())).thenReturn(new MdmProduct());

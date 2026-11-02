@@ -6,6 +6,7 @@ import com.neuedu.ems.entity.sys.SysStatusChangeLog;
 import com.neuedu.ems.entity.mfg.MfgWorkOrder;
 import com.neuedu.ems.entity.mfg.MfgWorkOrderMaterial;
 import com.neuedu.ems.entity.wms.WmsInventory;
+import com.neuedu.ems.entity.wms.WmsLocation;
 import com.neuedu.ems.entity.wms.WmsMaterialBatch;
 import com.neuedu.ems.entity.wms.WmsOutboundDetail;
 import com.neuedu.ems.entity.wms.WmsOutboundOrder;
@@ -17,6 +18,7 @@ import com.neuedu.ems.mapper.sys.SysStatusChangeLogMapper;
 import com.neuedu.ems.mapper.mfg.MfgWorkOrderMaterialMapper;
 import com.neuedu.ems.mapper.mfg.MfgWorkOrderMapper;
 import com.neuedu.ems.mapper.wms.WmsInventoryMapper;
+import com.neuedu.ems.mapper.wms.WmsLocationMapper;
 import com.neuedu.ems.mapper.wms.WmsMaterialBatchMapper;
 import com.neuedu.ems.mapper.wms.WmsOutboundDetailMapper;
 import com.neuedu.ems.mapper.wms.WmsOutboundOrderMapper;
@@ -37,6 +39,7 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -44,9 +47,81 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 class WmsOutboundOrderServiceImplTest {
+    @Test
+    void transferPreviewResolvesParentWithoutUsingWriteLocks() {
+        var stock=mock(com.neuedu.ems.service.mfg.StockComponentSupplyService.class);
+        ReflectionTestUtils.setField(service,"stockComponents",stock);
+        var order=new WmsOutboundOrder();order.setWorkOrderId(11L);
+        var child=new MfgWorkOrder();child.setWorkOrderId(11L);child.setParentWorkOrderId(10L);
+        var parent=new MfgWorkOrder();parent.setWorkOrderId(10L);
+        var detail=new WmsOutboundDetail();detail.setMaterialId(19L);
+        when(workOrderMapper.selectById(11L)).thenReturn(child);
+        when(workOrderMapper.selectById(10L)).thenReturn(parent);
+        when(stock.requirementOwner(11L,19L)).thenReturn(10L);
+        MfgWorkOrder owner=ReflectionTestUtils.invokeMethod(service,"consumptionOwner",order,List.of(detail),false);
+        assertEquals(parent,owner);
+        verify(workOrderMapper,never()).selectOne(any());
+        verify(inventoryMapper,never()).updateById(any(WmsInventory.class));
+    }
+    @Test
+    void genericConfirmationCannotBypassSalesInspection() {
+        var order = new WmsOutboundOrder(); order.setOutboundType("SALE"); order.setDeletedFlag(0);
+        when(orderMapper.selectOne(any())).thenReturn(order);
+        var error = assertThrows(BusinessException.class, () -> service.confirmOutboundOrder(1L, 1L, null));
+        assertTrue(error.getMessage().contains("出货检验"));
+        verify(inventoryMapper, never()).updateById(any(WmsInventory.class));
+        verify(movementMapper, never()).insert(any(WmsStockMovement.class));
+    }
 
     private WmsOutboundOrderServiceImpl service;
+
+    @Test
+    void stockComponentCannotUseOrdinaryConfirmationOrCloseProductionBeforeTransfer() {
+        var stock = mock(com.neuedu.ems.service.mfg.StockComponentSupplyService.class);
+        ReflectionTestUtils.setField(service, "stockComponents", stock);
+        var issue = order();
+        issue.setOutboundType("MATERIAL_ISSUE");
+        issue.setWorkOrderId(3L);
+        var line = detail(4L, "1.0000");
+        line.setInspectionId(90L);
+        when(orderMapper.selectOne(any())).thenReturn(issue);
+        when(workOrderMapper.selectById(3L)).thenReturn(workOrder("RELEASED"));
+        when(detailMapper.selectList(any())).thenReturn(List.of(line));
+
+        var error = assertThrows(BusinessException.class, () -> service.confirmOutboundOrder(1L, 9L, null));
+        assertTrue(error.getMessage().contains("转线边"));
+        verify(stock, never()).requirePassedAndReplace(any(), any(), any());
+        verify(orderMapper, never()).updateById(any(WmsOutboundOrder.class));
+        verify(inventoryMapper, never()).updateById(any(WmsInventory.class));
+        verify(materialMapper, never()).updateById(any(MfgWorkOrderMaterial.class));
+        verify(movementMapper, never()).insert(any(WmsStockMovement.class));
+    }
     private WmsOutboundOrderMapper orderMapper;
+
+    @Test
+    void stockComponentWithoutInspectionStillCannotUseOrdinaryConfirmation() {
+        var stock = mock(com.neuedu.ems.service.mfg.StockComponentSupplyService.class,
+                org.mockito.Mockito.CALLS_REAL_METHODS);
+        var jdbc = mock(org.springframework.jdbc.core.JdbcTemplate.class);
+        when(jdbc.queryForObject(org.mockito.ArgumentMatchers.anyString(), eq(Integer.class),
+                org.mockito.ArgumentMatchers.anyLong())).thenReturn(1);
+        ReflectionTestUtils.setField(stock, "jdbc", jdbc);
+        ReflectionTestUtils.setField(service, "stockComponents", stock);
+        var issue = order();
+        issue.setOutboundType("MATERIAL_ISSUE");
+        issue.setWorkOrderId(3L);
+        when(orderMapper.selectOne(any())).thenReturn(issue);
+        when(workOrderMapper.selectById(3L)).thenReturn(workOrder("RELEASED"));
+        when(detailMapper.selectList(any())).thenReturn(List.of(detail(4L, "1.0000")));
+
+        var error = assertThrows(BusinessException.class, () -> service.confirmOutboundOrder(1L, 9L, null));
+        assertTrue(error.getMessage().contains("尚未关联领用检验"));
+        verify(stock, never()).requirePassedAndReplace(any(), any(), any());
+        verify(orderMapper, never()).updateById(any(WmsOutboundOrder.class));
+        verify(inventoryMapper, never()).updateById(any(WmsInventory.class));
+        verify(materialMapper, never()).updateById(any(MfgWorkOrderMaterial.class));
+        verify(movementMapper, never()).insert(any(WmsStockMovement.class));
+    }
     private WmsOutboundDetailMapper detailMapper;
     private WmsInventoryMapper inventoryMapper;
     private WmsMaterialBatchMapper batchMapper;
@@ -56,10 +131,15 @@ class WmsOutboundOrderServiceImplTest {
     private WmsWarehouseMapper warehouseMapper;
     private MfgDispatchOrderService dispatchOrderService;
     private WmsResponsibilityNotificationService notificationService;
+    private com.neuedu.ems.service.mfg.CommandRequestService commandRequests;
+    private com.neuedu.ems.service.mfg.SupplyAllocationService supplyAllocations;
 
     @BeforeEach
     void setUp() {
         service = new WmsOutboundOrderServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
+        ReflectionTestUtils.setField(service, "preparationGate", mock(com.neuedu.ems.service.mdm.ManufacturingPreparationGate.class));
+        ReflectionTestUtils.setField(service, "executionQuantities", mock(com.neuedu.ems.service.mdm.MaterialExecutionQuantityService.class));
         orderMapper = mock(WmsOutboundOrderMapper.class);
         detailMapper = mock(WmsOutboundDetailMapper.class);
         inventoryMapper = mock(WmsInventoryMapper.class);
@@ -81,10 +161,24 @@ class WmsOutboundOrderServiceImplTest {
         ReflectionTestUtils.setField(service, "workOrderMaterialMapper", materialMapper);
         ReflectionTestUtils.setField(service, "workOrderMapper", workOrderMapper);
         ReflectionTestUtils.setField(service, "wmsWarehouseMapper", warehouseMapper);
+        WmsLocationMapper locationMapper = mock(WmsLocationMapper.class);
+        when(locationMapper.selectById(8L)).thenReturn(location());
+        ReflectionTestUtils.setField(service, "locationMapper", locationMapper);
         ReflectionTestUtils.setField(service, "mfgDispatchOrderService", dispatchOrderService);
         ReflectionTestUtils.setField(service, "sysStatusChangeLogMapper", statusLogMapper);
         ReflectionTestUtils.setField(service, "sysOperationLogMapper", operationLogMapper);
         ReflectionTestUtils.setField(service, "responsibilityNotificationService", notificationService);
+        // P2B：领料明细优先取已预留库存，移库时先消耗预留；默认无预留，回落到公共可用量。
+        supplyAllocations = mock(com.neuedu.ems.service.mfg.SupplyAllocationService.class);
+        when(supplyAllocations.reservedAllocationsForWorkOrder(any())).thenReturn(java.util.List.of());
+        when(supplyAllocations.consumeReservation(any(), any(), any(), any(), any(), any()))
+                .thenReturn(java.math.BigDecimal.ZERO.setScale(4));
+        ReflectionTestUtils.setField(service, "supplyAllocations", supplyAllocations);
+        // P2D：领料单生成与移库确认支持请求键幂等；默认不登记（返回 null 表示未重放）。
+        commandRequests = mock(com.neuedu.ems.service.mfg.CommandRequestService.class);
+        when(commandRequests.digest(any())).thenReturn("digest");
+        when(commandRequests.replayed(any(), any(), any())).thenReturn(null);
+        ReflectionTestUtils.setField(service, "commandRequests", commandRequests);
 
         when(orderMapper.selectOne(any())).thenReturn(order());
         when(batchMapper.selectOne(any())).thenReturn(batch(BusinessStatus.Quality.PASS, "AVAILABLE"));
@@ -157,6 +251,7 @@ class WmsOutboundOrderServiceImplTest {
         WmsOutboundOrder materialIssue = order();
         materialIssue.setOutboundType("MATERIAL_ISSUE");
         materialIssue.setWorkOrderId(3L);
+        when(workOrderMapper.selectById(3L)).thenReturn(workOrder("RELEASED"));
         when(orderMapper.selectOne(any())).thenReturn(materialIssue);
         when(detailMapper.selectList(any())).thenReturn(List.of(detail(4L, "8.0000")));
         when(inventoryMapper.selectOne(any())).thenReturn(inventory("10.0000"));
@@ -178,6 +273,115 @@ class WmsOutboundOrderServiceImplTest {
         assertEquals(new BigDecimal("0.0000"), update.getValue().getShortageQuantity());
         assertEquals("READY", update.getValue().getStatus());
         verify(dispatchOrderService).refreshMaterialReadiness(3L, 9L);
+    }
+
+    @Test
+    void confirmMaterialIssueConsumesReservationInsteadOfRequiringAvailableStock() {
+        // 半成品仓整份预留后 available 为 0、locked 为 6，确认出库必须走预留转换而不是判库存不足。
+        WmsOutboundOrder materialIssue = order();
+        materialIssue.setOutboundType("MATERIAL_ISSUE");
+        materialIssue.setWorkOrderId(3L);
+        when(workOrderMapper.selectById(3L)).thenReturn(workOrder("RELEASED"));
+        when(orderMapper.selectOne(any())).thenReturn(materialIssue);
+        when(detailMapper.selectList(any())).thenReturn(List.of(detail(4L, "6.0000")));
+        WmsInventory fullyReserved = inventory("0.0000");
+        fullyReserved.setLockedQuantity(new BigDecimal("6.0000"));
+        when(inventoryMapper.selectOne(any())).thenReturn(fullyReserved);
+        stubMaterialIssueRequirement();
+        var reservation = new com.neuedu.ems.entity.mfg.MfgSupplyAllocation();
+        reservation.setMaterialId(11L);
+        reservation.setInventoryId(6L);
+        reservation.setReservedQuantity(new BigDecimal("6.0000"));
+        when(supplyAllocations.reservedAllocationsForWorkOrder(3L)).thenReturn(List.of(reservation));
+        when(supplyAllocations.consumeReservation(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new BigDecimal("6.0000"));
+
+        assertTrue(service.confirmOutboundOrder(1L, 9L, "确认领料"));
+
+        ArgumentCaptor<WmsInventory> inventoryUpdate = ArgumentCaptor.forClass(WmsInventory.class);
+        verify(inventoryMapper).updateById(inventoryUpdate.capture());
+        assertEquals(new BigDecimal("0.0000"), inventoryUpdate.getValue().getAvailableQuantity());
+        assertEquals(new BigDecimal("0.0000"), inventoryUpdate.getValue().getLockedQuantity());
+        verify(supplyAllocations).consumeReservation(eq(3L), eq(11L), eq(6L),
+                eq(new BigDecimal("6.0000")), eq(9L), any());
+    }
+
+    @Test
+    void confirmMaterialIssueSplitsReservedAndUnreservedParts() {
+        // 预留 4、可用 6，出库 6：4 走预留（只扣 locked），2 扣 available。
+        WmsOutboundOrder materialIssue = order();
+        materialIssue.setOutboundType("MATERIAL_ISSUE");
+        materialIssue.setWorkOrderId(3L);
+        when(workOrderMapper.selectById(3L)).thenReturn(workOrder("RELEASED"));
+        when(orderMapper.selectOne(any())).thenReturn(materialIssue);
+        when(detailMapper.selectList(any())).thenReturn(List.of(detail(4L, "6.0000")));
+        WmsInventory mixed = inventory("6.0000");
+        mixed.setLockedQuantity(new BigDecimal("4.0000"));
+        when(inventoryMapper.selectOne(any())).thenReturn(mixed);
+        stubMaterialIssueRequirement();
+        var reservation = new com.neuedu.ems.entity.mfg.MfgSupplyAllocation();
+        reservation.setMaterialId(11L);
+        reservation.setInventoryId(6L);
+        reservation.setReservedQuantity(new BigDecimal("4.0000"));
+        when(supplyAllocations.reservedAllocationsForWorkOrder(3L)).thenReturn(List.of(reservation));
+        when(supplyAllocations.consumeReservation(any(), any(), any(), any(), any(), any()))
+                .thenReturn(new BigDecimal("4.0000"));
+
+        assertTrue(service.confirmOutboundOrder(1L, 9L, "确认领料"));
+
+        ArgumentCaptor<WmsInventory> inventoryUpdate = ArgumentCaptor.forClass(WmsInventory.class);
+        verify(inventoryMapper).updateById(inventoryUpdate.capture());
+        assertEquals(new BigDecimal("4.0000"), inventoryUpdate.getValue().getAvailableQuantity());
+        assertEquals(new BigDecimal("0.0000"), inventoryUpdate.getValue().getLockedQuantity());
+    }
+
+    @Test
+    void materialIssuePreviewRejectsReservationsInAnotherWarehouse() {
+        when(workOrderMapper.selectOne(any())).thenReturn(workOrder(BusinessStatus.Document.RELEASED));
+        when(warehouseMapper.selectOne(any())).thenReturn(warehouse());
+        MfgWorkOrderMaterial requirement = new MfgWorkOrderMaterial();
+        requirement.setWorkOrderId(3L);
+        requirement.setMaterialId(11L);
+        requirement.setRequiredQuantity(new BigDecimal("8.0000"));
+        requirement.setIssuedQuantity(BigDecimal.ZERO);
+        when(materialMapper.selectList(any())).thenReturn(List.of(requirement));
+        var reservation = new com.neuedu.ems.entity.mfg.MfgSupplyAllocation();
+        reservation.setMaterialId(11L);
+        reservation.setInventoryId(99L);
+        reservation.setReservedQuantity(new BigDecimal("8.0000"));
+        var allocations = (com.neuedu.ems.service.mfg.SupplyAllocationService)
+                ReflectionTestUtils.getField(service, "supplyAllocations");
+        when(allocations.reservedAllocationsForWorkOrder(3L)).thenReturn(List.of(reservation));
+        WmsInventory otherWarehouse = inventory("0.0000");
+        otherWarehouse.setWarehouseId(999L);
+        when(inventoryMapper.selectById(99L)).thenReturn(otherWarehouse);
+        when(inventoryMapper.selectList(any())).thenReturn(List.of());
+
+        assertThrows(BusinessException.class, () -> service.validateMaterialIssueAvailability(3L, 2L));
+        verify(orderMapper, never()).insert(any(WmsOutboundOrder.class));
+        verify(inventoryMapper, never()).updateById(any(WmsInventory.class));
+    }
+
+    @Test
+    void materialIssuePreviewUsesBatchReleaseRulesWithoutWriting() {
+        when(workOrderMapper.selectOne(any())).thenReturn(workOrder(BusinessStatus.Document.RELEASED));
+        when(warehouseMapper.selectOne(any())).thenReturn(warehouse());
+        MfgWorkOrderMaterial requirement = new MfgWorkOrderMaterial();
+        requirement.setRequirementId(20L);
+        requirement.setWorkOrderId(3L);
+        requirement.setMaterialId(11L);
+        requirement.setRequiredQuantity(new BigDecimal("8.0000"));
+        requirement.setIssuedQuantity(BigDecimal.ZERO);
+        when(materialMapper.selectList(any())).thenReturn(List.of(requirement));
+        when(inventoryMapper.selectList(any())).thenReturn(List.of(inventory("8.0000")));
+
+        service.validateMaterialIssueAvailability(3L, 2L);
+        when(batchMapper.selectOne(any())).thenReturn(batch(BusinessStatus.Quality.FAIL, "AVAILABLE"));
+        assertThrows(BusinessException.class, () -> service.validateMaterialIssueAvailability(3L, 2L));
+        verify(orderMapper, never()).insert(any(WmsOutboundOrder.class));
+        verify(detailMapper, never()).insert(any(WmsOutboundDetail.class));
+        verify(inventoryMapper, never()).updateById(any(WmsInventory.class));
+        verify(movementMapper, never()).insert(any(WmsStockMovement.class));
     }
 
     @Test
@@ -265,6 +469,89 @@ class WmsOutboundOrderServiceImplTest {
     }
 
     @Test
+    void generateMaterialIssueReplaysOriginalOrderWhenSameRequestKeyAndDigest() {
+        when(workOrderMapper.selectOne(any())).thenReturn(workOrder(BusinessStatus.Document.RELEASED));
+        when(commandRequests.replayed(any(), any(), any())).thenReturn(40L);
+        WmsOutboundOrder replayed = order();
+        replayed.setOutboundId(40L);
+        replayed.setOutboundType("MATERIAL_ISSUE");
+        replayed.setWorkOrderId(3L);
+        when(orderMapper.selectById(40L)).thenReturn(replayed);
+
+        WmsOutboundOrder generated = service.generateMaterialIssue(3L, 2L, 9L, null, "issue-key-1");
+
+        assertEquals(40L, generated.getOutboundId());
+        verify(orderMapper, never()).insert(any(WmsOutboundOrder.class));
+        verify(detailMapper, never()).insert(any(WmsOutboundDetail.class));
+        verify(inventoryMapper, never()).selectList(any());
+    }
+
+    @Test
+    void generateMaterialIssueRejectsSameRequestKeyWithChangedParameters() {
+        when(workOrderMapper.selectOne(any())).thenReturn(workOrder(BusinessStatus.Document.RELEASED));
+        when(commandRequests.replayed(any(), any(), any()))
+                .thenThrow(new BusinessException(com.neuedu.ems.common.ResultCode.BUSINESS_ERROR.getCode(),
+                        "同一命令请求键的请求参数已变化，不能复用原结果"));
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.generateMaterialIssue(3L, 2L, 9L, null, "issue-key-1"));
+
+        assertTrue(error.getMessage().contains("不能复用原结果"));
+        verify(orderMapper, never()).insert(any(WmsOutboundOrder.class));
+    }
+
+    @Test
+    void generateMaterialIssueRecordsCommandRequestWhenKeyProvided() {
+        when(workOrderMapper.selectOne(any())).thenReturn(workOrder(BusinessStatus.Document.RELEASED));
+        when(warehouseMapper.selectOne(any())).thenReturn(warehouse());
+        when(orderMapper.selectList(any())).thenReturn(List.of());
+        MfgWorkOrderMaterial requirement = new MfgWorkOrderMaterial();
+        requirement.setRequirementId(20L);
+        requirement.setWorkOrderId(3L);
+        requirement.setMaterialId(11L);
+        requirement.setRequiredQuantity(new BigDecimal("10.0000"));
+        requirement.setIssuedQuantity(new BigDecimal("2.0000"));
+        when(materialMapper.selectList(any())).thenReturn(List.of(requirement));
+        when(inventoryMapper.selectList(any())).thenReturn(List.of(inventory("8.0000")));
+        when(orderMapper.insert(any(WmsOutboundOrder.class))).thenAnswer(invocation -> {
+            invocation.<WmsOutboundOrder>getArgument(0).setOutboundId(40L);
+            return 1;
+        });
+        when(detailMapper.insert(any(WmsOutboundDetail.class))).thenReturn(1);
+
+        service.generateMaterialIssue(3L, 2L, 9L, "首单", "issue-key-1");
+
+        verify(commandRequests).record(eq(com.neuedu.ems.entity.mfg.MfgCommandRequest.COMMAND_MATERIAL_ISSUE_GENERATE),
+                eq("issue-key-1"), eq(com.neuedu.ems.entity.mfg.MfgCommandRequest.AGGREGATE_WORK_ORDER),
+                eq(3L), eq("digest"), eq(40L), eq(9L), eq("首单"), any());
+    }
+
+    @Test
+    void generateMaterialIssueSkipsCommandRequestWhenKeyAbsent() {
+        when(workOrderMapper.selectOne(any())).thenReturn(workOrder(BusinessStatus.Document.RELEASED));
+        when(warehouseMapper.selectOne(any())).thenReturn(warehouse());
+        when(orderMapper.selectList(any())).thenReturn(List.of());
+        MfgWorkOrderMaterial requirement = new MfgWorkOrderMaterial();
+        requirement.setRequirementId(20L);
+        requirement.setWorkOrderId(3L);
+        requirement.setMaterialId(11L);
+        requirement.setRequiredQuantity(new BigDecimal("10.0000"));
+        requirement.setIssuedQuantity(new BigDecimal("2.0000"));
+        when(materialMapper.selectList(any())).thenReturn(List.of(requirement));
+        when(inventoryMapper.selectList(any())).thenReturn(List.of(inventory("8.0000")));
+        when(orderMapper.insert(any(WmsOutboundOrder.class))).thenAnswer(invocation -> {
+            invocation.<WmsOutboundOrder>getArgument(0).setOutboundId(40L);
+            return 1;
+        });
+        when(detailMapper.insert(any(WmsOutboundDetail.class))).thenReturn(1);
+
+        service.generateMaterialIssue(3L, 2L, 9L, null);
+
+        verify(commandRequests, never()).replayed(any(), any(), any());
+        verify(commandRequests, never()).record(any(), any(), any(), any(), any(), any(), any(), any(), any());
+    }
+
+    @Test
     void combinedQuantityAboveAvailableInventoryIsRejectedBeforeMutation() {
         when(detailMapper.selectList(any())).thenReturn(List.of(detail(4L, "6.0000"), detail(5L, "5.0000")));
         when(inventoryMapper.selectOne(any())).thenReturn(inventory("10.0000"));
@@ -322,6 +609,19 @@ class WmsOutboundOrderServiceImplTest {
         verify(detailMapper, never()).updateById(any(WmsOutboundDetail.class));
     }
 
+    /** 生产领料确认必须有有效用料需求，这里给一条与明细物料一致的缺口需求。 */
+    private void stubMaterialIssueRequirement() {
+        MfgWorkOrderMaterial requirement = new MfgWorkOrderMaterial();
+        requirement.setRequirementId(20L);
+        requirement.setWorkOrderId(3L);
+        requirement.setMaterialId(11L);
+        requirement.setRequiredQuantity(new BigDecimal("10.0000"));
+        requirement.setIssuedQuantity(new BigDecimal("2.0000"));
+        requirement.setVersion(1);
+        when(materialMapper.selectList(any())).thenReturn(List.of(requirement));
+        when(materialMapper.updateById(any(MfgWorkOrderMaterial.class))).thenReturn(1);
+    }
+
     private WmsOutboundOrder order() {
         WmsOutboundOrder order = new WmsOutboundOrder();
         order.setOutboundId(1L);
@@ -376,5 +676,14 @@ class WmsOutboundOrderServiceImplTest {
         warehouse.setWarehouseType("RAW");
         warehouse.setStatus(BusinessStatus.Common.ENABLE);
         return warehouse;
+    }
+
+    private WmsLocation location() {
+        WmsLocation location = new WmsLocation();
+        location.setLocationId(8L);
+        location.setWarehouseId(2L);
+        location.setLocationType("NORMAL");
+        location.setStatus(BusinessStatus.Common.ENABLE);
+        return location;
     }
 }

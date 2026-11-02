@@ -126,4 +126,37 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     List<NotificationRecipientAccount> listNotificationRecipients(
             @Param("employeeId") Long employeeId,
             @Param("requiredPermission") String requiredPermission);
+
+    /**
+     * 列出全部有效的超级管理员账号，作为责任收件人缺失时的兜底接收人。
+     * <p>
+     * 业务责任通知按"部门主管 + 业务查看权限"路由。当责任部门没有配置主管、
+     * 主管没有登录账号、或主管缺少对应业务权限时，收件人会解析为空，
+     * 事件会以 {@code NO_VALID_NOTIFICATION_RECIPIENT} 反复失败并最终停止重试，
+     * 通知就此静默丢失。兜底给超级管理员至少保证有人能看到并转派，
+     * 而不是让事件烂在 outbox 里。
+     * </p>
+     * <p>
+     * 账号 {@code admin} 与 {@code PermissionServiceImpl} 的处理保持一致：
+     * 该账号在权限上下文里始终被视为 {@code SUPER_ADMIN}，即使没有
+     * {@code sys_user_role} 记录（初始化数据只建账号不建角色时就是这样），
+     * 所以这里也把它算作兜底接收人，避免整个库没有任何 {@code SUPER_ADMIN}
+     * 角色绑定导致兜底同样落空。
+     * </p>
+     *
+     * @return 超级管理员账号列表；没有可用账号时返回空列表
+     */
+    @Select("""
+            SELECT DISTINCT user.user_id, user.employee_id
+            FROM sys_user user
+            LEFT JOIN sys_user_role user_role
+              ON user_role.user_id = user.user_id AND user_role.deleted_flag = 0
+            LEFT JOIN sys_role role
+              ON role.role_id = user_role.role_id
+             AND role.deleted_flag = 0 AND role.status = 'ENABLE'
+            WHERE user.status = 'ENABLE' AND user.deleted_flag = 0
+              AND (role.role_code = 'SUPER_ADMIN' OR user.username = 'admin')
+            ORDER BY user.user_id
+            """)
+    List<NotificationRecipientAccount> listSuperAdminRecipients();
 }

@@ -23,6 +23,18 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/qms/inspection-standard")
 public class QmsInspectionStandardController {
+    @Autowired private com.neuedu.ems.service.qms.InspectionStandardReviewService reviewService;
+
+    @PostMapping("/{id}/confirm")
+    public ResultData confirm(@PathVariable Long id,@RequestBody com.neuedu.ems.service.mdm.ProductParameterService.Review request,
+            @org.springframework.web.bind.annotation.RequestAttribute("userId") Long actor){
+        return ResultData.success(ResultCode.SUCCESS,reviewService.review(id,request.version(),actor,true));
+    }
+    @PostMapping("/{id}/reopen")
+    public ResultData reopen(@PathVariable Long id,@RequestBody com.neuedu.ems.service.mdm.ProductParameterService.Review request,
+            @org.springframework.web.bind.annotation.RequestAttribute("userId") Long actor){
+        return ResultData.success(ResultCode.SUCCESS,reviewService.review(id,request.version(),actor,false));
+    }
 
     @Autowired
     private QmsInspectionStandardService qmsInspectionStandardService;

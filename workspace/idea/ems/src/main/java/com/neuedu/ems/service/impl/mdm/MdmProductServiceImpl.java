@@ -34,6 +34,8 @@ public class MdmProductServiceImpl extends ServiceImpl<MdmProductMapper, MdmProd
 
     @Override
     public boolean saveProduct(MdmProduct product) {
+        // 新增产品进入受控流程；迁移前历史产品保留原流程，普通 CRUD 不允许撤销登记。
+        product.setPreparationControlled(1);
         if (product.getDeletedFlag() == null) {
             product.setDeletedFlag(0);
         }
@@ -46,6 +48,7 @@ public class MdmProductServiceImpl extends ServiceImpl<MdmProductMapper, MdmProd
             return false;
         }
         product.setDeletedFlag(null);
+        product.setPreparationControlled(null);
         return baseMapper.updateById(product) > 0;
     }
 

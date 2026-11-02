@@ -27,6 +27,14 @@ public class WmsStockMovement {
     private Long sourceOrderId;
     private Long materialId;
     private Long batchId;
+    /** 发生仓库，用于解释线边移库。 */
+    private Long warehouseId;
+    /** 发生库位，用于解释线边移库。 */
+    private Long locationId;
+    /** 关联工单，0 表示公共库存业务。 */
+    private Long workOrderId;
+    /** 成对转移号：同批次移库的出入两笔共享同一编号。 */
+    private String pairNo;
     private BigDecimal quantity;
     private String direction;
     private LocalDateTime operationTime;

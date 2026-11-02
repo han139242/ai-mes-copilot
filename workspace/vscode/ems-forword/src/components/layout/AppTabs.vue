@@ -1,69 +1,85 @@
 <script setup>
-import { computed, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
-import AppIcon from '@/components/common/AppIcon.vue'
-import { firstAccessiblePath, getModuleDefinition } from '@/config/navigation'
+import { watch } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+import AppIcon from '@/components/common/AppIcon.vue';
+import { firstAccessiblePath, getModuleDefinition } from '@/config/navigation';
 
 // refresh事件交给layout处理，因为重新创建RouterView组件需要由父布局修改key。
-const emit = defineEmits(['refresh'])
-const route = useRoute()
-const router = useRouter()
+const emit = defineEmits(['refresh']);
+const route = useRoute();
+const router = useRouter();
 
 // tabs与layout中的标签数组双向绑定，新增和关闭标签时父子组件看到同一份状态。
 const tabs = defineModel({
   type: Array,
-  default: () => []
-})
+  default: () => [],
+});
 
-// 当前路由完整地址就是当前激活标签的唯一标识，query不同也视为不同标签。
-const activePath = computed(() => route.fullPath)
+// 标签的身份是路由路径（不含 query）。业务页的下钻、筛选、定位都以 query 表达，
+// 同一个页面换一组 query 仍然是一个页面，不能每次都新开一个同名标签。
+function tabIdentity(currentRoute) {
+  return currentRoute.path;
+}
 
 // 普通页面标题来自route.meta；模块首页需要根据动态moduleKey查询模块名称。
 function routeTitle(currentRoute) {
   if (currentRoute.name === 'ModuleHub') {
-    return getModuleDefinition(currentRoute.params.moduleKey).title
+    return getModuleDefinition(currentRoute.params.moduleKey).title;
   }
-  return currentRoute.meta.title || '未命名页面'
+  return currentRoute.meta.title || '未命名页面';
 }
 
-// 每次路由变化都把当前页面加入标签栏；相同fullPath只更新标题，不重复添加。
+// 每次路由变化都把当前页面加入标签栏。同一个路径只保留一个标签，
+// 但记住最近一次的 fullPath，这样从标签切回来时还能带上原来的筛选条件。
 function addCurrentRoute(currentRoute) {
   if (!currentRoute.name || currentRoute.meta.public) {
-    return
+    return;
   }
-  const exists = tabs.value.some((tab) => tab.path === currentRoute.fullPath)
-  if (!exists) {
+  const identity = tabIdentity(currentRoute);
+  const target = tabs.value.find((tab) => tab.path === identity);
+  if (!target) {
     tabs.value.push({
-      path: currentRoute.fullPath,
+      path: identity,
+      fullPath: currentRoute.fullPath,
       title: routeTitle(currentRoute),
-      affix: Boolean(currentRoute.meta.affix)
-    })
-  } else {
-    const target = tabs.value.find((tab) => tab.path === currentRoute.fullPath)
-    target.title = routeTitle(currentRoute)
+      affix: Boolean(currentRoute.meta.affix),
+    });
+    return;
   }
+  target.fullPath = currentRoute.fullPath;
+  target.title = routeTitle(currentRoute);
+}
+
+// 判断标签是否为当前页。query 变化不改变标签身份，所以这里只比路径。
+function isActive(tab) {
+  return tab.path === route.path;
 }
 
 // 固定首页不能关闭；关闭当前标签后自动跳到右侧、左侧或首页。
 function closeTab(tab) {
   if (tab.affix) {
-    return
+    return;
   }
-  const index = tabs.value.findIndex((item) => item.path === tab.path)
-  tabs.value.splice(index, 1)
-  if (activePath.value === tab.path) {
-    const next = tabs.value[index] || tabs.value[index - 1] || { path: firstAccessiblePath('/forbidden') }
-    router.push(next.path)
+  const index = tabs.value.findIndex((item) => item.path === tab.path);
+  tabs.value.splice(index, 1);
+  if (isActive(tab)) {
+    const next = tabs.value[index] || tabs.value[index - 1];
+    // 切回标签时优先回到它记住的 fullPath，没有历史地址时才退回路径。
+    router.push(next ? next.fullPath || next.path : firstAccessiblePath('/forbidden'));
   }
 }
 
 // 保留固定标签和当前标签，移除其余已打开页面。
 function closeOthers() {
-  tabs.value = tabs.value.filter((tab) => tab.affix || tab.path === activePath.value)
+  tabs.value = tabs.value.filter((tab) => tab.affix || isActive(tab));
 }
 
 // immediate使组件首次加载时也立刻登记当前路由。
-watch(() => route.fullPath, () => addCurrentRoute(route), { immediate: true })
+watch(
+  () => route.fullPath,
+  () => addCurrentRoute(route),
+  { immediate: true },
+);
 </script>
 
 <template>
@@ -75,8 +91,8 @@ watch(() => route.fullPath, () => addCurrentRoute(route), { immediate: true })
         :key="tab.path"
         type="button"
         class="tab-item"
-        :class="{ active: tab.path === activePath }"
-        @click="router.push(tab.path)"
+        :class="{ active: isActive(tab) }"
+        @click="router.push(tab.fullPath || tab.path)"
       >
         <span class="tab-title">{{ tab.title }}</span>
         <span
@@ -165,10 +181,10 @@ watch(() => route.fullPath, () => addCurrentRoute(route), { immediate: true })
 
 .tab-item.active {
   z-index: 1;
-  color: var(--mes-primary);
+  color: var(--mes-text);
   background: var(--mes-tab-surface);
   box-shadow: inset 0 -2px 0 var(--mes-primary);
-  font-weight: 620;
+  font-weight: 600;
 }
 
 .tab-title {

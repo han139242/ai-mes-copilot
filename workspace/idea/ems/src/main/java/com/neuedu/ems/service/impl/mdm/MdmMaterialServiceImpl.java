@@ -6,6 +6,10 @@ import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
 import com.neuedu.ems.entity.mdm.MdmMaterial;
 import com.neuedu.ems.mapper.mdm.MdmMaterialMapper;
 import com.neuedu.ems.service.mdm.MdmMaterialService;
+import com.neuedu.ems.service.mdm.MaterialQuantityPolicy;
+import com.neuedu.ems.exception.BusinessException;
+import com.neuedu.ems.common.ResultCode;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -16,6 +20,7 @@ import java.util.List;
  */
 @Service
 public class MdmMaterialServiceImpl extends ServiceImpl<MdmMaterialMapper, MdmMaterial> implements MdmMaterialService {
+    @Autowired private MaterialQuantityPolicy quantityPolicy;
 
     @Override
     public Page<MdmMaterial> pageMaterials(Integer current, Integer size, String materialCode,
@@ -34,6 +39,7 @@ public class MdmMaterialServiceImpl extends ServiceImpl<MdmMaterialMapper, MdmMa
 
     @Override
     public boolean saveMaterial(MdmMaterial material) {
+        quantityPolicy.validateDefinition(material);
         if (material.getDeletedFlag() == null) {
             material.setDeletedFlag(0);
         }
@@ -45,6 +51,16 @@ public class MdmMaterialServiceImpl extends ServiceImpl<MdmMaterialMapper, MdmMa
         if (material.getMaterialId() == null) {
             return false;
         }
+        MdmMaterial existing = getMaterialById(material.getMaterialId());
+        if (existing == null) return false;
+        MdmMaterial effective = new MdmMaterial();
+        effective.setQuantityMode(material.getQuantityMode() == null ? existing.getQuantityMode() : material.getQuantityMode());
+        effective.setIssueStep(material.getIssueStep() == null ? existing.getIssueStep() : material.getIssueStep());
+        quantityPolicy.validateDefinition(effective);
+        if ((!quantityPolicy.mode(existing).equals(quantityPolicy.mode(effective))
+                || quantityPolicy.step(existing).compareTo(quantityPolicy.step(effective)) != 0)
+                && baseMapper.movementCount(material.getMaterialId()) > 0)
+            throw new BusinessException(ResultCode.BUSINESS_ERROR.getCode(),"已产生库存流水的物料不能直接修改数量规则，请建立受控的新物料版本");
         material.setDeletedFlag(null);
         return baseMapper.updateById(material) > 0;
     }

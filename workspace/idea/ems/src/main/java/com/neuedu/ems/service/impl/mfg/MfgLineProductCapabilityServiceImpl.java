@@ -100,16 +100,14 @@ public class MfgLineProductCapabilityServiceImpl
         if (existing == null) {
             throw notFound("产线产品能力不存在或已删除");
         }
-        if (STATUS_DISABLE.equals(existing.getStatus())) {
-            return true;
-        }
-
-        MfgLineProductCapability update = new MfgLineProductCapability();
-        update.setCapabilityId(existing.getCapabilityId());
-        update.setStatus(STATUS_DISABLE);
-        update.setVersion(existing.getVersion());
-        if (baseMapper.updateById(update) == 0) {
-            throw new OptimisticLockConflictException();
+        if (!STATUS_DISABLE.equals(existing.getStatus())) {
+            MfgLineProductCapability update = new MfgLineProductCapability();
+            update.setCapabilityId(existing.getCapabilityId());
+            update.setStatus(STATUS_DISABLE);
+            update.setVersion(existing.getVersion());
+            if (baseMapper.updateById(update) == 0) {
+                throw new OptimisticLockConflictException();
+            }
         }
         return true;
     }

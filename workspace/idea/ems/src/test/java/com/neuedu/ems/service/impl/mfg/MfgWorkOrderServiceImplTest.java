@@ -60,9 +60,21 @@ class MfgWorkOrderServiceImplTest {
     private ProcessRouteMapper routeMapper;
     private MfgTaskMapper taskMapper;
 
+    private com.neuedu.ems.service.mfg.ComponentSupplyPlanningService componentSupply;
+
+    private com.neuedu.ems.service.mfg.SupplyAllocationService supplyAllocations;
+
     @BeforeEach
     void setUp() {
         service = new MfgWorkOrderServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
+        var materials = mock(com.neuedu.ems.mapper.mdm.MdmMaterialMapper.class);
+        var material = new com.neuedu.ems.entity.mdm.MdmMaterial();
+        material.setStatus("ENABLE"); material.setDeletedFlag(0);
+        when(materials.selectById(any())).thenReturn(material);
+        ReflectionTestUtils.setField(service,"materialDemands",new com.neuedu.ems.service.mdm.BomMaterialDemandService(materials,new com.neuedu.ems.service.mdm.MaterialQuantityPolicy()));
+        ReflectionTestUtils.setField(service,"productQuantities",mock(com.neuedu.ems.service.mdm.ProductQuantityService.class));
+        ReflectionTestUtils.setField(service,"preparationGate",mock(com.neuedu.ems.service.mdm.ManufacturingPreparationGate.class));
         workOrderMapper = mock(MfgWorkOrderMapper.class);
         planMapper = mock(MfgProductionPlanMapper.class);
         orderMapper = mock(MfgProductionOrderMapper.class);
@@ -70,6 +82,25 @@ class MfgWorkOrderServiceImplTest {
         bomItemMapper = mock(MdmBomItemMapper.class);
         materialMapper = mock(MfgWorkOrderMaterialMapper.class);
         inventoryMapper = mock(WmsInventoryMapper.class);
+        componentSupply = mock(com.neuedu.ems.service.mfg.ComponentSupplyPlanningService.class);
+        when(componentSupply.childBomReferences(any())).thenCallRealMethod();
+        when(componentSupply.qualifiedAvailable(any())).thenReturn(java.util.Map.of());
+        ReflectionTestUtils.setField(service,"componentSupply",componentSupply);
+        // P2B：预留与生成幂等记录用桩，默认"没有可用库存可预留"，保持原有缺口口径。
+        supplyAllocations = mock(com.neuedu.ems.service.mfg.SupplyAllocationService.class);
+        when(supplyAllocations.reserve(any(), any(), any(), any(), any())).thenAnswer(invocation -> {
+            MfgWorkOrderMaterial requirement = invocation.getArgument(0);
+            BigDecimal required = invocation.getArgument(1);
+            return new com.neuedu.ems.service.mfg.SupplyAllocationService.Reservation(
+                    BigDecimal.ZERO.setScale(4), required, List.of());
+        });
+        ReflectionTestUtils.setField(service,"supplyAllocations",supplyAllocations);
+        com.neuedu.ems.mapper.mfg.MfgGenerateRequestMapper generateRequests =
+                mock(com.neuedu.ems.mapper.mfg.MfgGenerateRequestMapper.class);
+        when(generateRequests.selectOne(any())).thenReturn(null);
+        when(generateRequests.insert(any(com.neuedu.ems.entity.mfg.MfgGenerateRequest.class))).thenReturn(1);
+        ReflectionTestUtils.setField(service,"generateRequests",generateRequests);
+        when(workOrderMapper.updateById(any(MfgWorkOrder.class))).thenReturn(1);
         capabilityMapper = mock(MfgLineProductCapabilityMapper.class);
         routeMapper = mock(ProcessRouteMapper.class);
         taskMapper = mock(MfgTaskMapper.class);
@@ -87,11 +118,23 @@ class MfgWorkOrderServiceImplTest {
         ReflectionTestUtils.setField(service, "mfgTaskMapper", taskMapper);
         ReflectionTestUtils.setField(service, "sysStatusChangeLogMapper", statusLogMapper);
         ReflectionTestUtils.setField(service, "sysOperationLogMapper", operationLogMapper);
+        // 冻结快照改造新增的依赖，测试里用空实现保证 releaseWorkOrder 可走完快照构建
+        ReflectionTestUtils.setField(service, "mdmProductMapper", mock(com.neuedu.ems.mapper.mdm.MdmProductMapper.class));
+        ReflectionTestUtils.setField(service, "mdmMaterialMapper", mock(com.neuedu.ems.mapper.mdm.MdmMaterialMapper.class));
+        ReflectionTestUtils.setField(service, "productParameterMapper", mock(com.neuedu.ems.mapper.mdm.MdmProductParameterMapper.class));
+        ReflectionTestUtils.setField(service, "routeItemMapper", mock(com.neuedu.ems.mapper.process.ProcessRouteItemMapper.class));
+        ReflectionTestUtils.setField(service, "operationMapper", mock(com.neuedu.ems.mapper.process.ProcessOperationMapper.class));
+        ReflectionTestUtils.setField(service, "inspectionSchemeMapper", mock(com.neuedu.ems.mapper.qms.QmsInspectionSchemeMapper.class));
+        ReflectionTestUtils.setField(service, "inspectionSchemeItemMapper", mock(com.neuedu.ems.mapper.qms.QmsInspectionSchemeItemMapper.class));
+        ReflectionTestUtils.setField(service, "inspectionStandardMapper", mock(com.neuedu.ems.mapper.qms.QmsInspectionStandardMapper.class));
+        ReflectionTestUtils.setField(service, "warehouseMapper", mock(com.neuedu.ems.mapper.wms.WmsWarehouseMapper.class));
+        ReflectionTestUtils.setField(service, "objectMapper", new com.fasterxml.jackson.databind.ObjectMapper());
         when(statusLogMapper.insert(any(SysStatusChangeLog.class))).thenReturn(1);
         when(operationLogMapper.insert(any(SysOperationLog.class))).thenReturn(1);
         when(bomItemMapper.selectList(any())).thenReturn(List.of(bomItem()));
         when(inventoryMapper.selectList(any())).thenReturn(List.of());
         when(materialMapper.insert(any(MfgWorkOrderMaterial.class))).thenReturn(1);
+        when(materialMapper.updateById(any(MfgWorkOrderMaterial.class))).thenReturn(1);
         when(materialMapper.selectCount(any())).thenReturn(1L);
         when(materialMapper.selectList(any())).thenReturn(List.of(readyRequirement()));
     }
@@ -105,7 +148,7 @@ class MfgWorkOrderServiceImplTest {
         WmsInventory inventory = new WmsInventory();
         inventory.setMaterialId(21L);
         inventory.setAvailableQuantity(new BigDecimal("150"));
-        when(inventoryMapper.selectList(any())).thenReturn(List.of(inventory));
+        when(componentSupply.qualifiedAvailable(any())).thenReturn(java.util.Map.of(21L,new BigDecimal("150")));
         when(workOrderMapper.insert(any(MfgWorkOrder.class))).thenAnswer(invocation -> {
             invocation.<MfgWorkOrder>getArgument(0).setWorkOrderId(5L);
             return 1;
@@ -119,14 +162,71 @@ class MfgWorkOrderServiceImplTest {
         assertEquals(12L, result.getBomId());
         assertEquals(13L, result.getRouteId());
         assertEquals(new BigDecimal("100"), result.getPlannedQuantity());
-        assertTrue(result.getWorkOrderNo().startsWith("WO-2-"));
+        assertTrue(result.getWorkOrderNo().startsWith("T-WO-20261027-"));
         ArgumentCaptor<MfgWorkOrderMaterial> requirement = ArgumentCaptor.forClass(MfgWorkOrderMaterial.class);
         verify(materialMapper).insert(requirement.capture());
         assertEquals(5L, requirement.getValue().getWorkOrderId());
         assertEquals(21L, requirement.getValue().getMaterialId());
         assertEquals(new BigDecimal("206.0000"), requirement.getValue().getRequiredQuantity());
-        assertEquals(new BigDecimal("56.0000"), requirement.getValue().getShortageQuantity());
-        assertEquals("PARTIAL_READY", requirement.getValue().getStatus());
+        // 生成时未预留任何库存，缺口即全额需求。
+        assertEquals(new BigDecimal("206.0000"), requirement.getValue().getShortageQuantity());
+        assertEquals("WAIT_READY", requirement.getValue().getStatus());
+        ArgumentCaptor<MfgWorkOrderMaterial> reserved = ArgumentCaptor.forClass(MfgWorkOrderMaterial.class);
+        verify(materialMapper).updateById(reserved.capture());
+        assertEquals(new BigDecimal("206.0000"), reserved.getValue().getShortageQuantity());
+        assertEquals(new BigDecimal("0.0000"), reserved.getValue().getReservedQuantity());
+        assertEquals("WAIT_READY", reserved.getValue().getStatus());
+    }
+
+    @Test
+    void generateReplaysOriginalRootWorkOrderWhenSameRequestKeyAndDigest() {
+        stubProductionDefinition();
+        when(planMapper.selectOne(any())).thenReturn(plan());
+        when(orderMapper.selectCount(any())).thenReturn(0L);
+        MfgWorkOrder existingRoot = new MfgWorkOrder();
+        existingRoot.setWorkOrderId(77L);
+        existingRoot.setWorkOrderNo("WO-2-EXISTING");
+        existingRoot.setDeletedFlag(0);
+        var generateRequests = (com.neuedu.ems.mapper.mfg.MfgGenerateRequestMapper)
+                ReflectionTestUtils.getField(service, "generateRequests");
+        MfgWorkOrder command = request("100");
+        command.setRequestKey("GEN-KEY-1");
+        String digest = (String) ReflectionTestUtils.invokeMethod(service, "generateDigest", 2L, plan(), command);
+        com.neuedu.ems.entity.mfg.MfgGenerateRequest recorded = new com.neuedu.ems.entity.mfg.MfgGenerateRequest();
+        recorded.setRequestKey("GEN-KEY-1");
+        recorded.setRequestDigest(digest);
+        recorded.setRootWorkOrderId(77L);
+        when(generateRequests.selectOne(any())).thenReturn(recorded);
+        when(workOrderMapper.selectById(77L)).thenReturn(existingRoot);
+
+        MfgWorkOrder result = service.generateWorkOrder(2L, command, 9L);
+
+        assertEquals(77L, result.getWorkOrderId());
+        assertEquals("WO-2-EXISTING", result.getWorkOrderNo());
+        existingRoot.setDeletedFlag(1);
+        assertThrows(BusinessException.class, () -> service.generateWorkOrder(2L, command, 9L));
+        verify(workOrderMapper, never()).insert(any(MfgWorkOrder.class));
+    }
+
+    @Test
+    void generateRejectsSameRequestKeyWithChangedParameters() {
+        stubProductionDefinition();
+        when(planMapper.selectOne(any())).thenReturn(plan());
+        var generateRequests = (com.neuedu.ems.mapper.mfg.MfgGenerateRequestMapper)
+                ReflectionTestUtils.getField(service, "generateRequests");
+        com.neuedu.ems.entity.mfg.MfgGenerateRequest recorded = new com.neuedu.ems.entity.mfg.MfgGenerateRequest();
+        recorded.setRequestKey("GEN-KEY-1");
+        recorded.setRequestDigest("different-digest");
+        recorded.setRootWorkOrderId(77L);
+        when(generateRequests.selectOne(any())).thenReturn(recorded);
+        MfgWorkOrder command = request("100");
+        command.setRequestKey("GEN-KEY-1");
+
+        BusinessException error = assertThrows(BusinessException.class,
+                () -> service.generateWorkOrder(2L, command, 9L));
+
+        assertTrue(error.getMessage().contains("不能复用原结果"));
+        verify(workOrderMapper, never()).insert(any(MfgWorkOrder.class));
     }
 
     @Test
@@ -340,6 +440,39 @@ class MfgWorkOrderServiceImplTest {
         plan.setPlannedQuantity(new BigDecimal("100"));
         plan.setStatus(BusinessStatus.Document.RELEASED);
         return plan;
+    }
+
+    @Test
+    void removeDraftWorkOrderReleasesItsMaterialReservation() {
+        MfgWorkOrder draft = new MfgWorkOrder();
+        draft.setWorkOrderId(7L);
+        draft.setStatus(BusinessStatus.Document.DRAFT);
+        draft.setVersion(0);
+        when(workOrderMapper.selectOne(any())).thenReturn(draft);
+        when(workOrderMapper.updateById(any(MfgWorkOrder.class))).thenReturn(1);
+        when(supplyAllocations.releaseForWorkOrders(any(), any(), any())).thenReturn(new BigDecimal("4"));
+
+        assertTrue(service.removeWorkOrderById(7L, 9L));
+
+        verify(workOrderMapper).updateById(any(MfgWorkOrder.class));
+        // 只把工单置删除标记而不释放预留，会把原料仓的可用量永久锁死。
+        verify(supplyAllocations).releaseForWorkOrders(
+                org.mockito.ArgumentMatchers.eq(List.of(7L)),
+                org.mockito.ArgumentMatchers.eq(9L),
+                any(LocalDateTime.class));
+    }
+
+    @Test
+    void removeReleasedWorkOrderIsRefusedAndKeepsReservation() {
+        MfgWorkOrder released = new MfgWorkOrder();
+        released.setWorkOrderId(8L);
+        released.setStatus(BusinessStatus.Document.RELEASED);
+        when(workOrderMapper.selectOne(any())).thenReturn(released);
+
+        assertTrue(!service.removeWorkOrderById(8L, 9L));
+
+        verify(workOrderMapper, never()).updateById(any(MfgWorkOrder.class));
+        verify(supplyAllocations, never()).releaseForWorkOrders(any(), any(), any());
     }
 
     private MfgProductionOrder order() {

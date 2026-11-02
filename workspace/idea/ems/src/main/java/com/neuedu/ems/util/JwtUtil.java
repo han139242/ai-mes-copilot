@@ -5,6 +5,9 @@ import io.jsonwebtoken.Jwts;
 import io.jsonwebtoken.security.Keys;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.util.StringUtils;
+import java.nio.charset.StandardCharsets;
 
 import javax.crypto.SecretKey;
 import java.util.Date;
@@ -18,6 +21,13 @@ import java.util.Map;
 @Component
 @Slf4j
 public class JwtUtil {
+    @Value("${mes.auth.jwt-secret:}")
+    private String configuredSecret = "";
+
+    private SecretKey signingKey() {
+        String value = StringUtils.hasText(configuredSecret) ? configuredSecret : JwtConstants.JWT_SECRET;
+        return Keys.hmacShaKeyFor(value.getBytes(StandardCharsets.UTF_8));
+    }
 
     /**
      * 生成JWT token
@@ -27,7 +37,7 @@ public class JwtUtil {
      */
     public String generateToken(Long userId, String username) {
         // 1. 创建签名密钥（使用HS256算法，密钥长度需≥32位）
-        SecretKey secretKey = Keys.hmacShaKeyFor(JwtConstants.JWT_SECRET.getBytes());
+        SecretKey secretKey = signingKey();
 
         // 2. 构建JWT的Payload（自定义声明）
         Map<String, Object> claims = new HashMap<>();
@@ -58,7 +68,7 @@ public class JwtUtil {
      */
     public Claims parseToken(String token) throws Exception {
         // 1. 创建签名密钥
-        SecretKey secretKey = Keys.hmacShaKeyFor(JwtConstants.JWT_SECRET.getBytes());
+        SecretKey secretKey = signingKey();
 
         // 2. 解析token，验证签名和过期时间
         return Jwts.parserBuilder()

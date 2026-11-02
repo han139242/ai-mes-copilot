@@ -144,7 +144,9 @@ public class TraceBarcodeServiceImpl extends ServiceImpl<TraceBarcodeMapper, Tra
     @Transactional
     public List<TraceBarcode> generateBarcodes(String barcodeType, String bizType, Long bizId, Integer quantity, String remark) {
         List<TraceBarcode> barcodes = new ArrayList<>();
-        if (!StringUtils.hasText(barcodeType) || !StringUtils.hasText(bizType) || bizId == null || quantity == null || quantity <= 0) {
+        boolean validTypes = StringUtils.hasText(barcodeType) && StringUtils.hasText(bizType);
+        boolean validQuantity = quantity != null && quantity > 0;
+        if (!validTypes || bizId == null || !validQuantity) {
             return barcodes;
         }
         String prefix = "BC" + LocalDateTime.now().format(BARCODE_FORMATTER);

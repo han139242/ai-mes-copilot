@@ -111,11 +111,36 @@ public class QmsInspectionResultServiceImpl extends ServiceImpl<QmsInspectionRes
         if (results == null) {
             return true;
         }
+        // 任一条不合规就整体不写，避免半批入库。
+        boolean normalized = normalizeAllInspectionResults(results);
+        if (normalized) {
+            insertAllInspectionResults(inspectionId, results);
+        }
+        return normalized;
+    }
+
+    /**
+     * 逐条校验并规整批量结果，任一条不合规就整体失败，避免半批写入。
+     *
+     * @param results 检验结果列表
+     * @return 是否全部合法
+     */
+    private boolean normalizeAllInspectionResults(List<QmsInspectionResult> results) {
         for (QmsInspectionResult result : results) {
             if (!normalizeInspectionResult(result)) {
                 return false;
             }
         }
+        return true;
+    }
+
+    /**
+     * 回填检验单主键与删除标记后逐条入库。
+     *
+     * @param inspectionId 检验单ID
+     * @param results      已经规整过的结果列表
+     */
+    private void insertAllInspectionResults(Long inspectionId, List<QmsInspectionResult> results) {
         for (QmsInspectionResult result : results) {
             result.setInspectionId(inspectionId);
             if (result.getDeletedFlag() == null) {
@@ -123,7 +148,6 @@ public class QmsInspectionResultServiceImpl extends ServiceImpl<QmsInspectionRes
             }
             baseMapper.insert(result);
         }
-        return true;
     }
 
     /**
@@ -133,6 +157,20 @@ public class QmsInspectionResultServiceImpl extends ServiceImpl<QmsInspectionRes
      */
     @Override
     public boolean updateInspectionResult(QmsInspectionResult inspectionResult) {
+        if (!canUpdateInspectionResult(inspectionResult)) {
+            return false;
+        }
+        inspectionResult.setDeletedFlag(null);
+        return baseMapper.updateById(inspectionResult) > 0;
+    }
+
+    /**
+     * 判断结果是否可以修改：主键必填、原记录存在、原检验单与新检验单都必须仍可变更，且字段合法。
+     *
+     * @param inspectionResult 待修改的检验结果
+     * @return 是否允许修改
+     */
+    private boolean canUpdateInspectionResult(QmsInspectionResult inspectionResult) {
         if (inspectionResult.getResultId() == null) {
             return false;
         }
@@ -140,14 +178,9 @@ public class QmsInspectionResultServiceImpl extends ServiceImpl<QmsInspectionRes
         if (existing == null || !canChangeInspectionOrder(existing.getInspectionId())) {
             return false;
         }
-        if (inspectionResult.getInspectionId() != null && !canChangeInspectionOrder(inspectionResult.getInspectionId())) {
-            return false;
-        }
-        if (!normalizeInspectionResult(inspectionResult)) {
-            return false;
-        }
-        inspectionResult.setDeletedFlag(null);
-        return baseMapper.updateById(inspectionResult) > 0;
+        boolean targetOrderChangeable = inspectionResult.getInspectionId() == null
+                || canChangeInspectionOrder(inspectionResult.getInspectionId());
+        return targetOrderChangeable && normalizeInspectionResult(inspectionResult);
     }
 
     /**

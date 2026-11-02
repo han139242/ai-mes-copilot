@@ -42,4 +42,25 @@ public interface SysEventOutboxMapper extends BaseMapper<SysEventOutbox> {
             WHERE deleted_flag = 0 AND status = 'PROCESSING' AND updated_time < #{staleBefore}
             """)
     int resetStale(@Param("staleBefore") LocalDateTime staleBefore, @Param("now") LocalDateTime now);
+
+    /**
+     * 周期性重复事件再次触发时，把已有的投递记录重新放回待投递队列。
+     * <p>
+     * 预警这类事件用固定的事件键（{@code ALERT:<预警编号>}），第二次提醒会撞上
+     * {@code uk_sys_event_outbox_event_key}，{@code INSERT IGNORE} 静默丢掉，
+     * 表现为"冷却到期后不再提醒"。这里把原记录的内容替换成最新载荷并重置重试状态，
+     * 让它重新走一遍投递；投递端按同一事件键刷新收件箱里的那一行，不会新增记录。
+     * </p>
+     */
+    @Update("""
+            UPDATE sys_event_outbox
+            SET payload_json = #{payloadJson}, status = 'PENDING', retry_count = 0,
+                next_retry_time = NULL, last_error = NULL, processed_time = NULL,
+                occurred_time = #{occurredTime}, updated_by = #{updatedBy}, updated_time = #{now},
+                version = version + 1
+            WHERE event_key = #{eventKey} AND deleted_flag = 0
+            """)
+    int revive(@Param("eventKey") String eventKey, @Param("payloadJson") String payloadJson,
+               @Param("occurredTime") LocalDateTime occurredTime, @Param("updatedBy") Long updatedBy,
+               @Param("now") LocalDateTime now);
 }

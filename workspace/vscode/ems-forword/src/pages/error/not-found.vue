@@ -1,13 +1,13 @@
 <script setup>
-import { useRouter } from 'vue-router'
-import AppIcon from '@/components/common/AppIcon.vue'
-import { firstAccessiblePath } from '@/config/navigation'
+import { useRouter } from 'vue-router';
+import AppIcon from '@/components/common/AppIcon.vue';
+import { firstAccessiblePath } from '@/config/navigation';
 
 // 404页面用于匹配不存在的地址，replace返回首页后不会把错误地址留在返回历史中。
-const router = useRouter()
+const router = useRouter();
 
 function returnHome() {
-  router.replace(firstAccessiblePath('/forbidden'))
+  router.replace(firstAccessiblePath('/forbidden'));
 }
 </script>
 

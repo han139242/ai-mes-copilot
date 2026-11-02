@@ -60,6 +60,7 @@ class QmsNonconformingOrderServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new QmsNonconformingOrderServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
         orderMapper = mock(QmsNonconformingOrderMapper.class);
         inspectionOrderMapper = mock(QmsInspectionOrderMapper.class);
         statusChangeLogMapper = mock(SysStatusChangeLogMapper.class);
@@ -213,8 +214,8 @@ class QmsNonconformingOrderServiceImplTest {
         prepareCompletion(BusinessStatus.Quality.SCRAP);
         MfgTask task = new MfgTask();
         task.setTaskId(100L);
-        when(taskService.createCompensationTask(eq(4L), eq(1L), eq(new BigDecimal("2")),
-                eq("SUPPLEMENT"), eq(9L), any())).thenReturn(task);
+        when(taskService.createScrapCompensationChain(eq(4L), eq(1L), eq(new BigDecimal("2")),
+                eq(9L), any())).thenReturn(List.of(task));
 
         Long taskId = service.completeDisposition(1L, false, 9L, "报废并补产");
 
@@ -235,6 +236,30 @@ class QmsNonconformingOrderServiceImplTest {
         ArgumentCaptor<TraceProductLot> lotUpdate = ArgumentCaptor.forClass(TraceProductLot.class);
         verify(productLotMapper).updateById(lotUpdate.capture());
         assertEquals(BusinessStatus.Quality.CONCESSION, lotUpdate.getValue().getStatus());
+    }
+
+    @Test void reportedProductionDefectsCannotUseConcessionToMeetGoodTarget() {
+        prepareCompletion(BusinessStatus.Quality.CONCESSION);
+        var inspection=failedInspection();inspection.setReportId(55L);
+        when(inspectionOrderMapper.selectOne(any())).thenReturn(inspection);
+        var mapper=(MfgWorkReportMapper)ReflectionTestUtils.getField(service,"mfgWorkReportMapper");
+        var report=new com.neuedu.ems.entity.mfg.MfgWorkReport();report.setDefectQuantity(new BigDecimal("2"));
+        when(mapper.selectOne(any())).thenReturn(report);
+        assertTrue(assertThrows(com.neuedu.ems.exception.BusinessException.class,
+                ()->service.completeDisposition(1L,false,9L,"直接接收不良")).getMessage().contains("不能"));
+        verify(orderMapper,never()).updateById(any(QmsNonconformingOrder.class));
+        verify(productLotMapper,never()).updateById(any(TraceProductLot.class));
+    }
+
+    @Test void dispositionDetailsCannotInflateOrUnderstateConfirmedDefectQuantity() {
+        prepareCompletion(BusinessStatus.Quality.SCRAP);
+        var detail=detail();detail.setDefectQuantity(new BigDecimal("3"));
+        when(detailMapper.selectList(any())).thenReturn(List.of(detail));
+        assertThrows(com.neuedu.ems.exception.BusinessException.class,()->service.completeDisposition(1L,false,9L,"三件超过确认的两件"));
+        detail.setDefectQuantity(BigDecimal.ONE);
+        assertThrows(com.neuedu.ems.exception.BusinessException.class,()->service.completeDisposition(1L,false,9L,"少做一件也不能关闭整批处置"));
+        verify(taskService,never()).createScrapCompensationChain(any(),any(),any(),any(),any());
+        verify(workOrderService,never()).addSupplementMaterialRequirements(any(),any(),any(),any());
     }
 
     private void prepareCompletion(String disposition) {

@@ -47,6 +47,7 @@ public class SensitivePhoneDtoMapper {
         entity.setCustomerId(request.getCustomerId());
         entity.setCustomerCode(request.getCustomerCode());
         entity.setCustomerName(request.getCustomerName());
+        entity.setNumberPrefix(request.getNumberPrefix());
         entity.setContactName(request.getContactName());
         entity.setStatus(request.getStatus());
         entity.setRemark(request.getRemark());
@@ -96,6 +97,7 @@ public class SensitivePhoneDtoMapper {
         view.setCustomerId(entity.getCustomerId());
         view.setCustomerCode(entity.getCustomerCode());
         view.setCustomerName(entity.getCustomerName());
+        view.setNumberPrefix(entity.getNumberPrefix());
         view.setContactName(entity.getContactName());
         view.setContactPhone(safeDisplay(SensitivePhoneField.CUSTOMER, entity.getContactPhone()));
         view.setStatus(entity.getStatus());

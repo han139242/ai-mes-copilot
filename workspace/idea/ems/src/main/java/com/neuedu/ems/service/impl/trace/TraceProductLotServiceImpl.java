@@ -39,6 +39,22 @@ public class TraceProductLotServiceImpl extends ServiceImpl<TraceProductLotMappe
 
     @Autowired
     private QmsInspectionResultMapper qmsInspectionResultMapper;
+    @Autowired private com.neuedu.ems.mapper.wms.WmsStockMovementMapper movements;
+
+    private void fillHandovers(List<TraceProductLot> lots) {
+        if (lots.isEmpty()) return;
+        List<Long> ids = lots.stream().map(TraceProductLot::getProductLotId).filter(java.util.Objects::nonNull).toList();
+        if (ids.isEmpty()) return;
+        Map<Long,java.math.BigDecimal> totals = new java.util.HashMap<>();
+        movements.selectList(new LambdaQueryWrapper<com.neuedu.ems.entity.wms.WmsStockMovement>()
+                .eq(com.neuedu.ems.entity.wms.WmsStockMovement::getMovementType,"COMPONENT_HANDOVER")
+                .eq(com.neuedu.ems.entity.wms.WmsStockMovement::getSourceOrderType,"PRODUCT_LOT")
+                .in(com.neuedu.ems.entity.wms.WmsStockMovement::getSourceOrderId,ids)
+                .eq(com.neuedu.ems.entity.wms.WmsStockMovement::getDirection,"IN")
+                .eq(com.neuedu.ems.entity.wms.WmsStockMovement::getDeletedFlag,0))
+                .forEach(m -> totals.merge(m.getSourceOrderId(),m.getQuantity(),java.math.BigDecimal::add));
+        lots.forEach(l -> l.setHandedOverQuantity(totals.getOrDefault(l.getProductLotId(),java.math.BigDecimal.ZERO)));
+    }
 
     /**
      * 分页查询产品批次，默认过滤已删除记录。
@@ -54,7 +70,9 @@ public class TraceProductLotServiceImpl extends ServiceImpl<TraceProductLotMappe
     public Page<TraceProductLot> pageProductLots(Integer current, Integer size, String keyword, Long productId,
                                                  Long workOrderId, String status) {
         Page<TraceProductLot> page = new Page<>(current, size);
-        return baseMapper.selectPage(page, buildProductLotQuery(keyword, productId, workOrderId, status));
+        var result = baseMapper.selectPage(page, buildProductLotQuery(keyword, productId, workOrderId, status));
+        fillHandovers(result.getRecords());
+        return result;
     }
 
     /**
@@ -67,7 +85,9 @@ public class TraceProductLotServiceImpl extends ServiceImpl<TraceProductLotMappe
      */
     @Override
     public List<TraceProductLot> listProductLots(String keyword, Long productId, Long workOrderId, String status) {
-        return baseMapper.selectList(buildProductLotQuery(keyword, productId, workOrderId, status));
+        var result = baseMapper.selectList(buildProductLotQuery(keyword, productId, workOrderId, status));
+        fillHandovers(result);
+        return result;
     }
 
     /**
@@ -80,7 +100,9 @@ public class TraceProductLotServiceImpl extends ServiceImpl<TraceProductLotMappe
         LambdaQueryWrapper<TraceProductLot> queryWrapper = new LambdaQueryWrapper<>();
         queryWrapper.eq(TraceProductLot::getProductLotId, productLotId)
                 .eq(TraceProductLot::getDeletedFlag, 0);
-        return baseMapper.selectOne(queryWrapper);
+        var result = baseMapper.selectOne(queryWrapper);
+        if (result != null) fillHandovers(List.of(result));
+        return result;
     }
 
     /**

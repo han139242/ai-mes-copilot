@@ -1,73 +1,92 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
-import dayjs from 'dayjs'
-import AppIcon from '@/components/common/AppIcon.vue'
-import { chatWithAi, getAiStatus, getDashboardInsight, getModuleSuggestion } from '@/api/ai'
-import { isFrameworkPreview } from '@/utils/auth'
+import { computed, ref, watch } from 'vue';
+import dayjs from 'dayjs';
+import AppIcon from '@/components/common/AppIcon.vue';
+import AiResultBlocks from '@/components/ai/AiResultBlocks.vue';
+import { aiHistory } from '@/utils/ai-results';
+import { appName } from '@/config/branding';
+import { chatWithAi, getAiStatus } from '@/api/ai';
+import { isFrameworkPreview } from '@/utils/auth';
 
 // 这是各业务页面可复用的侧边AI助手；open由父组件v-model控制，module决定AI分析上下文。
-const open = defineModel({ type: Boolean, default: false })
+const open = defineModel({ type: Boolean, default: false });
 // module由父页面传入，决定AI使用通用、看板还是具体业务模块接口。
 const props = defineProps({
-  module: { type: String, default: 'general' }
-})
+  module: { type: String, default: 'general' },
+});
 
 // status描述后端开关、密钥配置和模型可用性；messages保存当前抽屉中的临时对话。
-const previewMode = isFrameworkPreview()
-const loadingStatus = ref(false)
-const sending = ref(false)
-const question = ref('')
+const previewMode = isFrameworkPreview();
+const loadingStatus = ref(false);
+const sending = ref(false);
+const question = ref('');
 const status = ref({
   enabled: false,
   configured: false,
   available: false,
   state: 'DISABLED',
   provider: 'DEEPSEEK',
-  model: null
-})
+  model: null,
+});
 const messages = ref([
   {
     id: 1,
     role: 'assistant',
-    content: '你好，我是羽球智造 AI 助手。可以协助解读生产、质量、库存和设备数据。',
-    time: dayjs().format('HH:mm')
-  }
-])
-let abortController
+    content: `你好，我是${appName} AI 助手。可以协助解读生产、质量、库存和设备数据。`,
+    time: dayjs().format('HH:mm'),
+  },
+]);
+let abortController;
 
 // 快捷问题只是把常见问题填入输入框，最终仍调用与手工输入相同的sendQuestion流程。
-const quickQuestions = [
-  '解读今日生产情况',
-  '分析当前质量风险',
-  '检查库存与设备异常'
-]
+const quickQuestions = ['解读今日生产情况', '分析当前质量风险', '检查库存与设备异常'];
 
 // 将后端AI状态编码转换成用户能看到的服务状态文字。
 const statusLabel = computed(() => {
-  if (status.value.state === 'READY') return '服务就绪'
-  if (status.value.state === 'MISCONFIGURED') return '配置不完整'
-  return '服务未启用'
-})
+  if (status.value.state === 'READY') {
+    return '服务就绪';
+  }
+  if (status.value.queryAvailable) {
+    return '业务查询可用';
+  }
+  if (status.value.state === 'MISCONFIGURED') {
+    return '配置不完整';
+  }
+  return '服务未启用';
+});
 
 // 将AI状态转换为CSS色调名称，用于正常、警告和离线三种视觉样式。
 const statusTone = computed(() => {
-  if (status.value.state === 'READY') return 'ready'
-  if (status.value.state === 'MISCONFIGURED') return 'warning'
-  return 'offline'
-})
+  if (status.value.state === 'READY') {
+    return 'ready';
+  }
+  if (status.value.state === 'MISCONFIGURED') {
+    return 'warning';
+  }
+  return 'offline';
+});
 
 // 服务可用时提示输入问题，不可用时明确禁止发送。
 const inputPlaceholder = computed(() => {
-  if (status.value.available) return '输入需要分析的问题'
-  return 'AI 服务尚未可用'
-})
+  if (status.value.available) {
+    return '输入需要分析的问题';
+  }
+  return 'AI 服务尚未可用';
+});
+
+// 对话或查询任一通道可用就算能发问，供各处的发送前判断复用。
+const serviceUsable = computed(() => Boolean(status.value.available || status.value.queryAvailable));
 
 // 统一清洗父组件传入的模块名称，避免大小写和空格影响接口选择。
-const normalizedModule = computed(() => String(props.module || 'general').trim().toLowerCase())
+const normalizedModule = computed(() =>
+  String(props.module || 'general')
+    .trim()
+    .toLowerCase(),
+);
 // 仪表盘、具体业务模块和普通聊天使用三个不同后端提示词接口。
-const dashboardContext = computed(() => normalizedModule.value === 'dashboard')
+const dashboardContext = computed(() => normalizedModule.value === 'dashboard');
 // 除dashboard和general外的名称都按具体业务模块分析。
-const moduleContext = computed(() => !['dashboard', 'general'].includes(normalizedModule.value))
+const moduleContext = computed(() => !['dashboard', 'general'].includes(normalizedModule.value));
 
 // 查询后端AI开关和模型配置，并更新抽屉顶部的服务状态。
 async function loadStatus() {
@@ -79,81 +98,86 @@ async function loadStatus() {
       available: false,
       state: 'DISABLED',
       provider: 'DEEPSEEK',
-      model: null
-    }
-    return
+      model: null,
+    };
+    return;
   }
 
-  loadingStatus.value = true
+  loadingStatus.value = true;
   try {
-    const result = await getAiStatus()
-    status.value = result.data || status.value
+    const result = await getAiStatus();
+    status.value = result.data || status.value;
   } catch {
-    status.value = { ...status.value, available: false, state: 'DISABLED' }
+    status.value = { ...status.value, available: false, state: 'DISABLED' };
   } finally {
-    loadingStatus.value = false
+    loadingStatus.value = false;
   }
 }
 
 // 点击快捷问题后写入输入框；服务可用时直接发送。
 function selectQuickQuestion(value) {
-  question.value = value
+  question.value = value;
   if (status.value.available) {
-    sendQuestion()
+    sendQuestion();
   }
 }
 
 // 从后端详情、Axios显示消息和统一兜底中选择最适合用户的AI错误说明。
 function resolveAiErrorMessage(error) {
   // 优先显示后端业务错误，其次使用Axios拦截器整理的错误，最后使用通用文案。
-  const detail = error?.data?.message
+  const detail = error?.data?.message;
   if (typeof detail === 'string' && detail.trim()) {
-    return detail.trim()
+    return detail.trim();
   }
   if (typeof error?.displayMessage === 'string' && error.displayMessage.trim()) {
-    return error.displayMessage.trim()
+    return error.displayMessage.trim();
   }
-  return '本次分析未完成，请稍后重试。'
+  return '本次分析未完成，请稍后重试。';
 }
 
 // 将用户问题加入消息列表，选择对应AI接口，并把回答或错误追加回会话。
 async function sendQuestion() {
   // 防止空问题、重复提交和服务不可用时发送请求。
-  const content = question.value.trim()
-  if (!content || sending.value || !status.value.available) {
-    return
+  const content = question.value.trim();
+  if (!content || sending.value || !serviceUsable.value) {
+    return;
   }
 
   messages.value.push({
     id: Date.now(),
     role: 'user',
     content,
-    time: dayjs().format('HH:mm')
-  })
-  question.value = ''
-  sending.value = true
+    time: dayjs().format('HH:mm'),
+  });
+  question.value = '';
+  sending.value = true;
   // 每次提问创建独立AbortController，用户可在模型生成过程中点击停止。
-  abortController = new AbortController()
+  abortController = new AbortController();
 
   try {
-    // 根据module选择对应AI接口，signal传给Axios用于取消本次HTTP请求。
-    const requestAi = dashboardContext.value
-      ? getDashboardInsight
-      : moduleContext.value ? getModuleSuggestion : chatWithAi
-    const result = await requestAi({
-      question: content,
-      module: normalizedModule.value
-    }, abortController.signal)
-    const answer = result.data || {}
+    // 统一入口先查询真实业务数据，未命中时再结合模块上下文解释。
+    const requestAi = chatWithAi;
+    const result = await requestAi(
+      {
+        question: content,
+        messages: aiHistory(messages.value.slice(0, -1)),
+        module: normalizedModule.value,
+      },
+      abortController.signal,
+    );
+    const answer = result.data || {};
     messages.value.push({
       id: Date.now() + 1,
       role: 'assistant',
       content: answer.answer || '暂时没有生成可用内容。',
+      blocks: Array.isArray(answer.blocks) ? answer.blocks : [],
       suggestions: Array.isArray(answer.suggestions) ? answer.suggestions : [],
+      // 这次没读到的业务数据项，要让用户知道结论缺了哪一块。
+      dataGaps: Array.isArray(answer.businessDataGaps) ? answer.businessDataGaps : [],
       disclaimer: answer.disclaimer || '智能建议，仅供参考',
       model: answer.model,
-      time: dayjs(answer.generatedAt || undefined).format('HH:mm')
-    })
+      time: dayjs(answer.generatedAt || undefined).format('HH:mm'),
+    });
   } catch (error) {
     if (error.code !== 'ERR_CANCELED') {
       messages.value.push({
@@ -161,37 +185,39 @@ async function sendQuestion() {
         role: 'system',
         content: resolveAiErrorMessage(error),
         retryQuestion: content,
-        time: dayjs().format('HH:mm')
-      })
+        time: dayjs().format('HH:mm'),
+      });
     }
   } finally {
-    sending.value = false
-    abortController = null
+    sending.value = false;
+    abortController = null;
   }
 }
 
 // 主动终止当前AbortController关联的Axios请求。
 function cancelRequest() {
   // abort后Axios抛出ERR_CANCELED，catch中不会把它当成真正错误显示。
-  abortController?.abort()
+  abortController?.abort();
 }
 
 // 把失败消息保存的原问题重新放入输入框并再次提交。
 function retryMessage(message) {
-  if (sending.value || !status.value.available || !message.retryQuestion) return
-  question.value = message.retryQuestion
-  sendQuestion()
+  if (sending.value || !serviceUsable.value || !message.retryQuestion) {
+    return;
+  }
+  question.value = message.retryQuestion;
+  sendQuestion();
 }
 
 // 监听抽屉开关：打开时刷新服务状态，关闭时停止仍在生成的回答。
 watch(open, (value) => {
   // 打开时检查服务，关闭抽屉时取消仍在生成的请求。
   if (value) {
-    loadStatus()
+    loadStatus();
   } else if (sending.value) {
-    cancelRequest()
+    cancelRequest();
   }
-})
+});
 </script>
 
 <template>
@@ -221,7 +247,7 @@ watch(open, (value) => {
         </el-button>
       </header>
 
-      <div v-if="!status.available" class="ai-service-notice" :class="`is-${statusTone}`">
+      <div v-if="!(status.available || status.queryAvailable)" class="ai-service-notice" :class="`is-${statusTone}`">
         <AppIcon name="alert" :size="17" />
         <div>
           <strong>{{ statusLabel }}</strong>
@@ -231,17 +257,16 @@ watch(open, (value) => {
       </div>
 
       <main class="ai-conversation">
-        <div
-          v-for="message in messages"
-          :key="message.id"
-          class="ai-message"
-          :class="`is-${message.role}`"
-        >
+        <div v-for="message in messages" :key="message.id" class="ai-message" :class="`is-${message.role}`">
           <div v-if="message.role !== 'user'" class="message-avatar">
             <AppIcon :name="message.role === 'system' ? 'alert' : 'bot'" :size="15" />
           </div>
           <div class="message-content">
             <p>{{ message.content }}</p>
+            <AiResultBlocks v-if="message.blocks?.length" :blocks="message.blocks" />
+            <p v-if="message.dataGaps?.length" class="message-data-gaps">
+              未取到：{{ message.dataGaps.join('、') }}
+            </p>
             <button v-if="message.retryQuestion" class="message-retry" type="button" @click="retryMessage(message)">
               <AppIcon name="refresh" :size="13" />重新尝试
             </button>
@@ -268,21 +293,21 @@ watch(open, (value) => {
             v-for="item in quickQuestions"
             :key="item"
             type="button"
-            :disabled="sending || !status.available"
+            :disabled="sending || !(status.available || status.queryAvailable)"
             @click="selectQuickQuestion(item)"
           >
             {{ item }}
           </button>
         </div>
 
-        <div class="compose-box" :class="{ disabled: !status.available }">
+        <div class="compose-box" :class="{ disabled: !(status.available || status.queryAvailable) }">
           <el-input
             v-model="question"
             type="textarea"
             :rows="3"
             resize="none"
             maxlength="500"
-            :disabled="!status.available"
+            :disabled="!(status.available || status.queryAvailable)"
             :placeholder="inputPlaceholder"
             @keydown.ctrl.enter="sendQuestion"
           />
@@ -304,14 +329,13 @@ watch(open, (value) => {
               type="primary"
               circle
               aria-label="发送问题"
-              :disabled="!status.available || !question.trim()"
+              :disabled="!(status.available || status.queryAvailable) || !question.trim()"
               @click="sendQuestion"
             >
               <AppIcon name="arrow" :size="16" />
             </el-button>
           </div>
         </div>
-        <p class="ai-disclaimer">智能建议仅供参考，关键业务操作需人工确认</p>
       </section>
     </section>
   </el-drawer>
@@ -556,6 +580,13 @@ watch(open, (value) => {
   font-size: 9px;
 }
 
+.message-data-gaps {
+  margin: 6px 0 0;
+  color: var(--mes-warning, #d98a00);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
 .is-user .message-meta {
   justify-content: flex-end;
 }
@@ -629,7 +660,7 @@ watch(open, (value) => {
 .quick-questions button:disabled {
   color: var(--mes-text-muted);
   border-color: var(--mes-border);
-  opacity: .62;
+  opacity: 0.62;
   cursor: not-allowed;
 }
 
@@ -680,15 +711,16 @@ watch(open, (value) => {
   pointer-events: auto;
 }
 
-.ai-disclaimer {
-  margin-top: 8px;
-  color: #98a3af;
-  font-size: 9px;
-  text-align: center;
-}
-
 @keyframes thinking {
-  0%, 60%, 100% { transform: translateY(0); opacity: .45; }
-  30% { transform: translateY(-3px); opacity: 1; }
+  0%,
+  60%,
+  100% {
+    transform: translateY(0);
+    opacity: 0.45;
+  }
+  30% {
+    transform: translateY(-3px);
+    opacity: 1;
+  }
 }
 </style>

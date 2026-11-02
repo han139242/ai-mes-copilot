@@ -32,6 +32,12 @@ public class MfgProductionPlan {
     private BigDecimal plannedQuantity;
     private String status;
     private String remark;
+    /** 计划类型：ROOT=整机根计划，COMPONENT=组件补产计划 */
+    private String planType;
+    /** 组件计划所属的父计划ID */
+    private Long parentPlanId;
+    /** 可执行窗口计算依据：产线周历、班次、日产能与批次占用；组件计划必须写明，便于核对 */
+    private String capacityBasis;
     @Version
     private Integer version;
     private Long createdBy;

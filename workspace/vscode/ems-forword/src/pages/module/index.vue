@@ -1,35 +1,40 @@
 <script setup>
-import { computed, ref, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import AppIcon from '@/components/common/AppIcon.vue'
-import { getModuleDefinition } from '@/config/navigation'
+import { computed, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
+import AppIcon from '@/components/common/AppIcon.vue';
+import { getModuleDefinition } from '@/config/navigation';
+import { appName } from '@/config/branding';
 
 // 模块导航页由动态路由参数moduleKey复用，例如/sys、/mfg进入同一个组件但读取不同配置。
-const route = useRoute()
-const keyword = ref('')
+const route = useRoute();
+const keyword = ref('');
 // 根据动态moduleKey取得当前模块标题、图标和有权限的业务入口。
-const definition = computed(() => getModuleDefinition(route.params.moduleKey))
+const definition = computed(() => getModuleDefinition(route.params.moduleKey));
 // 输入关键词后只过滤当前模块内有权限的业务入口。
 const filteredEntries = computed(() => {
-  const value = keyword.value.trim()
+  const value = keyword.value.trim();
   if (!value) {
-    return definition.value.entries
+    return definition.value.entries;
   }
-  return definition.value.entries.filter((entry) => entry.label.includes(value))
-})
+  return definition.value.entries.filter((entry) => entry.label.includes(value));
+});
 
 // 监听动态模块变化，更新浏览器标题并清空上一个模块的搜索词。
-watch(definition, (value) => {
-  // 切换模块时同步浏览器标题并清空上一个模块的搜索词。
-  document.title = `${value.title} - 羽球智造 MES`
-  keyword.value = ''
-}, { immediate: true })
+watch(
+  definition,
+  (value) => {
+    // 切换模块时同步浏览器标题并清空上一个模块的搜索词。
+    document.title = `${value.title} - ${appName}`;
+    keyword.value = '';
+  },
+  { immediate: true },
+);
 
 // 打开模块中的业务入口；Hash变化会由Vue Router匹配对应页面。
 function openEntry(entry) {
   // 项目采用Hash路由，修改location.hash会交给Vue Router显示对应页面。
   if (entry.path) {
-    window.location.hash = `#${entry.path}`
+    window.location.hash = `#${entry.path}`;
   }
 }
 </script>
@@ -44,7 +49,6 @@ function openEntry(entry) {
         </span>
         <div>
           <h1 class="mes-page-title">{{ definition.title }}</h1>
-          <p class="mes-page-subtitle">模块导航与业务入口</p>
         </div>
       </div>
       <el-input v-model="keyword" class="module-search" clearable placeholder="搜索功能">
@@ -57,11 +61,6 @@ function openEntry(entry) {
         <span>业务功能</span>
         <strong>{{ definition.entries.length }}</strong>
       </div>
-      <div class="overview-divider" />
-      <div class="overview-state">
-        <span class="state-dot" />
-        <div><strong>业务界面已接入</strong><small>连接后端真实接口与状态编码</small></div>
-      </div>
     </section>
 
     <section class="mes-panel module-panel">
@@ -73,7 +72,6 @@ function openEntry(entry) {
         <button v-for="(entry, index) in filteredEntries" :key="entry.label" type="button" @click="openEntry(entry)">
           <span class="entry-index">{{ String(index + 1).padStart(2, '0') }}</span>
           <span class="entry-name">{{ entry.label }}</span>
-          <el-tag size="small" type="success" effect="plain">已接入</el-tag>
           <AppIcon name="right" :size="15" />
         </button>
       </div>
@@ -88,13 +86,9 @@ function openEntry(entry) {
   align-items: center;
 }
 
-.module-heading,
-.overview-state {
+.module-heading {
   display: flex;
   align-items: center;
-}
-
-.module-heading {
   gap: 13px;
 }
 
@@ -166,40 +160,6 @@ function openEntry(entry) {
 .overview-label strong {
   color: var(--mes-text);
   font-size: 23px;
-}
-
-.overview-divider {
-  width: 1px;
-  height: 30px;
-  background: var(--mes-border);
-}
-
-.overview-state {
-  gap: 10px;
-}
-
-.overview-state > div {
-  display: flex;
-  flex-direction: column;
-}
-
-.overview-state strong {
-  font-size: 12px;
-  font-weight: 620;
-}
-
-.overview-state small {
-  margin-top: 2px;
-  color: var(--mes-text-muted);
-  font-size: 10px;
-}
-
-.state-dot {
-  width: 8px;
-  height: 8px;
-  border-radius: 50%;
-  background: var(--mes-primary);
-  box-shadow: 0 0 0 4px var(--mes-primary-soft);
 }
 
 .entry-count {
@@ -277,11 +237,6 @@ function openEntry(entry) {
     flex-direction: column;
     gap: 12px;
     padding: 16px;
-  }
-
-  .overview-divider {
-    width: 100%;
-    height: 1px;
   }
 }
 </style>

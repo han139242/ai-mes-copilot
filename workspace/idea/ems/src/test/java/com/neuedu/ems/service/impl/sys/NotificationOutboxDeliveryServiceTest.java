@@ -82,7 +82,102 @@ class NotificationOutboxDeliveryServiceTest {
     void failsRoutingWhenNoAccountHasTargetPermission() {
         when(userMapper.listNotificationRecipients(11L, "mfg:task:view")).thenReturn(List.of());
         when(recipientMapper.selectCount(any())).thenReturn(0L);
+        when(userMapper.listSuperAdminRecipients()).thenReturn(List.of());
 
         assertThrows(IllegalStateException.class, () -> service.deliver(5L));
+    }
+
+    /**
+     * 业务侧解析不到责任人时载荷里的接收人列表就是空的。
+     * <p>
+     * 这类事件以前在校验阶段就被判成 INVALID_NOTIFICATION_EVENT_PAYLOAD，
+     * 重试到上限后静默丢消息；现在要放行空列表并升级给超级管理员。
+     * </p>
+     */
+    @Test
+    void escalatesToSuperAdminWhenPayloadHasNoRecipient() throws Exception {
+        NotificationEventPayload empty = new NotificationEventPayload(
+                "QMS", "INFO", "检验任务已完成", "检验单 QI-1 检验结果为 PASS", "QMS_INSPECTION_ORDER",
+                55L, "QI-1", "/qms/inspection-orders", 1L, null, LocalDateTime.now(), null, false,
+                List.of());
+        outbox.setPayloadJson(objectMapper.writeValueAsString(empty));
+        NotificationRecipientAccount admin = new NotificationRecipientAccount();
+        admin.setUserId(1L);
+        admin.setEmployeeId(null);
+        when(userMapper.listSuperAdminRecipients()).thenReturn(List.of(admin));
+        when(recipientMapper.selectCount(any())).thenReturn(0L);
+        when(recipientMapper.insertIgnore(any())).thenReturn(1);
+
+        service.deliver(5L);
+
+        ArgumentCaptor<com.neuedu.ems.entity.sys.SysNotificationRecipient> captor =
+                ArgumentCaptor.forClass(com.neuedu.ems.entity.sys.SysNotificationRecipient.class);
+        verify(recipientMapper).insertIgnore(captor.capture());
+        assertEquals(1L, captor.getValue().getRecipientUserId());
+        assertEquals("ESCALATION", captor.getValue().getRecipientReason());
+        assertEquals("PROCESSED", outbox.getStatus());
+    }
+
+    @Test
+    void escalatesToSuperAdminWhenResponsibleRecipientCannotBeResolved() {
+        NotificationRecipientAccount admin = new NotificationRecipientAccount();
+        admin.setUserId(1L);
+        admin.setEmployeeId(null);
+        when(userMapper.listNotificationRecipients(11L, "mfg:task:view")).thenReturn(List.of());
+        when(userMapper.listSuperAdminRecipients()).thenReturn(List.of(admin));
+        when(recipientMapper.selectCount(any())).thenReturn(0L);
+        when(recipientMapper.insertIgnore(any())).thenReturn(1);
+
+        service.deliver(5L);
+
+        ArgumentCaptor<com.neuedu.ems.entity.sys.SysNotificationRecipient> captor =
+                ArgumentCaptor.forClass(com.neuedu.ems.entity.sys.SysNotificationRecipient.class);
+        verify(recipientMapper).insertIgnore(captor.capture());
+        assertEquals(1L, captor.getValue().getRecipientUserId());
+        assertEquals("ESCALATION", captor.getValue().getRecipientReason());
+        assertEquals("PROCESSED", outbox.getStatus());
+    }
+
+    /**
+     * 同一条预警反复命中时，冷却到期后要再提醒一次，但不能在收件箱里堆出新行。
+     * <p>
+     * 之前事件键带分钟时间戳，每轮冷却到期都生成一条新通知，用户看到几百条未读；
+     * 现在改为就地刷新同一行，并把已读未确认的收件人重新标为未读。
+     * </p>
+     */
+    @Test
+    void repeatedNotificationRefreshesExistingRowInsteadOfAddingOne() {
+        NotificationRecipientAccount account = new NotificationRecipientAccount();
+        account.setUserId(21L);
+        account.setEmployeeId(11L);
+        when(userMapper.listNotificationRecipients(11L, "mfg:task:view")).thenReturn(List.of(account));
+        when(recipientMapper.insertIgnore(any())).thenReturn(0);
+        when(recipientMapper.selectCount(any())).thenReturn(1L);
+        when(notificationMapper.refresh(any())).thenReturn(1);
+
+        service.deliver(5L);
+
+        ArgumentCaptor<SysNotification> notificationCaptor = ArgumentCaptor.forClass(SysNotification.class);
+        verify(notificationMapper).refresh(notificationCaptor.capture());
+        assertEquals("MFG_TASK:1:ASSIGNED:11", notificationCaptor.getValue().getEventKey(),
+                "刷新必须按事件键定位同一条通知");
+        verify(notificationMapper).reopenUnacknowledgedRecipients(
+                org.mockito.ArgumentMatchers.eq("MFG_TASK:1:ASSIGNED:11"), any());
+        assertEquals("PROCESSED", outbox.getStatus());
+    }
+
+    @Test
+    void firstDeliveryDoesNotTouchRecipientReadState() {
+        NotificationRecipientAccount account = new NotificationRecipientAccount();
+        account.setUserId(21L);
+        account.setEmployeeId(11L);
+        when(userMapper.listNotificationRecipients(11L, "mfg:task:view")).thenReturn(List.of(account));
+        when(recipientMapper.insertIgnore(any())).thenReturn(1);
+        when(notificationMapper.refresh(any())).thenReturn(0);
+
+        service.deliver(5L);
+
+        verify(notificationMapper, org.mockito.Mockito.never())
+                .reopenUnacknowledgedRecipients(any(), any());
     }
 }

@@ -80,28 +80,36 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
             return false;
         }
         SysUser existing = getUserById(user.getUserId());
-        if (existing == null || (isSuperAdminUser(user.getUserId())
-                && StringUtils.hasText(user.getStatus()) && !"ENABLE".equals(user.getStatus()))) {
+        if (!updatableUser(existing, user)) {
             return false;
         }
         user.setDeletedFlag(null);
         user.setPasswordHash(null);
-        if ("ENABLE".equals(user.getStatus())) {
-            LambdaUpdateWrapper<SysUser> wrapper = new LambdaUpdateWrapper<>();
-            wrapper.eq(SysUser::getUserId, user.getUserId())
-                    .set(SysUser::getLoginFailCount, 0)
-                    .set(SysUser::getLockedTime, null);
-            boolean updated = baseMapper.update(user, wrapper) > 0;
-            if (updated) {
-                permissionService.evictUser(user.getUserId());
-            }
-            return updated;
-        }
-        boolean updated = baseMapper.updateById(user) > 0;
+        boolean updated = "ENABLE".equals(user.getStatus()) ? updateEnabledUser(user) : baseMapper.updateById(user) > 0;
         if (updated) {
             permissionService.evictUser(user.getUserId());
         }
         return updated;
+    }
+
+    /** 用户必须存在，且不允许把超级管理员改成非启用状态。 */
+    private boolean updatableUser(SysUser existing, SysUser user) {
+        if (existing == null) {
+            return false;
+        }
+        if (!isSuperAdminUser(user.getUserId())) {
+            return true;
+        }
+        return !StringUtils.hasText(user.getStatus()) || "ENABLE".equals(user.getStatus());
+    }
+
+    /** 启用账号时顺带清零登录失败次数并解除锁定，避免解锁要另走接口。 */
+    private boolean updateEnabledUser(SysUser user) {
+        LambdaUpdateWrapper<SysUser> wrapper = new LambdaUpdateWrapper<>();
+        wrapper.eq(SysUser::getUserId, user.getUserId())
+                .set(SysUser::getLoginFailCount, 0)
+                .set(SysUser::getLockedTime, null);
+        return baseMapper.update(user, wrapper) > 0;
     }
 
     @Override
@@ -146,6 +154,29 @@ public class SysUserServiceImpl extends ServiceImpl<SysUserMapper, SysUser> impl
             permissionService.evictUser(userId);
         }
         return reset;
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public boolean unlockUser(Long userId) {
+        if (userId == null) {
+            return false;
+        }
+        SysUser existing = getUserById(userId);
+        if (existing == null) {
+            return false;
+        }
+        SysUser user = new SysUser();
+        user.setUserId(userId);
+        user.setStatus("ENABLE");
+        user.setLoginFailCount(0);
+        user.setLockedTime(null);
+        user.setVersion(existing.getVersion());
+        boolean unlocked = baseMapper.updateById(user) > 0;
+        if (unlocked) {
+            permissionService.evictUser(userId);
+        }
+        return unlocked;
     }
 
     @Override

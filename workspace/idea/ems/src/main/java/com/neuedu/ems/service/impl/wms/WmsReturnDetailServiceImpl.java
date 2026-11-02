@@ -97,6 +97,19 @@ public class WmsReturnDetailServiceImpl extends ServiceImpl<WmsReturnDetailMappe
      */
     @Override
     public boolean updateReturnDetail(WmsReturnDetail returnDetail) {
+        if (!canUpdateReturnDetail(returnDetail)) {
+            return false;
+        }
+        returnDetail.setDeletedFlag(null);
+        return baseMapper.updateById(returnDetail) > 0;
+    }
+
+    /**
+     * 判断退料明细是否允许更新：主键必填、原单据可改、且不允许改挂到其他退料单。
+     * @param returnDetail 请求中的退料明细
+     * @return 是否允许更新
+     */
+    private boolean canUpdateReturnDetail(WmsReturnDetail returnDetail) {
         if (returnDetail.getDetailId() == null) {
             return false;
         }
@@ -104,11 +117,7 @@ public class WmsReturnDetailServiceImpl extends ServiceImpl<WmsReturnDetailMappe
         if (existing == null || !canChangeReturnOrder(existing.getReturnId())) {
             return false;
         }
-        if (returnDetail.getReturnId() != null && !canChangeReturnOrder(returnDetail.getReturnId())) {
-            return false;
-        }
-        returnDetail.setDeletedFlag(null);
-        return baseMapper.updateById(returnDetail) > 0;
+        return returnDetail.getReturnId() == null || canChangeReturnOrder(returnDetail.getReturnId());
     }
 
     /**

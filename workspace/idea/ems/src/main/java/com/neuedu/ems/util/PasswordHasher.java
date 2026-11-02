@@ -43,11 +43,15 @@ public class PasswordHasher {
         if (rawPassword == null || storedPassword == null) {
             return false;
         }
-        if (!isEncoded(storedPassword)) {
-            return MessageDigest.isEqual(
-                    rawPassword.getBytes(StandardCharsets.UTF_8),
-                    storedPassword.getBytes(StandardCharsets.UTF_8));
+        if (isEncoded(storedPassword)) {
+            return matchesEncoded(rawPassword, storedPassword);
         }
+        return MessageDigest.isEqual(
+                rawPassword.getBytes(StandardCharsets.UTF_8),
+                storedPassword.getBytes(StandardCharsets.UTF_8));
+    }
+
+    private boolean matchesEncoded(String rawPassword, String storedPassword) {
         try {
             String[] parts = storedPassword.split("\\$", -1);
             int iterations = Integer.parseInt(parts[1]);

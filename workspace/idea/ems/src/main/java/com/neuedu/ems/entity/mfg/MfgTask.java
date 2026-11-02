@@ -34,12 +34,29 @@ public class MfgTask {
     private String taskType;
     private Long sourceTaskId;
     private Long sourceNcrId;
+    /** 本次工序报工不良处置的来源任务，区分不同工序的多次补产。 */
+    private Long defectResolutionTaskId;
     @TableField(exist = false)
     private BigDecimal reportedQualifiedQuantity;
     @TableField(exist = false)
     private BigDecimal reportedDefectQuantity;
     @TableField(exist = false)
     private Boolean assignedToCurrentUser;
+    @TableField(exist = false)
+    private String fulfillmentStatus;
+    @TableField(exist = false)
+    private BigDecimal approvedQualifiedQuantity;
+    @TableField(exist = false)
+    private BigDecimal recoveredQualifiedQuantity;
+    @TableField(exist = false)
+    private BigDecimal totalQualifiedQuantity;
+    @TableField(exist = false)
+    private BigDecimal remainingQualifiedQuantity;
+    @TableField(exist = false)
+    private BigDecimal pendingReportQuantity;
+    /** 所属工单类型（ROOT/COMPONENT），仅供前端按工单类型过滤领料仓库。 */
+    @TableField(exist = false)
+    private String workOrderType;
     private String status;
     private String remark;
     @Version

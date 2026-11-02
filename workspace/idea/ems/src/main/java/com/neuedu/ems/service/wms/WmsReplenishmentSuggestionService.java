@@ -63,7 +63,16 @@ public interface WmsReplenishmentSuggestionService extends IService<WmsReplenish
     boolean removeSuggestionById(Long suggestionId);
 
     /**
+     * 查询某物料仍然待确认的库存预警类补货建议。
+     * 预警中心与自动化规则是两条独立链路，都要在生成前查一次，避免同一缺口重复建单、重复通知仓管。
+     * @param materialId 物料ID
+     * @return 最近一条待确认建议，没有则返回 null
+     */
+    WmsReplenishmentSuggestion findPendingInventoryWarning(Long materialId);
+
+    /**
      * 根据物料和仓库生成补货建议。
+     * 同一物料已有待确认的库存预警类建议时直接复用，不重复建单也不重复通知。
      * @param materialId 物料ID
      * @param warehouseId 仓库ID，可为空
      * @param requiredQuantity 需求数量，可为空

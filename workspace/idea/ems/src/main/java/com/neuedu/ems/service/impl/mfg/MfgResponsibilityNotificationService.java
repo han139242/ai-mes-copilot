@@ -107,8 +107,7 @@ public class MfgResponsibilityNotificationService {
     }
 
     public void publishTaskOverdue(MfgTask task, MfgDispatchOrder dispatch, Long leaderEmployeeId) {
-        if (task == null || task.getTaskId() == null || dispatch == null
-                || dispatch.getDueTime() == null || leaderEmployeeId == null) {
+        if (!canPublishOverdue(task, dispatch, leaderEmployeeId)) {
             return;
         }
         String eventType = "MFG_TASK_OVERDUE";
@@ -118,6 +117,19 @@ public class MfgResponsibilityNotificationService {
                         "生产任务 " + displayNo(task.getTaskNo(), task.getTaskId()) + " 已超过派工交期",
                         "MFG_TASK", task.getTaskId(), task.getTaskNo(), TASK_ROUTE, null, true,
                         List.of(target(leaderEmployeeId, "TEAM_LEADER", TASK_VIEW))));
+    }
+
+    /** 任务、派工交期和班组长都齐备时才发逾期提醒。 */
+    private boolean canPublishOverdue(MfgTask task, MfgDispatchOrder dispatch, Long leaderEmployeeId) {
+        return hasTaskId(task) && hasDueTime(dispatch) && leaderEmployeeId != null;
+    }
+
+    private boolean hasTaskId(MfgTask task) {
+        return task != null && task.getTaskId() != null;
+    }
+
+    private boolean hasDueTime(MfgDispatchOrder dispatch) {
+        return dispatch != null && dispatch.getDueTime() != null;
     }
 
     public void publishWorkReportSubmitted(MfgWorkReport report, Long sourceUserId, Long leaderEmployeeId) {
@@ -154,17 +166,27 @@ public class MfgResponsibilityNotificationService {
 
     public Long resolveTeamLeader(Long taskId) {
         MfgTask task = activeTask(taskId);
-        if (task == null || task.getDispatchId() == null) {
-            return null;
+        Long leaderId = null;
+        if (task != null && task.getDispatchId() != null) {
+            leaderId = leaderOfDispatch(dispatchMapper.selectById(task.getDispatchId()));
         }
-        MfgDispatchOrder dispatch = dispatchMapper.selectById(task.getDispatchId());
-        if (dispatch == null || dispatch.getDeletedFlag() != null && dispatch.getDeletedFlag() != 0
-                || dispatch.getTeamId() == null) {
-            return null;
+        return leaderId;
+    }
+
+    /** 沿派工找班组班组长；派工或班组已删除时返回 null。 */
+    private Long leaderOfDispatch(MfgDispatchOrder dispatch) {
+        Long leaderId = null;
+        if (dispatch != null && !isDeleted(dispatch.getDeletedFlag()) && dispatch.getTeamId() != null) {
+            OrgTeam team = teamMapper.selectById(dispatch.getTeamId());
+            if (team != null && !isDeleted(team.getDeletedFlag())) {
+                leaderId = team.getLeaderId();
+            }
         }
-        OrgTeam team = teamMapper.selectById(dispatch.getTeamId());
-        return team == null || team.getDeletedFlag() != null && team.getDeletedFlag() != 0
-                ? null : team.getLeaderId();
+        return leaderId;
+    }
+
+    private boolean isDeleted(Integer deletedFlag) {
+        return deletedFlag != null && deletedFlag != 0;
     }
 
     public void cancelTaskUnassigned(Long taskId, Long sourceUserId) {
@@ -248,17 +270,29 @@ public class MfgResponsibilityNotificationService {
                                              String bizType, Long bizId, String bizNo, String routePath,
                                              Long sourceUserId, boolean ackRequired,
                                              Collection<NotificationEventPayload.RecipientTarget> rawTargets) {
-        Map<String, NotificationEventPayload.RecipientTarget> targets = new LinkedHashMap<>();
-        if (rawTargets != null) {
-            for (NotificationEventPayload.RecipientTarget target : rawTargets) {
-                if (target != null && target.employeeId() != null) {
-                    targets.putIfAbsent(target.employeeId() + ":" + target.reason(), target);
-                }
-            }
-        }
+        Map<String, NotificationEventPayload.RecipientTarget> targets = dedupeTargets(rawTargets);
         return new NotificationEventPayload(category, severity, title, summary, bizType, bizId, bizNo,
                 routePath, sourceUserId, sourceEmployeeId(sourceUserId), LocalDateTime.now(), null,
                 ackRequired, List.copyOf(targets.values()));
+    }
+
+    /** 按「员工 + 原因」去重收件人，空的或不带员工的收件人直接丢弃。 */
+    private Map<String, NotificationEventPayload.RecipientTarget> dedupeTargets(
+            Collection<NotificationEventPayload.RecipientTarget> rawTargets) {
+        Map<String, NotificationEventPayload.RecipientTarget> targets = new LinkedHashMap<>();
+        if (rawTargets == null) {
+            return targets;
+        }
+        for (NotificationEventPayload.RecipientTarget target : rawTargets) {
+            if (isUsableTarget(target)) {
+                targets.putIfAbsent(target.employeeId() + ":" + target.reason(), target);
+            }
+        }
+        return targets;
+    }
+
+    private boolean isUsableTarget(NotificationEventPayload.RecipientTarget target) {
+        return target != null && target.employeeId() != null;
     }
 
     private NotificationEventPayload.RecipientTarget target(Long employeeId, String reason, String permission) {

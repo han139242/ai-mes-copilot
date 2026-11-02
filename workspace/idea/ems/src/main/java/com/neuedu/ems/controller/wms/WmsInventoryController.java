@@ -30,13 +30,14 @@ public class WmsInventoryController {
     private ExcelExportUtil excelExportUtil;
 
     /**
-     * 分页查询库存余额列表，支持仓库、库位、物料和批次筛选。
+     * 分页查询库存余额列表，支持仓库、库位、物料、批次和工单筛选。
      * @param current 当前页码，默认为1
      * @param size 每页记录数，默认为10
      * @param warehouseId 仓库ID，可选
      * @param locationId 库位ID，可选
      * @param materialId 物料ID，可选
      * @param batchId 批次ID，可选
+     * @param workOrderId 工单ID，可选，线边仓按工单占用时用于区分同一批次
      * @return 分页结果
      */
     @GetMapping("/page")
@@ -45,8 +46,9 @@ public class WmsInventoryController {
                            @RequestParam(required = false) Long warehouseId,
                            @RequestParam(required = false) Long locationId,
                            @RequestParam(required = false) Long materialId,
-                           @RequestParam(required = false) Long batchId) {
-        Page<WmsInventory> result = wmsInventoryService.pageInventories(current, size, warehouseId, locationId, materialId, batchId);
+                           @RequestParam(required = false) Long batchId,
+                           @RequestParam(required = false) Long workOrderId) {
+        Page<WmsInventory> result = wmsInventoryService.pageInventories(current, size, warehouseId, locationId, materialId, batchId, workOrderId);
         return ResultData.success(ResultCode.SUCCESS, result);
     }
 
@@ -68,14 +70,16 @@ public class WmsInventoryController {
      * @param locationId 库位ID，可选
      * @param materialId 物料ID，可选
      * @param batchId 批次ID，可选
+     * @param workOrderId 工单ID，可选
      */
     @GetMapping("/excel")
     public void excel(HttpServletResponse response,
                       @RequestParam(required = false) Long warehouseId,
                       @RequestParam(required = false) Long locationId,
                       @RequestParam(required = false) Long materialId,
-                      @RequestParam(required = false) Long batchId) {
-        List<WmsInventory> inventories = wmsInventoryService.listInventories(warehouseId, locationId, materialId, batchId);
+                      @RequestParam(required = false) Long batchId,
+                      @RequestParam(required = false) Long workOrderId) {
+        List<WmsInventory> inventories = wmsInventoryService.listInventories(warehouseId, locationId, materialId, batchId, workOrderId);
         excelExportUtil.exportExcel(response, inventories, WmsInventory.class, "库存余额列表", "库存余额列表");
     }
 }

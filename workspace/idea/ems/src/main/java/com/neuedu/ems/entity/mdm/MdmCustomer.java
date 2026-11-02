@@ -24,6 +24,7 @@ public class MdmCustomer {
     private Long customerId;
     private String customerCode;
     private String customerName;
+    private String numberPrefix;
     private String contactName;
     /** 数据库存储 AES-GCM 密文，HTTP 响应必须通过 MdmCustomerView 返回。 */
     @JsonIgnore

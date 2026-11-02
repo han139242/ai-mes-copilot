@@ -1,42 +1,220 @@
-import { defineResource, optionSets, values } from './helpers'
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ * 本项目为课程实训作品，版权说明按 CodeArts 文件头注释规范补充。
+ */
+import { defineResource, optionSets, values } from './helpers';
 
 // MDM主数据资源：计量单位、供应商、客户、物料、产品和BOM。
 // 主数据会被生产、仓储、质量等业务表通过ID引用，因此应先维护再开展业务。
-const enable = { type: 'select', options: optionSets.enable }
+const enable = { type: 'select', options: optionSets.enable };
 
 // 默认导出主数据资源数组，由resources/index.js统一汇总并生成路由菜单。
 export default [
-  defineResource({ key: 'mdm-unit', domain: 'mdm', route: 'mdm/units', title: '计量单位', icon: 'database', baseUrl: '/api/mdm/unit', idField: 'unitId', fields: ['unitCode', 'unitName', 'precisionScale', 'status', 'remark', 'createdTime'], filters: ['keyword', 'status'], defaults: { status: 'ENABLE', precisionScale: 2 }, overrides: { unitCode: { required: true }, unitName: { required: true }, precisionScale: { type: 'number', min: 0, max: 8 }, status: enable, createdTime: { form: false, width: 170 } } }),
-  defineResource({ key: 'mdm-supplier', domain: 'mdm', route: 'mdm/suppliers', title: '供应商管理', icon: 'warehouse', baseUrl: '/api/mdm/supplier', idField: 'supplierId', fields: ['supplierCode', 'supplierName', 'contactName', 'contactPhone', 'status', 'remark', 'createdTime'], filters: ['keyword', 'status'], defaults: { status: 'ENABLE' }, overrides: { supplierCode: { required: true }, supplierName: { required: true }, contactPhone: { type: 'tel', writePermission: 'mdm:supplier:contact-phone:write' }, status: enable, createdTime: { form: false, width: 170 } } }),
-  defineResource({ key: 'mdm-customer', domain: 'mdm', route: 'mdm/customers', title: '客户管理', icon: 'users', baseUrl: '/api/mdm/customer', idField: 'customerId', fields: ['customerCode', 'customerName', 'contactName', 'contactPhone', 'status', 'remark', 'createdTime'], filters: ['keyword', 'status'], defaults: { status: 'ENABLE' }, overrides: { customerCode: { required: true }, customerName: { required: true }, contactPhone: { type: 'tel', writePermission: 'mdm:customer:contact-phone:write' }, status: enable, createdTime: { form: false, width: 170 } } }),
   defineResource({
-    key: 'mdm-material-category', domain: 'mdm', route: 'mdm/material-categories', title: '物料分类', icon: 'database', baseUrl: '/api/mdm/material-category', idField: 'categoryId', treeEndpoint: '/api/mdm/material-category/tree',
-    fields: ['parentId', 'categoryCode', 'categoryName', 'status', 'remark', 'createdTime'], filters: ['keyword', 'status'], defaults: { status: 'ENABLE' },
-    overrides: { parentId: { type: 'reference', reference: 'mdm-material-category' }, categoryCode: { required: true }, categoryName: { required: true }, status: enable, createdTime: { form: false, width: 170 } }
-  }),
-  defineResource({
-    key: 'mdm-material', domain: 'mdm', route: 'mdm/materials', title: '物料管理', icon: 'package', baseUrl: '/api/mdm/material', idField: 'materialId',
-    fields: ['materialCode', 'materialName', 'categoryId', 'specModel', 'unitId', 'materialType', 'status', 'remark', 'createdTime'], filters: ['materialCode', 'materialName', 'categoryId', 'status'], defaults: { status: 'ENABLE' },
+    key: 'mdm-unit',
+    domain: 'mdm',
+    route: 'mdm/units',
+    title: '计量单位',
+    icon: 'database',
+    baseUrl: '/api/mdm/unit',
+    idField: 'unitId',
+    fields: ['unitCode', 'unitName', 'precisionScale', 'status', 'remark', 'createdTime'],
+    filters: ['keyword', 'status'],
+    defaults: { status: 'ENABLE', precisionScale: 2 },
     overrides: {
-      materialCode: { required: true }, materialName: { required: true }, categoryId: { reference: 'mdm-material-category', required: true }, unitId: { required: true },
-      materialType: { type: 'select', options: values([['RAW', '原料', 'primary'], ['SEMI_FINISHED', '半成品', 'warning'], ['FINISHED', '成品', 'success'], ['AUXILIARY', '辅料', 'info']]) },
-      status: enable, createdTime: { form: false, width: 170 }
-    }
+      unitCode: { required: true },
+      unitName: { required: true },
+      precisionScale: { type: 'number', min: 0, max: 8 },
+      status: enable,
+      createdTime: { form: false, width: 170 },
+    },
   }),
   defineResource({
-    key: 'mdm-product', domain: 'mdm', route: 'mdm/products', title: '产品管理', icon: 'package', baseUrl: '/api/mdm/product', idField: 'productId',
-    fields: ['productCode', 'productName', 'productModel', 'materialId', 'status', 'remark', 'createdTime'], filters: ['productCode', 'productName', 'status'], defaults: { status: 'ENABLE' },
-    overrides: { productCode: { required: true }, productName: { required: true }, materialId: { required: true }, status: enable, createdTime: { form: false, width: 170 } }
+    key: 'mdm-supplier',
+    domain: 'mdm',
+    route: 'mdm/suppliers',
+    title: '供应商管理',
+    icon: 'warehouse',
+    baseUrl: '/api/mdm/supplier',
+    idField: 'supplierId',
+    fields: ['supplierCode', 'supplierName', 'contactName', 'contactPhone', 'status', 'remark', 'createdTime'],
+    filters: ['keyword', 'status'],
+    defaults: { status: 'ENABLE' },
+    overrides: {
+      supplierCode: { required: true },
+      supplierName: { required: true },
+      contactPhone: { type: 'tel', writePermission: 'mdm:supplier:contact-phone:write' },
+      status: enable,
+      createdTime: { form: false, width: 170 },
+    },
   }),
   defineResource({
-    key: 'mdm-bom', domain: 'mdm', route: 'mdm/boms', title: '产品物料清单', icon: 'route', baseUrl: '/api/mdm/bom', idField: 'bomId',
-    fields: ['bomCode', 'productId', 'bomVersion', 'effectiveDate', 'status', 'remark', 'createdTime'], filters: ['bomCode', 'productId', 'status'], defaults: { status: 'DRAFT' },
-    overrides: { bomCode: { required: true }, productId: { required: true }, bomVersion: { required: true }, status: { type: 'select', options: optionSets.release }, createdTime: { form: false, width: 170 } },
-    relations: [{ key: 'items', title: '物料清单明细', resource: 'mdm-bom-item', parentField: 'bomId', endpoint: (row) => `/api/mdm/bom-item/page?current=1&size=200&bomId=${row.bomId}` }]
+    key: 'mdm-customer',
+    domain: 'mdm',
+    route: 'mdm/customers',
+    title: '客户管理',
+    icon: 'users',
+    baseUrl: '/api/mdm/customer',
+    idField: 'customerId',
+    fields: ['customerCode', 'customerName', 'numberPrefix', 'contactName', 'contactPhone', 'status', 'remark', 'createdTime'],
+    filters: ['keyword', 'status'],
+    defaults: { status: 'ENABLE' },
+    overrides: {
+      customerCode: { required: true },
+      customerName: { required: true },
+      numberPrefix: { label: '单号前缀', maxLength: 8, width: 110, placeholder: '如 A、B；留空自动生成' },
+      contactPhone: { type: 'tel', writePermission: 'mdm:customer:contact-phone:write' },
+      status: enable,
+      createdTime: { form: false, width: 170 },
+    },
   }),
   defineResource({
-    key: 'mdm-bom-item', domain: 'mdm', route: 'mdm/bom-items', title: '物料清单明细', baseUrl: '/api/mdm/bom-item', idField: 'bomItemId', menu: false,
-    fields: ['bomId', 'materialId', 'quantity', 'lossRate', 'sequenceNo', 'remark'], filters: ['bomId', 'materialId'],
-    overrides: { bomId: { required: true }, materialId: { required: true }, quantity: { required: true, type: 'number', min: 0 }, lossRate: { type: 'number', min: 0, max: 1, precision: 4, step: 0.005 }, sequenceNo: { type: 'number', min: 1 } }
-  })
-]
+    key: 'mdm-material-category',
+    domain: 'mdm',
+    route: 'mdm/material-categories',
+    title: '物料分类',
+    icon: 'database',
+    baseUrl: '/api/mdm/material-category',
+    idField: 'categoryId',
+    treeEndpoint: '/api/mdm/material-category/tree',
+    fields: ['parentId', 'categoryCode', 'categoryName', 'status', 'remark', 'createdTime'],
+    filters: ['keyword', 'status'],
+    defaults: { status: 'ENABLE' },
+    overrides: {
+      parentId: { type: 'reference', reference: 'mdm-material-category' },
+      categoryCode: { required: true },
+      categoryName: { required: true },
+      status: enable,
+      createdTime: { form: false, width: 170 },
+    },
+  }),
+  defineResource({
+    key: 'mdm-material',
+    domain: 'mdm',
+    route: 'mdm/materials',
+    title: '物料管理',
+    icon: 'package',
+    baseUrl: '/api/mdm/material',
+    idField: 'materialId',
+    fields: [
+      'materialCode',
+      'materialName',
+      'categoryId',
+      'specModel',
+      'unitId',
+      'materialType',
+      'quantityMode',
+      'issueStep',
+      'status',
+      'remark',
+      'createdTime',
+    ],
+    filters: ['materialCode', 'materialName', 'categoryId', 'status'],
+    defaults: { status: 'ENABLE', quantityMode: 'DISCRETE', issueStep: 1 },
+    overrides: {
+      materialCode: { required: true },
+      materialName: { required: true },
+      categoryId: { reference: 'mdm-material-category', required: true },
+      unitId: { required: true },
+      materialType: {
+        type: 'select',
+        options: values([
+          ['RAW', '原料', 'primary'],
+          ['SEMI_FINISHED', '半成品', 'warning'],
+          ['FINISHED', '成品', 'success'],
+          ['AUXILIARY', '辅料', 'info'],
+        ]),
+      },
+      quantityMode: {
+        required: true,
+        type: 'select',
+        options: values([
+          ['DISCRETE', '离散整数', 'primary'],
+          ['CONTINUOUS', '连续数量', 'info'],
+        ]),
+      },
+      issueStep: { required: true, type: 'number', min: 0.0001, precision: 4, step: 1 },
+      status: enable,
+      createdTime: { form: false, width: 170 },
+    },
+  }),
+  defineResource({
+    key: 'mdm-product',
+    domain: 'mdm',
+    route: 'mdm/products',
+    title: '产品管理',
+    icon: 'package',
+    baseUrl: '/api/mdm/product',
+    idField: 'productId',
+    fields: ['productCode', 'productName', 'productModel', 'materialId', 'status', 'remark', 'createdTime'],
+    filters: ['productCode', 'productName', 'status'],
+    defaults: { status: 'ENABLE' },
+    overrides: {
+      productCode: { required: true },
+      productName: { required: true },
+      materialId: { required: true },
+      status: enable,
+      createdTime: { form: false, width: 170 },
+    },
+  }),
+  defineResource({
+    key: 'mdm-bom',
+    domain: 'mdm',
+    route: 'mdm/boms',
+    title: '产品物料清单',
+    icon: 'route',
+    baseUrl: '/api/mdm/bom',
+    idField: 'bomId',
+    fields: ['bomCode', 'productId', 'bomVersion', 'effectiveDate', 'effectiveTo', 'status', 'remark', 'createdTime'],
+    filters: ['bomCode', 'productId', 'status'],
+    defaults: { status: 'DRAFT' },
+    overrides: {
+      bomCode: { required: true },
+      productId: { required: true },
+      bomVersion: { required: true },
+      status: { type: 'select', options: optionSets.release },
+      createdTime: { form: false, width: 170 },
+    },
+    canEdit: (row) => row.status === 'DRAFT',
+    canDelete: (row) => row.status === 'DRAFT',
+    lockedReason: '已发布 BOM 版本已冻结，请新建版本后调整',
+    relations: [
+      {
+        key: 'items',
+        title: '物料清单明细',
+        resource: 'mdm-bom-item',
+        parentField: 'bomId',
+        endpoint: (row) => `/api/mdm/bom-item/page?current=1&size=200&bomId=${row.bomId}`,
+      },
+    ],
+  }),
+  defineResource({
+    key: 'mdm-bom-item',
+    domain: 'mdm',
+    route: 'mdm/bom-items',
+    title: '物料清单明细',
+    baseUrl: '/api/mdm/bom-item',
+    idField: 'bomItemId',
+    menu: false,
+    fields: [
+      'bomId',
+      'materialId',
+      'childBomId',
+      'consumptionOperationId',
+      'quantity',
+      'lossRate',
+      'sequenceNo',
+      'remark',
+    ],
+    filters: ['bomId', 'materialId'],
+    overrides: {
+      bomId: { required: true },
+      materialId: { required: true },
+      childBomId: { type: 'reference', reference: 'mdm-bom' },
+      consumptionOperationId: { label: '投料工序', type: 'reference', reference: 'process-operation' },
+      quantity: { required: true, type: 'number', min: 0.0001 },
+      lossRate: { type: 'number', min: 0, max: 1, precision: 4, step: 0.005 },
+      sequenceNo: { type: 'number', min: 1 },
+    },
+  }),
+];

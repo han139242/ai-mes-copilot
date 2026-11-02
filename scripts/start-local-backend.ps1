@@ -1,11 +1,18 @@
 param(
-    [switch]$ValidateOnly
+    [switch]$ValidateOnly,
+    [switch]$DisableAI
 )
 
 $ErrorActionPreference = 'Stop'
 
+$localRuntimeConfig = Join-Path (Split-Path -Parent $PSScriptRoot) 'tmp/local-runtime.json'
+if ((Test-Path -LiteralPath $localRuntimeConfig) -and -not $ValidateOnly) {
+    & (Join-Path $PSScriptRoot 'manage-local.ps1') -Action start -Service backend -ConfigPath $localRuntimeConfig -DisableAI:$DisableAI
+    return
+}
+
 $userApiKey = [Environment]::GetEnvironmentVariable('AI_API_KEY', 'User')
-if ([string]::IsNullOrWhiteSpace($userApiKey)) {
+if ($DisableAI -or [string]::IsNullOrWhiteSpace($userApiKey)) {
     # AI is optional for local backend startup. Keep core MES APIs available even
     # when the model key has not been distributed to this machine.
     $env:AI_ENABLED = 'false'

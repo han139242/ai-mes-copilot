@@ -27,8 +27,26 @@ public class NotificationOutboxServiceImpl implements NotificationOutboxService 
     @Override
     public boolean enqueue(String eventKey, String aggregateType, Long aggregateId,
                            String eventType, NotificationEventPayload payload) {
-        if (!StringUtils.hasText(eventKey) || eventKey.length() > 191
-                || !StringUtils.hasText(aggregateType) || !StringUtils.hasText(eventType) || payload == null) {
+        return outboxMapper.insertIgnore(build(eventKey, aggregateType, aggregateId, eventType, payload)) > 0;
+    }
+
+    @Override
+    public boolean reenqueue(String eventKey, String aggregateType, Long aggregateId,
+                             String eventType, NotificationEventPayload payload) {
+        SysEventOutbox outbox = build(eventKey, aggregateType, aggregateId, eventType, payload);
+        if (outboxMapper.insertIgnore(outbox) > 0) {
+            return true;
+        }
+        // 事件键已存在：这是同一条业务事件的再次提醒，刷新载荷并放回待投递队列。
+        return outboxMapper.revive(eventKey, outbox.getPayloadJson(), outbox.getOccurredTime(),
+                outbox.getUpdatedBy(), outbox.getUpdatedTime()) > 0;
+    }
+
+    private SysEventOutbox build(String eventKey, String aggregateType, Long aggregateId,
+                                 String eventType, NotificationEventPayload payload) {
+        boolean validKey = StringUtils.hasText(eventKey) && eventKey.length() <= 191;
+        boolean validTypes = StringUtils.hasText(aggregateType) && StringUtils.hasText(eventType);
+        if (!validKey || !validTypes || payload == null) {
             throw new BusinessException(ResultCode.PARAM_ERROR.getCode(), "通知事件参数不完整");
         }
         LocalDateTime now = payload.occurredTime() == null ? LocalDateTime.now() : payload.occurredTime();
@@ -47,7 +65,7 @@ public class NotificationOutboxServiceImpl implements NotificationOutboxService 
         outbox.setUpdatedBy(payload.sourceUserId());
         outbox.setUpdatedTime(now);
         outbox.setDeletedFlag(0);
-        return outboxMapper.insertIgnore(outbox) > 0;
+        return outbox;
     }
 
     private String serialize(NotificationEventPayload payload) {

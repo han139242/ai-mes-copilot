@@ -1,13 +1,16 @@
 package com.neuedu.ems.controller.mfg;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.neuedu.ems.common.AuthorizationContext;
 import com.neuedu.ems.common.ResultCode;
 import com.neuedu.ems.common.ResultData;
 import com.neuedu.ems.entity.mfg.MfgProductionOrder;
 import com.neuedu.ems.service.mfg.MfgProductionOrderService;
+import com.neuedu.ems.service.mfg.ProductionOrderProgressService;
 import com.neuedu.ems.util.ExcelExportUtil;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -19,6 +22,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 /**
@@ -31,6 +35,9 @@ public class MfgProductionOrderController {
 
     @Autowired
     private MfgProductionOrderService mfgProductionOrderService;
+
+    @Autowired
+    private ProductionOrderProgressService productionOrderProgressService;
 
     @Autowired
     private ExcelExportUtil excelExportUtil;
@@ -65,6 +72,23 @@ public class MfgProductionOrderController {
     public ResultData getOrder(@PathVariable("productionOrderId") Long productionOrderId) {
         MfgProductionOrder order = mfgProductionOrderService.getOrderById(productionOrderId);
         return ResultData.success(ResultCode.SUCCESS, order);
+    }
+
+    /**
+     * 订单全过程一览：只读聚合订单头、八阶段、父子工单、用料覆盖、关联单据、时间线、
+     * 计划实际对比与依赖关系。该接口不写任何业务数据，重复调用不产生副作用。
+     *
+     * @param productionOrderId 生产订单ID
+     * @param asOf 风险计算时钟，可选；只影响风险与预测判断，不做历史回放
+     * @param authorization 当前登录上下文，用于跨模块数据范围校验
+     */
+    @GetMapping("/{productionOrderId}/progress")
+    public ResultData progress(@PathVariable("productionOrderId") Long productionOrderId,
+                               @RequestParam(required = false)
+                               @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime asOf,
+                               @RequestAttribute("authorizationContext") AuthorizationContext authorization) {
+        return ResultData.success(ResultCode.SUCCESS,
+                productionOrderProgressService.inspect(productionOrderId, asOf, authorization));
     }
 
     /**

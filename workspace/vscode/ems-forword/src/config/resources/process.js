@@ -1,44 +1,154 @@
-import { defineResource, optionSets, values } from './helpers'
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ * 本项目为课程实训作品，版权说明按 CodeArts 文件头注释规范补充。
+ */
+import { defineResource, optionSets, values } from './helpers';
 
 // 工艺资源：工序、工艺参数、工艺路线、路线工序和作业指导书。
 // fullChild表示主表和明细可以在同一个表单中一起提交。
 // 默认导出该业务域的资源数组，由resources/index.js统一汇总。
 export default [
   defineResource({
-    key: 'process-operation', domain: 'process', route: 'process/operations', title: '工序管理', icon: 'activity', baseUrl: '/api/process/operation', idField: 'operationId',
-    fields: ['operationCode', 'operationName', 'operationType', 'standardTime', 'status', 'remark', 'createdTime'], filters: ['keyword', 'status'], defaults: { status: 'ENABLE' },
+    key: 'process-operation',
+    domain: 'process',
+    route: 'process/operations',
+    title: '工序管理',
+    icon: 'activity',
+    baseUrl: '/api/process/operation',
+    idField: 'operationId',
+    fields: ['operationCode', 'operationName', 'operationType', 'standardTime', 'status', 'remark', 'createdTime'],
+    filters: ['keyword', 'status'],
+    defaults: { status: 'ENABLE' },
     overrides: {
-      operationCode: { required: true }, operationName: { required: true },
-      operationType: { type: 'select', options: values([['PRODUCTION', '生产', 'primary'], ['INSPECTION', '检验', 'success'], ['PACKAGING', '包装', 'warning']]) },
-      standardTime: { label: '标准工时（分钟/单位）', type: 'number', min: 0, precision: 2, step: 0.1 }, status: { type: 'select', options: optionSets.enable }, createdTime: { form: false, width: 170 }
+      operationCode: { required: true },
+      operationName: { required: true },
+      operationType: {
+        type: 'select',
+        options: values([
+          ['PRODUCTION', '生产', 'primary'],
+          ['INSPECTION', '检验', 'success'],
+          ['PACKAGING', '包装', 'warning'],
+        ]),
+      },
+      standardTime: { label: '标准工时（分钟/单位）', type: 'number', min: 0, precision: 2, step: 0.1 },
+      status: { type: 'select', options: optionSets.enable },
+      createdTime: { form: false, width: 170 },
     },
-    relations: [{ key: 'parameters', title: '工艺参数', resource: 'process-parameter', parentField: 'operationId' }]
+    relations: [{ key: 'parameters', title: '工艺参数', resource: 'process-parameter', parentField: 'operationId' }],
   }),
   defineResource({
-    key: 'process-parameter', domain: 'process', route: 'process/parameters', title: '工艺参数', icon: 'settings', baseUrl: '/api/process/parameter', idField: 'parameterId',
-    fields: ['operationId', 'parameterName', 'standardValue', 'upperLimit', 'lowerLimit', 'unitId', 'remark'], filters: ['operationId', 'keyword'],
-    overrides: { operationId: { required: true }, parameterName: { required: true }, standardValue: { required: true } }
+    key: 'process-parameter',
+    domain: 'process',
+    route: 'process/parameters',
+    title: '工艺参数',
+    icon: 'settings',
+    baseUrl: '/api/process/parameter',
+    idField: 'parameterId',
+    fields: ['operationId', 'parameterName', 'standardValue', 'upperLimit', 'lowerLimit', 'unitId', 'remark'],
+    filters: ['operationId', 'keyword'],
+    overrides: {
+      operationId: { required: true },
+      parameterName: { required: true },
+      standardValue: { required: true },
+    },
   }),
   defineResource({
-    key: 'process-route', domain: 'process', route: 'process/routes', title: '工艺路线', icon: 'route', baseUrl: '/api/process/route', idField: 'routeId',
-    fields: ['routeCode', 'routeName', 'productId', 'version', 'status', 'remark', 'createdTime'], filters: ['keyword', 'productId', 'status'], defaults: { status: 'DRAFT' },
-    overrides: { routeCode: { required: true }, routeName: { required: true }, productId: { required: true }, version: { required: true }, status: { type: 'select', options: optionSets.release }, createdTime: { form: false, width: 170 } },
+    key: 'process-route',
+    domain: 'process',
+    route: 'process/routes',
+    title: '工艺路线',
+    icon: 'route',
+    baseUrl: '/api/process/route',
+    idField: 'routeId',
+    fields: ['routeCode', 'routeName', 'productId', 'version', 'status', 'remark', 'createdTime'],
+    filters: ['keyword', 'productId', 'status'],
+    defaults: { status: 'DRAFT' },
+    overrides: {
+      routeCode: { required: true },
+      routeName: { required: true },
+      productId: { required: true },
+      version: { required: true },
+      status: { type: 'select', options: optionSets.release },
+      createdTime: { form: false, width: 170 },
+    },
     masterDetail: {
-      title: '路线工序明细', resource: 'process-route-item', parentField: 'routeId',
+      title: '路线工序明细',
+      resource: 'process-route-item',
+      parentField: 'routeId',
       endpoint: () => '/api/process/route-item/page',
       params: (row) => ({ current: 1, size: 100, routeId: row.routeId }),
-      label: (row) => [row.routeCode, row.routeName].filter(Boolean).join(' / ')
+      label: (row) => [row.routeCode, row.routeName].filter(Boolean).join(' / '),
     },
-    relations: [{ key: 'items', title: '路线工序明细', resource: 'process-route-item', parentField: 'routeId' }]
+    relations: [{ key: 'items', title: '路线工序明细', resource: 'process-route-item', parentField: 'routeId' }],
   }),
   defineResource({
-    key: 'process-route-item', domain: 'process', route: 'process/route-items', title: '路线工序明细', baseUrl: '/api/process/route-item', idField: 'routeItemId', menu: false,
-    fields: ['routeId', 'operationId', 'sequenceNo', 'standardTime', 'qcRequired', 'remark'], filters: ['routeId', 'operationId'],
-    overrides: { routeId: { required: true }, operationId: { required: true }, sequenceNo: { required: true, type: 'number', min: 1 }, standardTime: { label: '路线工时（分钟/单位）', type: 'number', min: 0, precision: 2, step: 0.1 }, qcRequired: { type: 'select', options: optionSets.yesNo, defaultValue: 0 } }
+    key: 'process-route-item',
+    domain: 'process',
+    route: 'process/route-items',
+    title: '路线工序明细',
+    baseUrl: '/api/process/route-item',
+    idField: 'routeItemId',
+    menu: false,
+    fields: [
+      'routeId',
+      'operationId',
+      'sequenceNo',
+      'standardTime',
+      'resourceType',
+      'batchCapacity',
+      'batchDurationMinutes',
+      'timeSourceReference',
+      'qcRequired',
+      'remark',
+    ],
+    filters: ['routeId', 'operationId'],
+    defaults: { resourceType: 'LABOR' },
+    overrides: {
+      routeId: { required: true },
+      operationId: { required: true },
+      sequenceNo: { required: true, type: 'number', min: 1 },
+      standardTime: { label: '人工分钟/件', type: 'number', min: 0, precision: 2, step: 0.1 },
+      resourceType: {
+        label: '资源占用方式',
+        type: 'select',
+        options: values([
+          ['LABOR', '人工节拍'],
+          ['BATCH_EQUIPMENT', '批量设备'],
+        ]),
+      },
+      batchCapacity: { label: '设备每批容量', type: 'number', min: 1, precision: 0 },
+      batchDurationMinutes: { label: '设备分钟/批', type: 'number', min: 0.01, precision: 2 },
+      timeSourceReference: { label: '时间依据与版本', type: 'textarea' },
+      qcRequired: { type: 'select', options: optionSets.yesNo, defaultValue: 0 },
+    },
   }),
   defineResource({
-    key: 'process-work-instruction', domain: 'process', route: 'process/instructions', title: '作业指导书', icon: 'clipboard', baseUrl: '/api/process/work-instruction', idField: 'instructionId',
-    fields: ['title', 'operationId', 'productId', 'version', 'fileId', 'effectiveTime', 'status', 'remark', 'createdTime'], filters: ['keyword', 'operationId', 'productId', 'status'], defaults: { status: 'DRAFT' },
-    overrides: { title: { required: true }, operationId: { required: true }, version: { required: true }, status: { type: 'select', options: optionSets.release }, createdTime: { form: false, width: 170 } }
-  })
-]
+    key: 'process-work-instruction',
+    domain: 'process',
+    route: 'process/instructions',
+    title: '作业指导书',
+    icon: 'clipboard',
+    baseUrl: '/api/process/work-instruction',
+    idField: 'instructionId',
+    fields: [
+      'title',
+      'operationId',
+      'productId',
+      'version',
+      'fileId',
+      'effectiveTime',
+      'status',
+      'remark',
+      'createdTime',
+    ],
+    filters: ['keyword', 'operationId', 'productId', 'status'],
+    defaults: { status: 'DRAFT' },
+    overrides: {
+      title: { required: true },
+      operationId: { required: true },
+      version: { required: true },
+      status: { type: 'select', options: optionSets.release },
+      createdTime: { form: false, width: 170 },
+    },
+  }),
+];

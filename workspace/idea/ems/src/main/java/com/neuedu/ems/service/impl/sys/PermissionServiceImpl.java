@@ -66,19 +66,32 @@ public class PermissionServiceImpl implements PermissionService {
             return null;
         }
         long now = System.nanoTime();
-        CacheEntry cached = cache.get(userId);
         // 命中且未过期时直接复用快照，避免重复访问 sys_user、角色和菜单关系表。
-        if (cached != null && cached.expiresAtNanos() > now) {
-            return cached.context();
+        AuthorizationContext cachedContext = cachedContext(userId, now);
+        if (cachedContext != null) {
+            return cachedContext;
         }
+        return refreshContext(userId, now);
+    }
+
+    /** 缓存未命中时从库内重建快照；用户已无效则清掉缓存并返回 null。 */
+    private AuthorizationContext refreshContext(Long userId, long now) {
         AuthorizationContext context = loadContext(userId);
         if (context == null) {
             cache.remove(userId);
             return null;
         }
-        long ttlNanos = Duration.ofSeconds(Math.max(1, cacheSeconds)).toNanos();
-        cache.put(userId, new CacheEntry(context, now + ttlNanos));
+        cache.put(userId, new CacheEntry(context, now + cacheTtlNanos()));
         return context;
+    }
+
+    private AuthorizationContext cachedContext(Long userId, long now) {
+        CacheEntry cached = cache.get(userId);
+        return cached != null && cached.expiresAtNanos() > now ? cached.context() : null;
+    }
+
+    private long cacheTtlNanos() {
+        return Duration.ofSeconds(Math.max(1, cacheSeconds)).toNanos();
     }
 
     /**

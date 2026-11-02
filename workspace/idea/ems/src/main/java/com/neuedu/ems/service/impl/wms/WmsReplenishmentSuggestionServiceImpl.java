@@ -21,6 +21,9 @@ import java.util.List;
  */
 @Service
 public class WmsReplenishmentSuggestionServiceImpl extends ServiceImpl<WmsReplenishmentSuggestionMapper, WmsReplenishmentSuggestion> implements WmsReplenishmentSuggestionService {
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.neuedu.ems.service.sys.BusinessNumberService numbers;
+
 
     private static final String PENDING_STATUS = "SUBMITTED";
     private static final String MANUAL_SOURCE = "MANUAL";
@@ -105,6 +108,7 @@ public class WmsReplenishmentSuggestionServiceImpl extends ServiceImpl<WmsReplen
             return false;
         }
         suggestion.setDeletedFlag(null);
+        suggestion.setSuggestionNo(null);
         boolean updated = baseMapper.updateById(suggestion) > 0;
         if (updated && StringUtils.hasText(suggestion.getStatus())
                 && !PENDING_STATUS.equals(suggestion.getStatus())) {
@@ -137,7 +141,28 @@ public class WmsReplenishmentSuggestionServiceImpl extends ServiceImpl<WmsReplen
     }
 
     /**
+     * 查询某物料仍然待确认的库存预警类补货建议。
+     * @param materialId 物料ID
+     * @return 最近一条待确认建议，没有则返回 null
+     */
+    @Override
+    public WmsReplenishmentSuggestion findPendingInventoryWarning(Long materialId) {
+        if (materialId == null) {
+            return null;
+        }
+        return baseMapper.selectOne(new LambdaQueryWrapper<WmsReplenishmentSuggestion>()
+                .eq(WmsReplenishmentSuggestion::getMaterialId, materialId)
+                .eq(WmsReplenishmentSuggestion::getSourceType, INVENTORY_WARNING_SOURCE)
+                .eq(WmsReplenishmentSuggestion::getStatus, PENDING_STATUS)
+                .eq(WmsReplenishmentSuggestion::getDeletedFlag, 0)
+                .orderByDesc(WmsReplenishmentSuggestion::getSuggestionId)
+                .last("LIMIT 1"));
+    }
+
+    /**
      * 根据物料和仓库生成补货建议；schema没有仓库字段，因此仓库只用于计算当前可用库存。
+     * 同一物料已有待确认的库存预警类建议时复用原单：预警中心与自动化规则都会调用本方法，
+     * 各自再去重会互相看不见，导致同一缺口刷出两条建议和两条仓管通知。
      * @param materialId 物料ID
      * @param warehouseId 仓库ID，可为空
      * @param requiredQuantity 需求数量，可为空
@@ -148,6 +173,10 @@ public class WmsReplenishmentSuggestionServiceImpl extends ServiceImpl<WmsReplen
     public Long generateSuggestion(Long materialId, Long warehouseId, BigDecimal requiredQuantity) {
         if (materialId == null) {
             return null;
+        }
+        WmsReplenishmentSuggestion pending = findPendingInventoryWarning(materialId);
+        if (pending != null) {
+            return pending.getSuggestionId();
         }
         BigDecimal required = requiredQuantity == null ? BigDecimal.ZERO : requiredQuantity;
         BigDecimal available = sumAvailableQuantity(materialId, warehouseId);
@@ -189,7 +218,7 @@ public class WmsReplenishmentSuggestionServiceImpl extends ServiceImpl<WmsReplen
      */
     private void prepareSuggestion(WmsReplenishmentSuggestion suggestion) {
         if (!StringUtils.hasText(suggestion.getSuggestionNo())) {
-            suggestion.setSuggestionNo("RPS" + System.currentTimeMillis());
+            suggestion.setSuggestionNo(numbers.next("RP",null));
         }
         if (suggestion.getRequiredQuantity() == null) {
             suggestion.setRequiredQuantity(BigDecimal.ZERO);

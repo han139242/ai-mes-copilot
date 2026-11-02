@@ -64,6 +64,24 @@ public interface WmsOutboundOrderService extends IService<WmsOutboundOrder> {
 
     WmsOutboundOrder generateMaterialIssue(Long workOrderId, Long warehouseId, Long operatorId, String remark);
 
+    /** 按真实领料分配规则只读校验库存；正式生成时仍需重新校验。 */
+    void validateMaterialIssueAvailability(Long workOrderId, Long warehouseId);
+
+    /** 按正式转线边规则只读检查工单、冻结用料、库位与半成品领用复验。 */
+    void validateLineSideTransfer(Long outboundId, Long targetLocationId);
+    LineSideLocationService.Preparation prepareLineSideTransfer(Long outboundId);
+
+    /**
+     * 生成生产领料单，支持请求键幂等。
+     *
+     * <p>同一请求键、同一参数重放返回原出库单；参数变化必须拒绝。
+     * 请求键为空时按普通命令执行。</p>
+     *
+     * @param requestKey 调用方提供的幂等请求键，可选
+     */
+    WmsOutboundOrder generateMaterialIssue(Long workOrderId, Long warehouseId, Long operatorId,
+                                           String remark, String requestKey);
+
     /**
      * 更新出库单。
      * @param outboundOrder 出库单实体
@@ -96,4 +114,22 @@ public interface WmsOutboundOrderService extends IService<WmsOutboundOrder> {
      * @return 是否成功
      */
     boolean confirmOutboundOrder(Long outboundId, Long operatorId, String remark);
+
+    /**
+     * 领料转线边：只转移位置并按工单占用，不登记生产消耗。
+     *
+     * <p>成功即正常返回，被拒绝时抛业务异常，调用方按异常处理。</p>
+     */
+    void transferMaterialIssueToLineSide(Long outboundId, Long targetLocationId, Long operatorId, String remark);
+
+    /**
+     * 领料转线边确认，支持请求键幂等。
+     *
+     * <p>同一请求键、同一参数重放不重复移库；参数变化必须拒绝。
+     * 成功即正常返回，被拒绝时抛业务异常。</p>
+     *
+     * @param requestKey 调用方提供的幂等请求键，可选
+     */
+    void transferMaterialIssueToLineSide(Long outboundId, Long targetLocationId, Long operatorId,
+                                         String remark, String requestKey);
 }

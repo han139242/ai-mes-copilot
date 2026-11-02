@@ -28,6 +28,7 @@ public class MfgWorkReport {
     private Long stationId;
     private BigDecimal qualifiedQuantity;
     private BigDecimal defectQuantity;
+    private String defectDescription;
     private BigDecimal actualWorkHours;
     private LocalDateTime reportTime;
     private String auditStatus;

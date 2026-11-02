@@ -1,98 +1,13 @@
--- Badminton MES database schema
+-- 智能调光台灯 MES database schema
 -- Generated from 相关文档，图片/md/数据库表结构设计文档.md, target database: mes
 -- MySQL 8.0 / InnoDB / utf8mb4 / logical foreign keys
--- WARNING: This script drops and recreates all MES tables. Select the target database explicitly.
+-- 仅用于全新空库建表；不会删除已有表。已有环境请先备份并应用对应增量迁移。
 -- Example: mysql -u root -p mes < schema.sql
 
 CREATE DATABASE IF NOT EXISTS `mes` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
 SET NAMES utf8mb4;
 SET FOREIGN_KEY_CHECKS = 0;
 
-DROP TABLE IF EXISTS `trace_material_usage`;
-DROP TABLE IF EXISTS `trace_product_lot`;
-DROP TABLE IF EXISTS `trace_barcode`;
-DROP TABLE IF EXISTS `eam_repair_order`;
-DROP TABLE IF EXISTS `eam_spot_check_record`;
-DROP TABLE IF EXISTS `eam_spot_check_plan`;
-DROP TABLE IF EXISTS `eam_maintenance_record`;
-DROP TABLE IF EXISTS `eam_maintenance_plan`;
-DROP TABLE IF EXISTS `eam_equipment_status_log`;
-DROP TABLE IF EXISTS `eam_equipment`;
-DROP TABLE IF EXISTS `eam_equipment_category`;
-DROP TABLE IF EXISTS `qms_nonconforming_detail`;
-DROP TABLE IF EXISTS `qms_nonconforming_order`;
-DROP TABLE IF EXISTS `qms_inspection_result`;
-DROP TABLE IF EXISTS `qms_inspection_order`;
-DROP TABLE IF EXISTS `qms_inspection_scheme_item`;
-DROP TABLE IF EXISTS `qms_inspection_scheme`;
-DROP TABLE IF EXISTS `qms_inspection_standard`;
-DROP TABLE IF EXISTS `qms_inspection_item`;
-DROP TABLE IF EXISTS `wms_replenishment_suggestion`;
-DROP TABLE IF EXISTS `wms_stocktake_detail`;
-DROP TABLE IF EXISTS `wms_stocktake_order`;
-DROP TABLE IF EXISTS `wms_return_detail`;
-DROP TABLE IF EXISTS `wms_return_order`;
-DROP TABLE IF EXISTS `wms_outbound_detail`;
-DROP TABLE IF EXISTS `wms_outbound_order`;
-DROP TABLE IF EXISTS `wms_inbound_detail`;
-DROP TABLE IF EXISTS `wms_inbound_order`;
-DROP TABLE IF EXISTS `wms_stock_movement`;
-DROP TABLE IF EXISTS `wms_inventory`;
-DROP TABLE IF EXISTS `wms_material_batch`;
-DROP TABLE IF EXISTS `wms_location`;
-DROP TABLE IF EXISTS `wms_warehouse`;
-DROP TABLE IF EXISTS `mfg_andon_alert`;
-DROP TABLE IF EXISTS `mfg_exception`;
-DROP TABLE IF EXISTS `mfg_report_material`;
-DROP TABLE IF EXISTS `mfg_work_report`;
-DROP TABLE IF EXISTS `mfg_task_operator`;
-DROP TABLE IF EXISTS `mfg_task`;
-DROP TABLE IF EXISTS `mfg_dispatch_order`;
-DROP TABLE IF EXISTS `mfg_work_order_material`;
-DROP TABLE IF EXISTS `mfg_work_order`;
-DROP TABLE IF EXISTS `mfg_production_plan`;
-DROP TABLE IF EXISTS `mfg_schedule_item`;
-DROP TABLE IF EXISTS `mfg_schedule_scenario`;
-DROP TABLE IF EXISTS `mfg_line_calendar_rule`;
-DROP TABLE IF EXISTS `mfg_line_product_capability`;
-DROP TABLE IF EXISTS `mfg_production_order`;
-DROP TABLE IF EXISTS `factory_station_operation`;
-DROP TABLE IF EXISTS `factory_station`;
-DROP TABLE IF EXISTS `factory_line`;
-DROP TABLE IF EXISTS `factory_workshop`;
-DROP TABLE IF EXISTS `process_work_instruction`;
-DROP TABLE IF EXISTS `process_parameter`;
-DROP TABLE IF EXISTS `process_route_item`;
-DROP TABLE IF EXISTS `process_route`;
-DROP TABLE IF EXISTS `process_operation`;
-DROP TABLE IF EXISTS `mdm_bom_item`;
-DROP TABLE IF EXISTS `mdm_bom`;
-DROP TABLE IF EXISTS `mdm_product`;
-DROP TABLE IF EXISTS `mdm_material`;
-DROP TABLE IF EXISTS `mdm_material_category`;
-DROP TABLE IF EXISTS `mdm_customer`;
-DROP TABLE IF EXISTS `mdm_supplier`;
-DROP TABLE IF EXISTS `mdm_unit`;
-DROP TABLE IF EXISTS `org_shift`;
-DROP TABLE IF EXISTS `org_team_member`;
-DROP TABLE IF EXISTS `org_team`;
-DROP TABLE IF EXISTS `org_employee`;
-DROP TABLE IF EXISTS `org_department`;
-DROP TABLE IF EXISTS `sys_event_outbox`;
-DROP TABLE IF EXISTS `sys_notification_recipient`;
-DROP TABLE IF EXISTS `sys_notification`;
-DROP TABLE IF EXISTS `sys_approval_record`;
-DROP TABLE IF EXISTS `sys_status_change_log`;
-DROP TABLE IF EXISTS `sys_operation_log`;
-DROP TABLE IF EXISTS `sys_file`;
-DROP TABLE IF EXISTS `sys_system_param`;
-DROP TABLE IF EXISTS `sys_dict_data`;
-DROP TABLE IF EXISTS `sys_dict_type`;
-DROP TABLE IF EXISTS `sys_role_menu`;
-DROP TABLE IF EXISTS `sys_user_role`;
-DROP TABLE IF EXISTS `sys_menu`;
-DROP TABLE IF EXISTS `sys_role`;
-DROP TABLE IF EXISTS `sys_user`;
 
 SET FOREIGN_KEY_CHECKS = 1;
 
@@ -524,6 +439,7 @@ CREATE TABLE `mdm_supplier` (
 CREATE TABLE `mdm_customer` (
   `customer_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '客户主键。',
   `customer_code` VARCHAR(64) NULL COMMENT '客户编码。',
+  `number_prefix` VARCHAR(8) NULL COMMENT '业务单号客户前缀。',
   `customer_name` VARCHAR(128) NULL COMMENT '客户名称。',
   `contact_name` VARCHAR(128) NULL COMMENT '联系人。',
   `contact_phone` VARCHAR(255) NULL COMMENT '联系电话 AES-GCM 密文。',
@@ -537,6 +453,7 @@ CREATE TABLE `mdm_customer` (
   `updated_time` DATETIME NULL COMMENT '更新时间',
   `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
   PRIMARY KEY (`customer_id`),
+  UNIQUE KEY `uk_mdm_customer_number_prefix` (`number_prefix`),
   UNIQUE KEY `uk_mdm_customer_customer_code` (`customer_code`),
   KEY `idx_mdm_customer_contact_phone_lookup_hash` (`contact_phone_lookup_hash`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='客户表';
@@ -567,6 +484,8 @@ CREATE TABLE `mdm_material` (
   `spec_model` VARCHAR(64) NULL COMMENT '规格型号。',
   `unit_id` BIGINT UNSIGNED NULL COMMENT '计量单位。',
   `material_type` VARCHAR(32) NULL COMMENT '原料、半成品、成品、辅料。',
+  `quantity_mode` VARCHAR(16) NOT NULL DEFAULT 'CONTINUOUS' COMMENT 'DISCRETE:离散整数，CONTINUOUS:连续数量；旧物料保持原精度。',
+  `issue_step` DECIMAL(18,4) NOT NULL DEFAULT 0.0001 COMMENT '最小发料粒度；合并需求后向上取整。',
   `status` VARCHAR(32) NULL COMMENT 'ENABLE:正常，DISABLE:停用。',
   `remark` VARCHAR(500) NULL COMMENT '备注',
   `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
@@ -595,6 +514,7 @@ CREATE TABLE `mdm_product` (
   `updated_by` BIGINT UNSIGNED NULL COMMENT '更新人',
   `updated_time` DATETIME NULL COMMENT '更新时间',
   `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
+  `preparation_controlled` TINYINT NOT NULL DEFAULT 0 COMMENT '是否启用制造准备受控流程，0兼容历史1受控',
   PRIMARY KEY (`product_id`),
   UNIQUE KEY `uk_mdm_product_product_code` (`product_code`),
   KEY `idx_mdm_product_material_id` (`material_id`)
@@ -606,6 +526,7 @@ CREATE TABLE `mdm_bom` (
   `product_id` BIGINT UNSIGNED NULL COMMENT '关联产品。',
   `bom_version` VARCHAR(64) NULL COMMENT '版本号。',
   `effective_date` DATE NULL COMMENT '生效日期。',
+  `effective_to` DATE NULL COMMENT 'BOM 失效日期，含当日；空为长期有效。',
   `status` VARCHAR(32) NULL COMMENT 'DRAFT:草稿，RELEASED:已发布，DISABLE:停用。',
   `remark` VARCHAR(500) NULL COMMENT '备注',
   `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
@@ -623,6 +544,8 @@ CREATE TABLE `mdm_bom_item` (
   `bom_item_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '产品物料清单明细主键。',
   `bom_id` BIGINT UNSIGNED NULL COMMENT '产品物料清单主表 ID。',
   `material_id` BIGINT UNSIGNED NULL COMMENT '所需物料。',
+  `child_bom_id` BIGINT UNSIGNED NULL COMMENT '冻结引用的自制组件 BOM；空为外购投入。',
+  `consumption_operation_id` BIGINT UNSIGNED NULL COMMENT '本级直接物料的投料工序；历史空值表示尚未配置。',
   `quantity` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT '标准用量。',
   `loss_rate` DECIMAL(9,4) NOT NULL DEFAULT 0.0000 COMMENT '损耗率。',
   `sequence_no` INT NULL COMMENT '顺序号。',
@@ -635,6 +558,7 @@ CREATE TABLE `mdm_bom_item` (
   `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
   PRIMARY KEY (`bom_item_id`),
   KEY `idx_mdm_bom_item_bom_id` (`bom_id`),
+  KEY `idx_mdm_bom_item_child_bom_id` (`child_bom_id`),
   KEY `idx_mdm_bom_item_material_id` (`material_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='产品物料清单明细表';
 
@@ -688,6 +612,10 @@ CREATE TABLE `process_route_item` (
   `updated_by` BIGINT UNSIGNED NULL COMMENT '更新人',
   `updated_time` DATETIME NULL COMMENT '更新时间',
   `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
+  `resource_type` VARCHAR(32) NOT NULL DEFAULT 'LABOR' COMMENT 'LABOR人工节拍，BATCH_EQUIPMENT批量设备占用',
+  `batch_capacity` DECIMAL(18,4) NULL COMMENT '批量设备每批容量，离散整数',
+  `batch_duration_minutes` DECIMAL(10,2) NULL COMMENT '每批设备占用分钟，非人工单件工时',
+  `time_source_reference` VARCHAR(500) NULL COMMENT '工时或设备占用参数依据',
   PRIMARY KEY (`route_item_id`),
   KEY `idx_process_route_item_route_id` (`route_id`),
   KEY `idx_process_route_item_operation_id` (`operation_id`)
@@ -871,25 +799,29 @@ CREATE TABLE `mfg_production_order` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='生产订单表';
 
 CREATE TABLE `mfg_production_plan` (
-  `plan_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '计划主键。',
-  `plan_no` VARCHAR(64) NULL COMMENT '计划编号。',
-  `production_order_id` BIGINT UNSIGNED NULL COMMENT '关联生产订单。',
-  `line_id` BIGINT UNSIGNED NULL COMMENT '计划产线。',
-  `planned_start_time` DATETIME NULL COMMENT '计划开始时间。',
-  `planned_end_time` DATETIME NULL COMMENT '计划结束时间。',
-  `planned_quantity` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT '计划数量。',
-  `status` VARCHAR(32) NULL COMMENT 'DRAFT:待生效，RELEASED:已生效，FINISHED:已完成，CLOSED:已取消。',
-  `remark` VARCHAR(500) NULL COMMENT '备注',
-  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
-  `created_by` BIGINT UNSIGNED NULL COMMENT '创建人',
-  `created_time` DATETIME NULL COMMENT '创建时间',
-  `updated_by` BIGINT UNSIGNED NULL COMMENT '更新人',
-  `updated_time` DATETIME NULL COMMENT '更新时间',
-  `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
+  `plan_id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '计划主键。',
+  `plan_no` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '计划编号。',
+  `production_order_id` bigint unsigned DEFAULT NULL COMMENT '关联生产订单。',
+  `line_id` bigint unsigned DEFAULT NULL COMMENT '计划产线。',
+  `planned_start_time` datetime DEFAULT NULL COMMENT '计划开始时间。',
+  `planned_end_time` datetime DEFAULT NULL COMMENT '计划结束时间。',
+  `planned_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '计划数量。',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'DRAFT:待生效，RELEASED:已生效，FINISHED:已完成，CLOSED:已取消。',
+  `remark` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '备注',
+  `capacity_basis` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '可执行窗口计算依据：产线周历、班次、日产能与批次占用',
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本号',
+  `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人',
+  `created_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_by` bigint unsigned DEFAULT NULL COMMENT '更新人',
+  `updated_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_flag` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记 0未删 1已删',
+  `plan_type` varchar(16) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'ROOT' COMMENT 'ROOT:整机根计划，COMPONENT:组件补产计划',
+  `parent_plan_id` bigint unsigned DEFAULT NULL COMMENT '组件计划来源的父计划',
   PRIMARY KEY (`plan_id`),
   UNIQUE KEY `uk_mfg_production_plan_plan_no` (`plan_no`),
   KEY `idx_mfg_production_plan_production_order_id` (`production_order_id`),
-  KEY `idx_mfg_production_plan_line_id` (`line_id`)
+  KEY `idx_mfg_production_plan_line_id` (`line_id`),
+  KEY `idx_mfg_production_plan_parent_plan_id` (`parent_plan_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='生产计划表';
 
 CREATE TABLE `mfg_schedule_scenario` (
@@ -966,6 +898,8 @@ CREATE TABLE `mfg_work_order` (
   `product_id` BIGINT UNSIGNED NULL COMMENT '产品 ID。',
   `bom_id` BIGINT UNSIGNED NULL COMMENT '使用的产品物料清单。',
   `route_id` BIGINT UNSIGNED NULL COMMENT '使用的工艺路线。',
+  `planned_start_time` DATETIME NULL COMMENT '工单自身计划开始时间。',
+  `planned_end_time` DATETIME NULL COMMENT '工单自身计划结束时间。',
   `planned_quantity` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT '计划生产数量。',
   `completed_quantity` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT '完成数量。',
   `status` VARCHAR(32) NULL COMMENT 'DRAFT:新建，APPROVED:已审核，RELEASED:已下达，RUNNING:生产中，FINISHED:已完成，CLOSED:已关闭。',
@@ -976,6 +910,13 @@ CREATE TABLE `mfg_work_order` (
   `updated_by` BIGINT UNSIGNED NULL COMMENT '更新人',
   `updated_time` DATETIME NULL COMMENT '更新时间',
   `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
+  `work_order_type` VARCHAR(16) NOT NULL DEFAULT 'ROOT',
+  `parent_work_order_id` BIGINT UNSIGNED NULL,
+  `root_work_order_id` BIGINT UNSIGNED NULL,
+  `source_requirement_id` BIGINT UNSIGNED NULL,
+  `snapshot_json` LONGTEXT NULL,
+  `snapshot_hash` VARCHAR(64) NULL,
+  `snapshot_time` DATETIME NULL,
   PRIMARY KEY (`work_order_id`),
   UNIQUE KEY `uk_mfg_work_order_work_order_no` (`work_order_no`),
   KEY `idx_mfg_work_order_plan_id` (`plan_id`),
@@ -985,20 +926,23 @@ CREATE TABLE `mfg_work_order` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='生产工单表';
 
 CREATE TABLE `mfg_work_order_material` (
-  `requirement_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '需求主键。',
-  `work_order_id` BIGINT UNSIGNED NULL COMMENT '工单 ID。',
-  `material_id` BIGINT UNSIGNED NULL COMMENT '物料 ID。',
-  `required_quantity` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT '需求数量。',
-  `issued_quantity` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT '已发料数量。',
-  `shortage_quantity` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT '缺料数量。',
-  `status` VARCHAR(32) NULL COMMENT 'WAIT_READY:待齐套，PARTIAL_READY:部分齐套，READY:已齐套。',
-  `remark` VARCHAR(500) NULL COMMENT '备注',
-  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
-  `created_by` BIGINT UNSIGNED NULL COMMENT '创建人',
-  `created_time` DATETIME NULL COMMENT '创建时间',
-  `updated_by` BIGINT UNSIGNED NULL COMMENT '更新人',
-  `updated_time` DATETIME NULL COMMENT '更新时间',
-  `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
+  `requirement_id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '需求主键。',
+  `work_order_id` bigint unsigned DEFAULT NULL COMMENT '工单 ID。',
+  `material_id` bigint unsigned DEFAULT NULL COMMENT '物料 ID。',
+  `required_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '需求数量。',
+  `issued_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '已发料数量。',
+  `shortage_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '缺料数量。',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'WAIT_READY:待齐套，PARTIAL_READY:部分齐套，READY:已齐套。',
+  `remark` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '备注',
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本号',
+  `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人',
+  `created_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_by` bigint unsigned DEFAULT NULL COMMENT '更新人',
+  `updated_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_flag` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记 0未删 1已删',
+  `supply_type` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'STOCK' COMMENT 'STOCK:库存领用，COMPONENT_WORK_ORDER:组件工单补产，PURCHASE:采购补货',
+  `source_work_order_id` bigint unsigned DEFAULT NULL COMMENT '该需求对应的组件工单',
+  `reserved_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '已承诺的库存预留数量；不等于已发料',
   PRIMARY KEY (`requirement_id`),
   KEY `idx_mfg_work_order_material_work_order_id` (`work_order_id`),
   KEY `idx_mfg_work_order_material_material_id` (`material_id`)
@@ -1039,6 +983,7 @@ CREATE TABLE `mfg_task` (
   `task_type` VARCHAR(32) NOT NULL DEFAULT 'NORMAL' COMMENT 'NORMAL:正常任务，REWORK:返工任务，SUPPLEMENT:补产或续作任务。',
   `source_task_id` BIGINT UNSIGNED NULL COMMENT '补偿任务的来源任务 ID。',
   `source_ncr_id` BIGINT UNSIGNED NULL COMMENT '质量补偿任务的来源不合格品处理单 ID。',
+  `defect_resolution_task_id` BIGINT UNSIGNED NULL COMMENT '工序报工不良处置来源任务。',
   `status` VARCHAR(32) NULL COMMENT 'WAIT_START:待开工，RUNNING:生产中，PAUSED:暂停，FINISHED:已完工，CLOSED:已关闭。',
   `remark` VARCHAR(500) NULL COMMENT '备注',
   `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
@@ -1079,6 +1024,7 @@ CREATE TABLE `mfg_work_report` (
   `station_id` BIGINT UNSIGNED NULL COMMENT '工位 ID。',
   `qualified_quantity` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT '合格数量。',
   `defect_quantity` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT '不良数量。',
+  `defect_description` VARCHAR(1000) DEFAULT NULL COMMENT '生产不良现象、原因及数量说明；有不良时必填。',
   `actual_work_hours` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT '实际工时。',
   `report_time` DATETIME NULL COMMENT '报工时间。',
   `audit_status` VARCHAR(32) NULL COMMENT 'SUBMITTED:待审核，APPROVED:通过，REJECTED:驳回。',
@@ -1189,6 +1135,7 @@ CREATE TABLE `wms_location` (
   `location_code` VARCHAR(64) NULL COMMENT '库位编码。',
   `location_name` VARCHAR(128) NULL COMMENT '库位名称。',
   `warehouse_id` BIGINT UNSIGNED NULL COMMENT '所属仓库。',
+  `line_id` BIGINT UNSIGNED NULL COMMENT '线边库位所属产线；空为共享。',
   `location_type` VARCHAR(32) NULL COMMENT '正常、待检、不良、冻结。',
   `status` VARCHAR(32) NULL COMMENT 'IDLE:空闲，OCCUPIED:占用，LOCKED:锁定，MAINTAINING:维护。',
   `remark` VARCHAR(500) NULL COMMENT '备注',
@@ -1247,8 +1194,9 @@ CREATE TABLE `wms_inventory` (
   `updated_by` BIGINT UNSIGNED NULL COMMENT '更新人',
   `updated_time` DATETIME NULL COMMENT '更新时间',
   `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
+  `work_order_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
   PRIMARY KEY (`inventory_id`),
-  UNIQUE KEY `uk_wms_inventory_whlmb` (`warehouse_id`, `location_id`, `material_id`, `batch_id`),
+  UNIQUE KEY `uk_wms_inventory_whlmb_wo` (`warehouse_id`, `location_id`, `material_id`, `batch_id`, `work_order_id`),
   KEY `idx_wms_inventory_warehouse_id` (`warehouse_id`),
   KEY `idx_wms_inventory_location_id` (`location_id`),
   KEY `idx_wms_inventory_material_id` (`material_id`),
@@ -1273,6 +1221,10 @@ CREATE TABLE `wms_stock_movement` (
   `updated_by` BIGINT UNSIGNED NULL COMMENT '更新人',
   `updated_time` DATETIME NULL COMMENT '更新时间',
   `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
+  `warehouse_id` BIGINT UNSIGNED NULL,
+  `location_id` BIGINT UNSIGNED NULL,
+  `work_order_id` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+  `pair_no` VARCHAR(64) NULL,
   PRIMARY KEY (`movement_id`),
   UNIQUE KEY `uk_wms_stock_movement_movement_no` (`movement_no`),
   KEY `idx_wms_stock_movement_source_order_id` (`source_order_id`),
@@ -1339,6 +1291,9 @@ CREATE TABLE `wms_outbound_order` (
   `updated_by` BIGINT UNSIGNED NULL COMMENT '更新人',
   `updated_time` DATETIME NULL COMMENT '更新时间',
   `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
+  `customer_id` BIGINT UNSIGNED NULL,
+  `source_production_order_id` BIGINT UNSIGNED NULL,
+  `inspection_id` BIGINT UNSIGNED NULL,
   PRIMARY KEY (`outbound_id`),
   UNIQUE KEY `uk_wms_outbound_order_outbound_no` (`outbound_no`),
   KEY `idx_wms_outbound_order_warehouse_id` (`warehouse_id`),
@@ -1352,6 +1307,7 @@ CREATE TABLE `wms_outbound_detail` (
   `material_id` BIGINT UNSIGNED NULL COMMENT '物料 ID。',
   `batch_id` BIGINT UNSIGNED NULL COMMENT '批次 ID。',
   `location_id` BIGINT UNSIGNED NULL COMMENT '库位 ID。',
+  `inspection_id` BIGINT UNSIGNED NULL COMMENT '库存半成品领用复验单。',
   `outbound_quantity` DECIMAL(18,4) NOT NULL DEFAULT 0.0000 COMMENT '出库数量。',
   `remark` VARCHAR(500) NULL COMMENT '备注',
   `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
@@ -1364,7 +1320,8 @@ CREATE TABLE `wms_outbound_detail` (
   KEY `idx_wms_outbound_detail_outbound_id` (`outbound_id`),
   KEY `idx_wms_outbound_detail_material_id` (`material_id`),
   KEY `idx_wms_outbound_detail_batch_id` (`batch_id`),
-  KEY `idx_wms_outbound_detail_location_id` (`location_id`)
+  KEY `idx_wms_outbound_detail_location_id` (`location_id`),
+  KEY `idx_wms_outbound_detail_inspection_id` (`inspection_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='出库单明细表';
 
 CREATE TABLE `wms_return_order` (
@@ -1511,6 +1468,8 @@ CREATE TABLE `qms_inspection_standard` (
   `updated_by` BIGINT UNSIGNED NULL COMMENT '更新人',
   `updated_time` DATETIME NULL COMMENT '更新时间',
   `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
+  `confirmation_status` VARCHAR(32) NOT NULL DEFAULT 'LEGACY' COMMENT 'LEGACY历史兼容，DRAFT草稿，CONFIRMED已确认设计标准',
+  `source_reference` VARCHAR(500) NULL COMMENT '检验标准依据及版本',
   PRIMARY KEY (`standard_id`),
   KEY `idx_qms_inspection_standard_item_id` (`item_id`),
   KEY `idx_qms_inspection_standard_product_id` (`product_id`),
@@ -1552,6 +1511,7 @@ CREATE TABLE `qms_inspection_scheme_item` (
   `updated_by` BIGINT UNSIGNED NULL COMMENT '更新人',
   `updated_time` DATETIME NULL COMMENT '更新时间',
   `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
+  `sampling_mode` VARCHAR(16) NOT NULL DEFAULT 'FIXED' COMMENT 'FIXED固定抽样，ALL按实际批量全检',
   PRIMARY KEY (`id`),
   KEY `idx_qms_inspection_scheme_item_scheme_id` (`scheme_id`),
   KEY `idx_qms_inspection_scheme_item_item_id` (`item_id`),
@@ -1593,21 +1553,23 @@ CREATE TABLE `qms_inspection_order` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='检验单主表';
 
 CREATE TABLE `qms_inspection_result` (
-  `result_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '结果主键。',
-  `inspection_id` BIGINT UNSIGNED NULL COMMENT '检验单 ID。',
-  `item_id` BIGINT UNSIGNED NULL COMMENT '检验项目 ID。',
-  `measured_value` VARCHAR(64) NULL COMMENT '实测值。',
-  `result` VARCHAR(32) NULL COMMENT 'PASS:合格，FAIL:不合格，CONCESSION:让步接收。',
-  `defect_description` VARCHAR(255) NULL COMMENT '缺陷描述。',
-  `photo_file_id` BIGINT UNSIGNED NULL COMMENT '质检图片附件。',
-  `remark` VARCHAR(500) NULL COMMENT '备注',
-  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
-  `created_by` BIGINT UNSIGNED NULL COMMENT '创建人',
-  `created_time` DATETIME NULL COMMENT '创建时间',
-  `updated_by` BIGINT UNSIGNED NULL COMMENT '更新人',
-  `updated_time` DATETIME NULL COMMENT '更新时间',
-  `deleted_flag` TINYINT NOT NULL DEFAULT 0 COMMENT '软删除标记 0未删 1已删',
+  `result_id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '结果主键。',
+  `inspection_id` bigint unsigned DEFAULT NULL COMMENT '检验单 ID。',
+  `piece_no` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '件号，逐件全检时必填',
+  `item_id` bigint unsigned DEFAULT NULL COMMENT '检验项目 ID。',
+  `measured_value` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '实测值。',
+  `result` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'PASS:合格，FAIL:不合格，CONCESSION:让步接收。',
+  `defect_description` varchar(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '缺陷描述。',
+  `photo_file_id` bigint unsigned DEFAULT NULL COMMENT '质检图片附件。',
+  `remark` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '备注',
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本号',
+  `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人',
+  `created_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_by` bigint unsigned DEFAULT NULL COMMENT '更新人',
+  `updated_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_flag` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记 0未删 1已删',
   PRIMARY KEY (`result_id`),
+  UNIQUE KEY `uk_qms_result_piece` (`inspection_id`,`item_id`,`piece_no`),
   KEY `idx_qms_inspection_result_inspection_id` (`inspection_id`),
   KEY `idx_qms_inspection_result_item_id` (`item_id`),
   KEY `idx_qms_inspection_result_photo_file_id` (`photo_file_id`)
@@ -1893,3 +1855,466 @@ CREATE TABLE `trace_material_usage` (
   KEY `idx_trace_material_usage_material_id` (`material_id`),
   KEY `idx_trace_material_usage_batch_id` (`batch_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='物料使用追溯表';
+
+CREATE TABLE IF NOT EXISTS `mdm_product_parameter` (
+  `parameter_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `product_id` BIGINT UNSIGNED NOT NULL,
+  `parameter_code` VARCHAR(64) NOT NULL,
+  `parameter_name` VARCHAR(128) NOT NULL,
+  `value_type` VARCHAR(16) NOT NULL DEFAULT 'TEXT',
+  `parameter_value` VARCHAR(255) NULL,
+  `unit_label` VARCHAR(32) NULL,
+  `source_reference` VARCHAR(500) NULL,
+  `required_flag` TINYINT NOT NULL DEFAULT 1,
+  `status` VARCHAR(32) NOT NULL DEFAULT 'DRAFT',
+  `version` INT NOT NULL DEFAULT 0,
+  `created_by` BIGINT UNSIGNED NULL,
+  `created_time` DATETIME NULL,
+  `updated_by` BIGINT UNSIGNED NULL,
+  `updated_time` DATETIME NULL,
+  `deleted_flag` TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`parameter_id`),
+  UNIQUE KEY `uk_product_parameter_code` (`product_id`,`parameter_code`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='受控产品规格参数';
+
+
+CREATE TABLE `org_team_schedule` (
+  `schedule_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT '排班主键',
+  `schedule_no` VARCHAR(64) DEFAULT NULL COMMENT '排班编号',
+  `team_id` BIGINT UNSIGNED NOT NULL COMMENT '班组',
+  `line_id` BIGINT UNSIGNED NOT NULL COMMENT '产线',
+  `shift_id` BIGINT UNSIGNED NOT NULL COMMENT '班次',
+  `work_date` DATE NOT NULL COMMENT '排班日期',
+  `planned_headcount` INT NOT NULL DEFAULT 1 COMMENT '计划出勤人数',
+  `status` VARCHAR(32) NOT NULL DEFAULT 'DRAFT' COMMENT 'DRAFT:草稿，RELEASED:已生效，CLOSED:已关闭',
+  `remark` VARCHAR(500) DEFAULT NULL COMMENT '备注',
+  `version` INT NOT NULL DEFAULT 0 COMMENT '乐观锁版本号',
+  `created_by` BIGINT UNSIGNED DEFAULT NULL,
+  `created_time` DATETIME DEFAULT NULL,
+  `updated_by` BIGINT UNSIGNED DEFAULT NULL,
+  `updated_time` DATETIME DEFAULT NULL,
+  `deleted_flag` TINYINT NOT NULL DEFAULT 0,
+  PRIMARY KEY (`schedule_id`),
+  UNIQUE KEY `uk_org_team_schedule` (`team_id`,`line_id`,`shift_id`,`work_date`),
+  KEY `idx_org_team_schedule_date` (`work_date`),
+  KEY `idx_org_team_schedule_line` (`line_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='班组到日期产线的岗位排班';
+
+
+-- 供给分配与智能业务扩展；字段与对应增量迁移、实体同步。
+
+CREATE TABLE `ai_anomaly_scan` (
+  `scan_id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '扫描主键。',
+  `scan_no` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '扫描编号。',
+  `trigger_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'SCHEDULE' COMMENT '触发方式：SCHEDULE 定时、MANUAL 手工。',
+  `status` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'RUNNING' COMMENT 'SUCCEEDED 成功、FAILED 失败。',
+  `detected_count` int NOT NULL DEFAULT '0' COMMENT '本轮检测到的异常条数。',
+  `opened_count` int NOT NULL DEFAULT '0' COMMENT '本轮新登记异常条数。',
+  `closed_count` int NOT NULL DEFAULT '0' COMMENT '本轮自动关闭异常条数。',
+  `notified_count` int NOT NULL DEFAULT '0' COMMENT '本轮发出通知条数。',
+  `elapsed_ms` bigint DEFAULT NULL COMMENT '耗时毫秒。',
+  `summary` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '扫描结论。',
+  `error_message` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '失败原因。',
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本号',
+  `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人',
+  `created_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_by` bigint unsigned DEFAULT NULL COMMENT '更新人',
+  `updated_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_flag` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记 0未删 1已删',
+  PRIMARY KEY (`scan_id`),
+  UNIQUE KEY `uk_ai_anomaly_scan_no` (`scan_no`),
+  KEY `idx_ai_anomaly_scan_time` (`created_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='主动异常扫描记录';
+
+CREATE TABLE `ai_automation_rule` (
+  `rule_id` bigint NOT NULL AUTO_INCREMENT COMMENT '规则ID',
+  `rule_no` varchar(64) NOT NULL COMMENT '规则编号',
+  `rule_name` varchar(128) NOT NULL COMMENT '规则名称',
+  `rule_type` varchar(48) NOT NULL COMMENT '规则类型：INVENTORY_BELOW_SAFETY',
+  `status` varchar(24) NOT NULL DEFAULT 'DRAFT' COMMENT '状态：DRAFT/ENABLED/PAUSED/DISABLED',
+  `default_threshold` decimal(18,4) DEFAULT NULL COMMENT '默认安全库存阈值',
+  `config_json` longtext COMMENT '适用范围与阈值配置JSON',
+  `interval_minutes` int NOT NULL DEFAULT '10' COMMENT '定时执行间隔（分钟）',
+  `last_run_time` datetime DEFAULT NULL COMMENT '上次执行时间',
+  `next_run_time` datetime DEFAULT NULL COMMENT '下次计划执行时间',
+  `success_count` int NOT NULL DEFAULT '0' COMMENT '累计成功次数',
+  `fail_count` int NOT NULL DEFAULT '0' COMMENT '累计失败次数',
+  `remark` varchar(500) DEFAULT NULL COMMENT '备注',
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本',
+  `created_by` bigint DEFAULT NULL,
+  `created_time` datetime DEFAULT NULL,
+  `updated_by` bigint DEFAULT NULL,
+  `updated_time` datetime DEFAULT NULL,
+  `deleted_flag` tinyint NOT NULL DEFAULT '0' COMMENT '删除标记',
+  PRIMARY KEY (`rule_id`),
+  UNIQUE KEY `uk_ai_automation_rule_no` (`rule_no`),
+  KEY `idx_ai_automation_rule_status` (`status`,`deleted_flag`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI自动化规则';
+
+CREATE TABLE `ai_automation_run` (
+  `run_id` bigint NOT NULL AUTO_INCREMENT COMMENT '运行ID',
+  `run_no` varchar(64) NOT NULL COMMENT '运行编号',
+  `run_key` varchar(128) NOT NULL COMMENT '幂等键，同一触发不重复执行',
+  `rule_id` bigint NOT NULL COMMENT '规则ID',
+  `rule_no` varchar(64) DEFAULT NULL COMMENT '规则编号快照',
+  `rule_name` varchar(128) DEFAULT NULL COMMENT '规则名称快照',
+  `trigger_type` varchar(24) NOT NULL COMMENT '触发方式：SCHEDULE/MANUAL',
+  `status` varchar(24) NOT NULL COMMENT '状态：RUNNING/SUCCEEDED/FAILED/SKIPPED',
+  `matched_count` int NOT NULL DEFAULT '0' COMMENT '命中数量',
+  `started_time` datetime DEFAULT NULL COMMENT '开始时间',
+  `finished_time` datetime DEFAULT NULL COMMENT '结束时间',
+  `elapsed_ms` bigint DEFAULT NULL COMMENT '耗时毫秒',
+  `summary` varchar(500) DEFAULT NULL COMMENT '结果摘要',
+  `error_message` varchar(500) DEFAULT NULL COMMENT '失败原因',
+  `created_by` bigint DEFAULT NULL,
+  `created_time` datetime DEFAULT NULL,
+  `updated_by` bigint DEFAULT NULL,
+  `updated_time` datetime DEFAULT NULL,
+  `deleted_flag` tinyint NOT NULL DEFAULT '0',
+  PRIMARY KEY (`run_id`),
+  UNIQUE KEY `uk_ai_automation_run_no` (`run_no`),
+  UNIQUE KEY `uk_ai_automation_run_key` (`run_key`),
+  KEY `idx_ai_automation_run_rule` (`rule_id`,`started_time`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI自动化规则执行记录';
+
+CREATE TABLE `ai_automation_step` (
+  `step_id` bigint NOT NULL AUTO_INCREMENT COMMENT '步骤ID',
+  `run_id` bigint NOT NULL COMMENT '运行ID',
+  `step_no` int NOT NULL COMMENT '步骤序号',
+  `action_type` varchar(48) NOT NULL COMMENT '动作类型',
+  `target_type` varchar(48) DEFAULT NULL COMMENT '目标对象类型',
+  `target_no` varchar(128) DEFAULT NULL COMMENT '目标对象编号',
+  `status` varchar(24) NOT NULL COMMENT '状态：SUCCEEDED/FAILED/SKIPPED',
+  `message` varchar(500) DEFAULT NULL COMMENT '结果说明',
+  `biz_no` varchar(64) DEFAULT NULL COMMENT '业务单据号',
+  `elapsed_ms` bigint DEFAULT NULL COMMENT '耗时毫秒',
+  `created_by` bigint DEFAULT NULL,
+  `created_time` datetime DEFAULT NULL,
+  `updated_by` bigint DEFAULT NULL,
+  `updated_time` datetime DEFAULT NULL,
+  `deleted_flag` tinyint NOT NULL DEFAULT '0',
+  PRIMARY KEY (`step_id`),
+  KEY `idx_ai_automation_step_run` (`run_id`,`step_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI自动化执行步骤流水';
+
+CREATE TABLE `ai_command_execution` (
+  `command_id` bigint NOT NULL AUTO_INCREMENT COMMENT '命令执行ID',
+  `confirmation_id` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '预览确认凭据，UUID去横线',
+  `idempotency_key` varchar(96) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '调用方幂等键',
+  `request_hash` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '规范化参数摘要，用于识别同凭据改参数',
+  `conversation_id` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '来源会话ID',
+  `user_id` bigint DEFAULT NULL COMMENT '发起用户ID',
+  `raw_text` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '原始自然语言命令',
+  `intent` varchar(48) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '意图编码',
+  `action` varchar(48) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '写动作编码',
+  `action_label` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '写动作中文名',
+  `target_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '目标单据类型',
+  `target_no` varchar(96) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '目标单号',
+  `target_id` bigint DEFAULT NULL COMMENT '目标主键',
+  `params_json` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '规范化命令参数',
+  `preview_json` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '预览返回体',
+  `impacts_json` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '影响说明',
+  `preconditions_json` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '前置条件校验结果',
+  `status` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT 'PREVIEW/CONFIRMED/EXECUTING/SUCCEEDED/FAILED/PARTIAL_FAILED/CANCELLED/EXPIRED/REJECTED',
+  `result_json` text CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci COMMENT '执行结果',
+  `error_message` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '失败原因',
+  `source` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'WORKBENCH/DOCK/API',
+  `elapsed_ms` bigint DEFAULT NULL COMMENT '执行耗时毫秒',
+  `expires_at` datetime DEFAULT NULL COMMENT '预览过期时间',
+  `executed_at` datetime DEFAULT NULL COMMENT '执行完成时间',
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本',
+  `created_by` bigint DEFAULT NULL,
+  `created_time` datetime DEFAULT NULL,
+  `updated_by` bigint DEFAULT NULL,
+  `updated_time` datetime DEFAULT NULL,
+  `deleted_flag` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`command_id`),
+  UNIQUE KEY `uk_ai_command_confirmation` (`confirmation_id`),
+  KEY `idx_ai_command_user_time` (`user_id`,`created_time`),
+  KEY `idx_ai_command_status` (`status`),
+  KEY `idx_ai_command_action` (`action`),
+  KEY `idx_ai_command_idempotency` (`idempotency_key`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='AI写命令执行记录';
+
+CREATE TABLE `ai_command_step` (
+  `step_id` bigint NOT NULL AUTO_INCREMENT COMMENT '步骤ID',
+  `command_id` bigint NOT NULL COMMENT '所属命令ID',
+  `step_no` int DEFAULT NULL COMMENT '步骤序号，从1开始',
+  `capability` varchar(48) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '步骤能力：PRECHECK/DOMAIN_CALL',
+  `input_digest` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '本步骤输入摘要',
+  `status` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT 'PENDING/RUNNING/SUCCEEDED/FAILED/SKIPPED',
+  `biz_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '产出单据类型',
+  `biz_no` varchar(96) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '产出单据号',
+  `biz_id` bigint DEFAULT NULL COMMENT '产出单据主键',
+  `error_message` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '失败原因',
+  `started_at` datetime DEFAULT NULL,
+  `ended_at` datetime DEFAULT NULL,
+  `elapsed_ms` bigint DEFAULT NULL,
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本',
+  `created_by` bigint DEFAULT NULL,
+  `created_time` datetime DEFAULT NULL,
+  `updated_by` bigint DEFAULT NULL,
+  `updated_time` datetime DEFAULT NULL,
+  `deleted_flag` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`step_id`),
+  KEY `idx_ai_command_step_command` (`command_id`,`step_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='AI写命令步骤流水';
+
+CREATE TABLE `ai_inventory_risk` (
+  `risk_id` bigint NOT NULL AUTO_INCREMENT COMMENT '风险ID',
+  `risk_no` varchar(64) NOT NULL COMMENT '风险编号',
+  `rule_id` bigint DEFAULT NULL COMMENT '来源规则ID',
+  `rule_no` varchar(64) DEFAULT NULL COMMENT '来源规则编号',
+  `material_id` bigint NOT NULL COMMENT '物料ID',
+  `material_code` varchar(64) DEFAULT NULL COMMENT '物料编码快照',
+  `material_name` varchar(128) DEFAULT NULL COMMENT '物料名称快照',
+  `warehouse_type` varchar(32) DEFAULT NULL COMMENT '统计的仓库类型',
+  `available_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '检出时可用量',
+  `threshold_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '阈值',
+  `shortage_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '缺口',
+  `suggestion_id` bigint DEFAULT NULL COMMENT '关联补货建议ID',
+  `status` varchar(24) NOT NULL DEFAULT 'OPEN' COMMENT '状态：OPEN/CLOSED',
+  `detected_time` datetime DEFAULT NULL COMMENT '发现时间',
+  `closed_time` datetime DEFAULT NULL COMMENT '关闭时间',
+  `remark` varchar(500) DEFAULT NULL,
+  `version` int NOT NULL DEFAULT '0',
+  `created_by` bigint DEFAULT NULL,
+  `created_time` datetime DEFAULT NULL,
+  `updated_by` bigint DEFAULT NULL,
+  `updated_time` datetime DEFAULT NULL,
+  `deleted_flag` tinyint NOT NULL DEFAULT '0',
+  PRIMARY KEY (`risk_id`),
+  UNIQUE KEY `uk_ai_inventory_risk_no` (`risk_no`),
+  KEY `idx_ai_inventory_risk_material` (`material_id`,`status`,`deleted_flag`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='库存风险台账';
+
+CREATE TABLE `ai_knowledge_section` (
+  `section_id` bigint NOT NULL AUTO_INCREMENT COMMENT '章节主键',
+  `doc_code` varchar(32) NOT NULL COMMENT '文档代号：REQ 需求规格说明书 / DES 系统设计说明书',
+  `doc_name` varchar(128) NOT NULL COMMENT '文档名称',
+  `seq_no` int NOT NULL DEFAULT '0' COMMENT '章节序号，按文档出现顺序',
+  `level_no` int NOT NULL DEFAULT '1' COMMENT '标题层级：1-4',
+  `title` varchar(255) NOT NULL COMMENT '章节标题，含编号',
+  `page_no` int DEFAULT NULL COMMENT '在导出 PDF 中的页码',
+  `content` longtext COMMENT '章节正文，截取前若干字',
+  `version` int NOT NULL DEFAULT '0',
+  `created_by` bigint DEFAULT NULL,
+  `created_time` datetime DEFAULT NULL,
+  `updated_by` bigint DEFAULT NULL,
+  `updated_time` datetime DEFAULT NULL,
+  `deleted_flag` tinyint NOT NULL DEFAULT '0',
+  PRIMARY KEY (`section_id`),
+  KEY `idx_ai_knowledge_doc` (`doc_code`,`seq_no`),
+  KEY `idx_ai_knowledge_title` (`title`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 知识助手章节索引';
+
+CREATE TABLE `ai_task_definition` (
+  `definition_id` bigint NOT NULL AUTO_INCREMENT COMMENT '任务定义ID',
+  `definition_no` varchar(64) NOT NULL COMMENT '任务编号',
+  `definition_name` varchar(128) NOT NULL COMMENT '任务名称',
+  `trigger_type` varchar(32) NOT NULL DEFAULT 'MANUAL' COMMENT '触发方式：EVENT事件/SCHEDULE定时/MANUAL手动',
+  `trigger_event_key` varchar(128) DEFAULT NULL COMMENT '触发事件键，触发方式为EVENT时必填',
+  `interval_minutes` int NOT NULL DEFAULT '10' COMMENT '定时触发间隔分钟',
+  `status` varchar(32) NOT NULL DEFAULT 'DRAFT' COMMENT '状态：DRAFT/ENABLED/PAUSED/DISABLED',
+  `max_attempts` int NOT NULL DEFAULT '2' COMMENT '单步最大尝试次数，含首次',
+  `max_instances_per_hour` int NOT NULL DEFAULT '50' COMMENT '每小时最多实例数，用于循环防护',
+  `timeout_minutes` int NOT NULL DEFAULT '30' COMMENT '单实例最长执行分钟数，超时收敛为 TIMEOUT',
+  `max_step_calls_per_day` int NOT NULL DEFAULT '500' COMMENT '单个定义每日最多执行的步骤次数（调用量上限）',
+  `steps_json` longtext COMMENT '步骤定义JSON数组',
+  `last_run_time` datetime DEFAULT NULL COMMENT '上次触发时间',
+  `success_count` int NOT NULL DEFAULT '0' COMMENT '成功实例数',
+  `fail_count` int NOT NULL DEFAULT '0' COMMENT '失败实例数',
+  `remark` varchar(512) DEFAULT NULL COMMENT '备注',
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本',
+  `created_by` bigint DEFAULT NULL COMMENT '创建人',
+  `created_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_by` bigint DEFAULT NULL COMMENT '更新人',
+  `updated_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_flag` int NOT NULL DEFAULT '0' COMMENT '删除标记',
+  PRIMARY KEY (`definition_id`),
+  UNIQUE KEY `uk_ai_task_definition_no` (`definition_no`),
+  KEY `idx_ai_task_definition_status` (`status`,`deleted_flag`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 多步任务定义';
+
+CREATE TABLE `ai_task_instance` (
+  `instance_id` bigint NOT NULL AUTO_INCREMENT COMMENT '实例ID',
+  `instance_no` varchar(64) NOT NULL COMMENT '实例编号',
+  `instance_key` varchar(191) NOT NULL COMMENT '幂等键，同一触发源只允许一个实例',
+  `definition_id` bigint NOT NULL COMMENT '任务定义ID',
+  `definition_no` varchar(64) NOT NULL COMMENT '任务编号',
+  `definition_name` varchar(128) NOT NULL COMMENT '任务名称',
+  `trigger_type` varchar(32) NOT NULL COMMENT '触发方式',
+  `trigger_source` varchar(255) DEFAULT NULL COMMENT '触发源描述，例如事件键或分钟窗口',
+  `status` varchar(32) NOT NULL DEFAULT 'RUNNING' COMMENT '状态：RUNNING/SUCCEEDED/PARTIAL_FAILED/FAILED/SKIPPED/WAITING_INPUT/CANCELLED/TIMEOUT',
+  `current_step_no` int NOT NULL DEFAULT '0' COMMENT '当前执行到的步骤序号',
+  `resume_step_no` int NOT NULL DEFAULT '1' COMMENT '续跑起始步骤',
+  `total_steps` int NOT NULL DEFAULT '0' COMMENT '步骤总数',
+  `attempt_count` int NOT NULL DEFAULT '0' COMMENT '整体尝试次数',
+  `started_time` datetime DEFAULT NULL COMMENT '开始时间',
+  `finished_time` datetime DEFAULT NULL COMMENT '结束时间',
+  `elapsed_ms` bigint DEFAULT NULL COMMENT '耗时毫秒',
+  `summary` varchar(512) DEFAULT NULL COMMENT '执行摘要',
+  `error_message` varchar(512) DEFAULT NULL COMMENT '失败原因',
+  `waiting_reason` varchar(512) DEFAULT NULL COMMENT '等待补充的具体原因，状态为 WAITING_INPUT 时填写',
+  `deadline_time` datetime DEFAULT NULL COMMENT '本实例的超时截止时间',
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本',
+  `created_by` bigint DEFAULT NULL COMMENT '创建人',
+  `created_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_by` bigint DEFAULT NULL COMMENT '更新人',
+  `updated_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_flag` int NOT NULL DEFAULT '0' COMMENT '删除标记',
+  PRIMARY KEY (`instance_id`),
+  UNIQUE KEY `uk_ai_task_instance_no` (`instance_no`),
+  UNIQUE KEY `uk_ai_task_instance_key` (`instance_key`),
+  KEY `idx_ai_task_instance_def` (`definition_id`,`started_time`),
+  KEY `idx_ai_task_instance_status` (`status`,`deleted_flag`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 多步任务实例';
+
+CREATE TABLE `ai_task_step` (
+  `step_id` bigint NOT NULL AUTO_INCREMENT COMMENT '步骤ID',
+  `instance_id` bigint NOT NULL COMMENT '实例ID',
+  `step_no` int NOT NULL COMMENT '步骤序号',
+  `step_label` varchar(128) DEFAULT NULL COMMENT '步骤名称',
+  `capability` varchar(64) DEFAULT NULL COMMENT '步骤能力，动作编码或查询编码',
+  `target_type` varchar(64) DEFAULT NULL COMMENT '目标单据类型',
+  `target_no` varchar(64) DEFAULT NULL COMMENT '目标单据号',
+  `status` varchar(32) NOT NULL DEFAULT 'PENDING' COMMENT '状态：PENDING/RUNNING/SUCCEEDED/FAILED/SKIPPED',
+  `attempt_count` int NOT NULL DEFAULT '0' COMMENT '本步尝试次数',
+  `biz_no` varchar(64) DEFAULT NULL COMMENT '结果单据号',
+  `biz_id` bigint DEFAULT NULL COMMENT '结果单据ID',
+  `message` varchar(1024) DEFAULT NULL COMMENT '结果或失败原因',
+  `elapsed_ms` bigint DEFAULT NULL COMMENT '耗时毫秒',
+  `created_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_flag` int NOT NULL DEFAULT '0' COMMENT '删除标记',
+  PRIMARY KEY (`step_id`),
+  KEY `idx_ai_task_step_instance` (`instance_id`,`step_no`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci COMMENT='AI 多步任务步骤流水';
+
+CREATE TABLE `mfg_command_request` (
+  `request_id` bigint NOT NULL AUTO_INCREMENT COMMENT '命令请求ID',
+  `request_key` varchar(96) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '调用方提供的幂等请求键',
+  `command` varchar(48) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '命令类型：MATERIAL_ISSUE_GENERATE/LINE_SIDE_TRANSFER',
+  `aggregate_type` varchar(32) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '聚合类型：MFG_WORK_ORDER/WMS_OUTBOUND_ORDER',
+  `aggregate_id` bigint NOT NULL COMMENT '命令作用的聚合ID',
+  `request_digest` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '请求参数摘要，用于识别同键改参数',
+  `result_id` bigint NOT NULL COMMENT '命令结果主键，重放时返回',
+  `operator_id` bigint DEFAULT NULL COMMENT '发起命令的操作人',
+  `status` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'COMPLETED' COMMENT '命令状态：COMPLETED',
+  `remark` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '备注',
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本',
+  `created_by` bigint DEFAULT NULL,
+  `created_time` datetime DEFAULT NULL,
+  `updated_by` bigint DEFAULT NULL,
+  `updated_time` datetime DEFAULT NULL,
+  `deleted_flag` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`request_id`),
+  UNIQUE KEY `uk_mfg_command_request_key` (`request_key`,`command`),
+  KEY `idx_mfg_command_request_aggregate` (`aggregate_type`,`aggregate_id`),
+  KEY `idx_mfg_command_request_result` (`result_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='生产与仓储命令幂等登记';
+
+CREATE TABLE `mfg_generate_request` (
+  `request_id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '生成请求主键',
+  `request_key` varchar(96) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '生成命令幂等键',
+  `plan_id` bigint unsigned NOT NULL COMMENT '来源生产计划',
+  `command` varchar(48) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'GENERATE_WORK_ORDER' COMMENT '命令名',
+  `request_digest` varchar(64) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '请求摘要，参数变化时拒绝复用',
+  `root_work_order_id` bigint unsigned DEFAULT NULL COMMENT '本次生成的根工单',
+  `operator_id` bigint unsigned DEFAULT NULL COMMENT '调用人',
+  `status` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'COMPLETED' COMMENT 'COMPLETED:已完成',
+  `remark` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '备注',
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本号',
+  `created_by` bigint unsigned DEFAULT NULL,
+  `created_time` datetime DEFAULT NULL,
+  `updated_by` bigint unsigned DEFAULT NULL,
+  `updated_time` datetime DEFAULT NULL,
+  `deleted_flag` tinyint NOT NULL DEFAULT '0',
+  PRIMARY KEY (`request_id`),
+  UNIQUE KEY `uk_mfg_generate_request_key` (`request_key`),
+  KEY `idx_mfg_generate_request_plan` (`plan_id`),
+  KEY `idx_mfg_generate_request_root` (`root_work_order_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='生产工单生成命令幂等记录';
+
+CREATE TABLE `mfg_supply_allocation` (
+  `allocation_id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '供给分配主键',
+  `allocation_no` varchar(96) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '分配编号：需求+库存余额唯一，重复请求复用',
+  `requirement_id` bigint unsigned NOT NULL COMMENT '工单用料需求行',
+  `work_order_id` bigint unsigned NOT NULL COMMENT '需求所属工单',
+  `material_id` bigint unsigned NOT NULL COMMENT '物料',
+  `warehouse_id` bigint unsigned NOT NULL COMMENT '来源仓库',
+  `location_id` bigint unsigned NOT NULL COMMENT '来源库位',
+  `batch_id` bigint unsigned NOT NULL COMMENT '来源批次',
+  `inventory_id` bigint unsigned NOT NULL COMMENT '来源公共库存余额行',
+  `allocated_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '分配数量，成功后不再变化',
+  `reserved_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '仍处于预留状态的数量',
+  `transferred_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '已转为线边工单占用的数量',
+  `consumed_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '已实际消耗的数量',
+  `released_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '已释放回公共可用量的数量',
+  `status` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'RESERVED' COMMENT 'RESERVED:预留中，TRANSFERRED:已转线边，CONSUMED:已消耗，RELEASED:已释放',
+  `request_key` varchar(96) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '预留业务幂等键：需求+请求键',
+  `remark` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '备注',
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本号',
+  `created_by` bigint unsigned DEFAULT NULL,
+  `created_time` datetime DEFAULT NULL,
+  `updated_by` bigint unsigned DEFAULT NULL,
+  `updated_time` datetime DEFAULT NULL,
+  `deleted_flag` tinyint NOT NULL DEFAULT '0',
+  PRIMARY KEY (`allocation_id`),
+  UNIQUE KEY `uk_mfg_supply_allocation_no` (`allocation_no`),
+  KEY `idx_mfg_supply_allocation_requirement` (`requirement_id`),
+  KEY `idx_mfg_supply_allocation_work_order` (`work_order_id`),
+  KEY `idx_mfg_supply_allocation_inventory` (`inventory_id`),
+  KEY `idx_mfg_supply_allocation_material` (`material_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='供给分配与库存预留：合格库存只分配一次';
+
+CREATE TABLE `mfg_supply_source` (
+  `source_id` bigint unsigned NOT NULL AUTO_INCREMENT COMMENT '供给来源主键。',
+  `source_no` varchar(96) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL COMMENT '供给来源单号，同一需求下的拆分序号。',
+  `requirement_id` bigint unsigned NOT NULL COMMENT '被供给的工单用料需求 ID。',
+  `work_order_id` bigint unsigned NOT NULL COMMENT '提供供给的组件工单 ID。',
+  `plan_id` bigint unsigned DEFAULT NULL COMMENT '提供供给的组件补产计划 ID。',
+  `material_id` bigint unsigned NOT NULL COMMENT '供给物料 ID。',
+  `supply_type` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'COMPONENT_WORK_ORDER' COMMENT '供给类型：COMPONENT_WORK_ORDER。',
+  `planned_quantity` decimal(18,4) NOT NULL DEFAULT '0.0000' COMMENT '该来源承诺的供给数量。',
+  `sequence_no` int NOT NULL DEFAULT '1' COMMENT '同一需求下的拆分序号，从 1 开始。',
+  `status` varchar(24) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci NOT NULL DEFAULT 'PLANNED' COMMENT 'PLANNED:已计划，RELEASED:已下达，CLOSED:已关闭。',
+  `request_key` varchar(96) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '生成请求键，用于命令幂等追溯。',
+  `remark` varchar(500) CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci DEFAULT NULL COMMENT '备注',
+  `version` int NOT NULL DEFAULT '0' COMMENT '乐观锁版本号',
+  `created_by` bigint unsigned DEFAULT NULL COMMENT '创建人',
+  `created_time` datetime DEFAULT NULL COMMENT '创建时间',
+  `updated_by` bigint unsigned DEFAULT NULL COMMENT '更新人',
+  `updated_time` datetime DEFAULT NULL COMMENT '更新时间',
+  `deleted_flag` tinyint NOT NULL DEFAULT '0' COMMENT '软删除标记 0未删 1已删',
+  PRIMARY KEY (`source_id`),
+  UNIQUE KEY `uk_mfg_supply_source_no` (`source_no`),
+  KEY `idx_mfg_supply_source_requirement_id` (`requirement_id`),
+  KEY `idx_mfg_supply_source_work_order_id` (`work_order_id`),
+  KEY `idx_mfg_supply_source_plan_id` (`plan_id`),
+  KEY `idx_mfg_supply_source_material_id` (`material_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='需求供给来源明细表';
+
+CREATE TABLE `sys_document_sequence` (
+  `sequence_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `scope_prefix` VARCHAR(8) NOT NULL,
+  `document_type` VARCHAR(4) NOT NULL,
+  `business_date` DATE NOT NULL,
+  `current_value` BIGINT UNSIGNED NOT NULL,
+  `updated_time` DATETIME NOT NULL,
+  PRIMARY KEY (`sequence_id`),
+  UNIQUE KEY `uk_document_sequence_scope` (`scope_prefix`,`document_type`,`business_date`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='业务单号每日流水；不回收已用序号';
+
+CREATE TABLE `sys_document_number_alias` (
+  `alias_id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+  `document_type` VARCHAR(4) NOT NULL,
+  `biz_id` BIGINT UNSIGNED NOT NULL,
+  `original_number` VARCHAR(128) NOT NULL,
+  `current_number` VARCHAR(64) NOT NULL,
+  `changed_time` DATETIME NOT NULL,
+  PRIMARY KEY (`alias_id`),
+  UNIQUE KEY `uk_document_alias_original` (`document_type`,`original_number`),
+  KEY `idx_document_alias_number` (`original_number`),
+  KEY `idx_document_alias_biz` (`document_type`,`biz_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci COMMENT='旧单号到当前单号的兼容映射';

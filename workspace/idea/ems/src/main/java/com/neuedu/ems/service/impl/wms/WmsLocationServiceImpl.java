@@ -16,6 +16,40 @@ import java.util.List;
  */
 @Service
 public class WmsLocationServiceImpl extends ServiceImpl<WmsLocationMapper, WmsLocation> implements WmsLocationService {
+    @org.springframework.beans.factory.annotation.Autowired private com.neuedu.ems.mapper.factory.FactoryLineMapper lines;
+    @org.springframework.beans.factory.annotation.Autowired private com.neuedu.ems.mapper.wms.WmsWarehouseMapper warehouses;
+    @org.springframework.beans.factory.annotation.Autowired private com.neuedu.ems.mapper.wms.WmsInventoryMapper inventories;
+
+    private void validateLine(WmsLocation request, WmsLocation existing) {
+        Long lineId = request.getLineId() == null && existing != null ? existing.getLineId() : request.getLineId();
+        Long warehouseId = request.getWarehouseId() == null && existing != null ? existing.getWarehouseId() : request.getWarehouseId();
+        if (lineId != null) {
+            var line = lines.selectById(lineId);
+            var warehouse = warehouses.selectById(warehouseId);
+            if (!usableLine(line) || !usableLineSideWarehouse(warehouse))
+                throw new com.neuedu.ems.exception.BusinessException(com.neuedu.ems.common.ResultCode.PARAM_ERROR.getCode(),"所属产线只能绑定有效产线及线边仓库位");
+        }
+        if (existing != null && (!java.util.Objects.equals(lineId,existing.getLineId()) || !java.util.Objects.equals(warehouseId,existing.getWarehouseId()))) {
+            long occupied = inventories.selectCount(new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<com.neuedu.ems.entity.wms.WmsInventory>()
+                    .eq(com.neuedu.ems.entity.wms.WmsInventory::getLocationId,existing.getLocationId())
+                    .eq(com.neuedu.ems.entity.wms.WmsInventory::getDeletedFlag,0)
+                    .and(w -> w.gt(com.neuedu.ems.entity.wms.WmsInventory::getAvailableQuantity,0)
+                            .or().gt(com.neuedu.ems.entity.wms.WmsInventory::getLockedQuantity,0)
+                            .or().gt(com.neuedu.ems.entity.wms.WmsInventory::getInspectionQuantity,0)));
+            if (occupied > 0) throw new com.neuedu.ems.exception.BusinessException(com.neuedu.ems.common.ResultCode.BUSINESS_ERROR.getCode(),"库位仍有库存或工单占用，不能变更仓库及所属产线");
+        }
+    }
+
+    /** 产线可用：存在且未删除。 */
+    private static boolean usableLine(com.neuedu.ems.entity.factory.FactoryLine line) {
+        return line != null && Integer.valueOf(0).equals(line.getDeletedFlag());
+    }
+
+    /** 仓库可用且是线边仓：库位绑产线时只允许落在未删除的线边仓里。 */
+    private static boolean usableLineSideWarehouse(com.neuedu.ems.entity.wms.WmsWarehouse warehouse) {
+        return warehouse != null && Integer.valueOf(0).equals(warehouse.getDeletedFlag())
+                && "LINE_SIDE".equals(warehouse.getWarehouseType());
+    }
 
     /**
      * 分页查询库位列表，支持关键字搜索和状态筛选。
@@ -51,6 +85,7 @@ public class WmsLocationServiceImpl extends ServiceImpl<WmsLocationMapper, WmsLo
      */
     @Override
     public boolean saveLocation(WmsLocation location) {
+        validateLine(location,null);
         if (location.getDeletedFlag() == null) {
             location.setDeletedFlag(0);
         }
@@ -68,6 +103,7 @@ public class WmsLocationServiceImpl extends ServiceImpl<WmsLocationMapper, WmsLo
             return false;
         }
         location.setDeletedFlag(null);
+        validateLine(location,getLocationById(location.getLocationId()));
         return baseMapper.updateById(location) > 0;
     }
 

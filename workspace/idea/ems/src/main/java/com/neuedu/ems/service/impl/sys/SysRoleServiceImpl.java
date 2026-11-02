@@ -55,29 +55,64 @@ public class SysRoleServiceImpl extends ServiceImpl<SysRoleMapper, SysRole> impl
 
     @Override
     public boolean updateRole(SysRole role) {
+        SysRole existing = loadUpdatableRole(role);
+        boolean updated = existing != null && persistRole(role, existing);
+        if (updated) {
+            permissionService.evictAll();
+        }
+        return updated;
+    }
+
+    /**
+     * 读取可修改的角色，超管角色要额外校验不能被降级、停用或缩小数据范围。
+     *
+     * @param role 待修改的角色
+     * @return 可修改时返回库内当前值，否则返回 null
+     */
+    private SysRole loadUpdatableRole(SysRole role) {
         if (role.getRoleId() == null) {
-            return false;
+            return null;
         }
         SysRole existing = getRoleById(role.getRoleId());
-        if (existing == null) {
-            return false;
+        if (existing == null || !keepsSuperAdminInvariant(existing, role)) {
+            return null;
         }
+        return existing;
+    }
+
+    /**
+     * 超管角色不允许改编码、停用或缩小数据范围，其它角色一律放行。
+     *
+     * @param existing 库内角色
+     * @param role     待修改的角色
+     * @return 是否满足超管约束
+     */
+    private boolean keepsSuperAdminInvariant(SysRole existing, SysRole role) {
+        if (!SUPER_ADMIN_ROLE.equals(existing.getRoleCode())) {
+            return true;
+        }
+        boolean changesCode = StringUtils.hasText(role.getRoleCode())
+                && !SUPER_ADMIN_ROLE.equals(role.getRoleCode());
+        boolean disables = StringUtils.hasText(role.getStatus()) && !"ENABLE".equals(role.getStatus());
+        boolean shrinksScope = StringUtils.hasText(role.getDataScope()) && !"ALL".equals(role.getDataScope());
+        return !(changesCode || disables || shrinksScope);
+    }
+
+    /**
+     * 落库更新，超管角色先强制回填编码、状态与数据范围。
+     *
+     * @param role     待修改的角色
+     * @param existing 库内角色
+     * @return 是否更新成功
+     */
+    private boolean persistRole(SysRole role, SysRole existing) {
         if (SUPER_ADMIN_ROLE.equals(existing.getRoleCode())) {
-            if ((StringUtils.hasText(role.getRoleCode()) && !SUPER_ADMIN_ROLE.equals(role.getRoleCode()))
-                    || (StringUtils.hasText(role.getStatus()) && !"ENABLE".equals(role.getStatus()))
-                    || (StringUtils.hasText(role.getDataScope()) && !"ALL".equals(role.getDataScope()))) {
-                return false;
-            }
             role.setRoleCode(SUPER_ADMIN_ROLE);
             role.setStatus("ENABLE");
             role.setDataScope("ALL");
         }
         role.setDeletedFlag(null);
-        boolean updated = baseMapper.updateById(role) > 0;
-        if (updated) {
-            permissionService.evictAll();
-        }
-        return updated;
+        return baseMapper.updateById(role) > 0;
     }
 
     @Override

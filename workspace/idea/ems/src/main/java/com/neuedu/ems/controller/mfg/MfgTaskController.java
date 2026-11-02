@@ -31,6 +31,19 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/mfg/task")
 public class MfgTaskController {
+    @Autowired private com.neuedu.ems.service.mfg.TaskDefectResolutionService defectResolution;
+    @Autowired private com.neuedu.ems.service.mfg.WorkReportPreparationService reportPreparation;
+
+    @GetMapping("/{taskId}/material-requirements")
+    public ResultData materialRequirements(@PathVariable Long taskId) {
+        return ResultData.success(ResultCode.SUCCESS,reportPreparation.materialRequirements(taskId));
+    }
+
+    @PutMapping("/{taskId}/resolve-defects")
+    public ResultData resolveDefects(@PathVariable Long taskId, @RequestBody Map<String,String> request,
+                                    @RequestAttribute("userId") Long userId) {
+        return ResultData.success(ResultCode.SUCCESS,defectResolution.resolve(taskId,request.get("disposition"),request.get("reason"),userId));
+    }
 
     @Autowired
     private MfgTaskService mfgTaskService;

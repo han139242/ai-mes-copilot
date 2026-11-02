@@ -7,4 +7,11 @@ public class DataScopeAccessDeniedException extends RuntimeException {
     public DataScopeAccessDeniedException() {
         super("目标数据超出当前账号的数据范围");
     }
+
+    /**
+     * 带上具体原因，让前端能直接说清是缺权限还是数据范围不够。
+     */
+    public DataScopeAccessDeniedException(String message) {
+        super(message);
+    }
 }

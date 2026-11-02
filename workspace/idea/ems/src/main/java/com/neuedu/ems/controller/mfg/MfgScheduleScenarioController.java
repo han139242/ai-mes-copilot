@@ -112,6 +112,34 @@ public class MfgScheduleScenarioController {
                 request.getPlannedStartTime(), request.getPlannedEndTime(), request.getRemark(), operatorId));
     }
 
+    /**
+     * 按产线班次与产能，从计划开始时间推算结束时间。
+     * 只读：不修改排产项，由前端把结果回填到结束时间输入框。
+     */
+    @GetMapping("/{scenarioId}/items/{scheduleItemId}/duration-preview")
+    public ResultData previewManualDuration(@PathVariable Long scenarioId, @PathVariable Long scheduleItemId,
+                                            @RequestParam Long lineId,
+                                            @RequestParam String plannedStartTime) {
+        java.time.LocalDateTime startTime;
+        try {
+            startTime = java.time.LocalDateTime.parse(plannedStartTime);
+        } catch (java.time.format.DateTimeParseException e) {
+            throw new com.neuedu.ems.exception.BusinessException(ResultCode.PARAM_ERROR);
+        }
+        return ResultData.success(ResultCode.SUCCESS,
+                mfgScheduleScenarioService.previewManualDuration(scenarioId, scheduleItemId, lineId, startTime));
+    }
+
+    /**
+     * 执行前排程推演：只读比较现状、换线与组件优先三种口径的开工与完工时间。
+     * 不写排程明细、不生成计划，口径不含排队换型待料，不能当交期承诺。
+     */
+    @GetMapping("/simulation/orders/{productionOrderId}")
+    public ResultData simulateOrderSchedule(@PathVariable Long productionOrderId) {
+        return ResultData.success(ResultCode.SUCCESS,
+                mfgScheduleScenarioService.simulateOrderSchedule(productionOrderId));
+    }
+
     @DeleteMapping("/{scenarioId}/items/{scheduleItemId}")
     public ResultData removeManualItem(@PathVariable Long scenarioId, @PathVariable Long scheduleItemId,
                                        @RequestAttribute("userId") Long operatorId,

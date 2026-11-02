@@ -90,6 +90,15 @@ public class SysUserController {
     }
 
     /**
+     * 解除账号锁定：清零连续登录失败次数并恢复启用状态，供管理员在用户被锁定后自助处理。
+     */
+    @PutMapping("/{userId}/unlock")
+    public ResultData unlock(@PathVariable("userId") Long userId) {
+        boolean flag = sysUserService.unlockUser(userId);
+        return flag ? ResultData.success(ResultCode.SUCCESS) : ResultData.fail(ResultCode.FAILED);
+    }
+
+    /**
      * 分配用户角色。
      */
     @PutMapping("/{userId}/roles")

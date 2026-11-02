@@ -91,6 +91,30 @@ class MfgLineCalendarRuleServiceImplTest {
         assertEquals(3, update.getValue().getVersion());
     }
 
+    @Test
+    void repeatedDisableDoesNotWriteAgain() {
+        MfgLineCalendarRule existing = calendarRule();
+        existing.setCalendarRuleId(5L);
+        existing.setStatus("DISABLE");
+        when(calendarRuleMapper.selectOne(any())).thenReturn(existing);
+
+        assertTrue(service.disableCalendarRule(5L));
+
+        verify(calendarRuleMapper, org.mockito.Mockito.never()).updateById(any(MfgLineCalendarRule.class));
+    }
+
+    @Test
+    void disableRetainsOptimisticLockFailure() {
+        MfgLineCalendarRule existing = calendarRule();
+        existing.setCalendarRuleId(5L);
+        existing.setStatus("ENABLE");
+        when(calendarRuleMapper.selectOne(any())).thenReturn(existing);
+        when(calendarRuleMapper.updateById(any(MfgLineCalendarRule.class))).thenReturn(0);
+
+        assertThrows(com.neuedu.ems.exception.OptimisticLockConflictException.class,
+                () -> service.disableCalendarRule(5L));
+    }
+
     private MfgLineCalendarRule calendarRule() {
         MfgLineCalendarRule calendarRule = new MfgLineCalendarRule();
         calendarRule.setLineId(1L);

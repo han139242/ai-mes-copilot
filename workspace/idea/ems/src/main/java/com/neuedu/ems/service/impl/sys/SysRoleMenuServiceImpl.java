@@ -115,33 +115,87 @@ public class SysRoleMenuServiceImpl extends ServiceImpl<SysRoleMenuMapper, SysRo
     @Override
     @Transactional(rollbackFor = Exception.class)
     public boolean replaceRoleMenus(Long roleId, List<Long> menuIds) {
+        if (!isAssignableRole(roleId)) {
+            return false;
+        }
+        Set<Long> targetMenuIds = normalizeMenuIds(menuIds);
+        if (!allMenusExist(targetMenuIds)) {
+            return false;
+        }
+        Map<Long, SysRoleMenu> existingByMenu = loadRelationsByMenu(roleId);
+        LocalDateTime now = LocalDateTime.now();
+        refreshExistingRelations(existingByMenu, targetMenuIds, now);
+        insertNewRelations(roleId, targetMenuIds, now);
+        permissionService.evictAll();
+        return true;
+    }
+
+    /**
+     * 校验角色存在、已启用且不是超管角色，超管权限不允许在页面侧改写。
+     *
+     * @param roleId 角色主键
+     * @return 是否允许改写权限
+     */
+    private boolean isAssignableRole(Long roleId) {
         if (roleId == null) {
             return false;
         }
         QueryWrapper<SysRole> roleQuery = new QueryWrapper<>();
         roleQuery.eq("role_id", roleId).eq("deleted_flag", 0).eq("status", "ENABLE");
         SysRole role = sysRoleMapper.selectOne(roleQuery);
-        if (role == null || "SUPER_ADMIN".equals(role.getRoleCode())) {
-            return false;
-        }
+        return role != null && !"SUPER_ADMIN".equals(role.getRoleCode());
+    }
 
-        Set<Long> targetMenuIds = menuIds == null
-                ? new LinkedHashSet<>()
-                : menuIds.stream().filter(id -> id != null).collect(Collectors.toCollection(LinkedHashSet::new));
-        if (!targetMenuIds.isEmpty()) {
-            QueryWrapper<SysMenu> menuQuery = new QueryWrapper<>();
-            menuQuery.in("menu_id", targetMenuIds).eq("deleted_flag", 0);
-            if (sysMenuMapper.selectCount(menuQuery) != targetMenuIds.size()) {
-                return false;
-            }
+    /**
+     * 规整目标菜单主键集合，去掉空值并保序去重。
+     *
+     * @param menuIds 原始菜单主键
+     * @return 去重后的菜单主键集合
+     */
+    private Set<Long> normalizeMenuIds(List<Long> menuIds) {
+        if (menuIds == null) {
+            return new LinkedHashSet<>();
         }
+        return menuIds.stream().filter(id -> id != null).collect(Collectors.toCollection(LinkedHashSet::new));
+    }
 
+    /**
+     * 校验目标菜单全部存在且未删除。
+     *
+     * @param targetMenuIds 目标菜单主键
+     * @return 是否全部可用
+     */
+    private boolean allMenusExist(Set<Long> targetMenuIds) {
+        if (targetMenuIds.isEmpty()) {
+            return true;
+        }
+        QueryWrapper<SysMenu> menuQuery = new QueryWrapper<>();
+        menuQuery.in("menu_id", targetMenuIds).eq("deleted_flag", 0);
+        return sysMenuMapper.selectCount(menuQuery) == targetMenuIds.size();
+    }
+
+    /**
+     * 读取角色已有的菜单关系，按菜单主键索引。
+     *
+     * @param roleId 角色主键
+     * @return 已存在的关系
+     */
+    private Map<Long, SysRoleMenu> loadRelationsByMenu(Long roleId) {
         QueryWrapper<SysRoleMenu> relationQuery = new QueryWrapper<>();
         relationQuery.eq("role_id", roleId);
-        Map<Long, SysRoleMenu> existingByMenu = baseMapper.selectList(relationQuery).stream()
+        return baseMapper.selectList(relationQuery).stream()
                 .collect(Collectors.toMap(SysRoleMenu::getMenuId, Function.identity(), (first, second) -> first));
-        LocalDateTime now = LocalDateTime.now();
+    }
 
+    /**
+     * 按目标集合刷新已有关系：命中的恢复删除标记，未命中的置为删除。
+     *
+     * @param existingByMenu 已有关系
+     * @param targetMenuIds  目标菜单主键，处理过程中会被消费
+     * @param now            操作时间
+     */
+    private void refreshExistingRelations(Map<Long, SysRoleMenu> existingByMenu,
+                                          Set<Long> targetMenuIds, LocalDateTime now) {
         for (SysRoleMenu existing : existingByMenu.values()) {
             boolean shouldEnable = targetMenuIds.remove(existing.getMenuId());
             int expectedFlag = shouldEnable ? 0 : 1;
@@ -157,7 +211,16 @@ public class SysRoleMenuServiceImpl extends ServiceImpl<SysRoleMenuMapper, SysRo
                 }
             }
         }
+    }
 
+    /**
+     * 为剩余目标菜单新增关系。
+     *
+     * @param roleId        角色主键
+     * @param targetMenuIds 仍待新增的菜单主键
+     * @param now           操作时间
+     */
+    private void insertNewRelations(Long roleId, Set<Long> targetMenuIds, LocalDateTime now) {
         for (Long menuId : targetMenuIds) {
             SysRoleMenu relation = new SysRoleMenu();
             relation.setRoleId(roleId);
@@ -168,8 +231,6 @@ public class SysRoleMenuServiceImpl extends ServiceImpl<SysRoleMenuMapper, SysRo
                 throw new IllegalStateException("角色权限关系新增失败");
             }
         }
-        permissionService.evictAll();
-        return true;
     }
 
     private QueryWrapper<SysRoleMenu> buildRoleMenuQuery(Long roleId, Long menuId) {

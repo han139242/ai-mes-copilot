@@ -36,6 +36,16 @@ public class MfgWorkReportController {
     @Autowired
     private ExcelExportUtil excelExportUtil;
 
+    @Autowired
+    private com.neuedu.ems.service.mfg.WorkReportPreparationService preparation;
+
+    @GetMapping("/preparation")
+    public ResultData preparation(@RequestParam Long taskId,
+                                  @RequestParam(required = false) Long reportId,
+                                  @RequestParam(required = false) java.math.BigDecimal quantity) {
+        return ResultData.success(ResultCode.SUCCESS, preparation.prepare(taskId, reportId, quantity));
+    }
+
     /**
      * 分页查询生产报工列表，支持编号、任务、人员、工位和审核状态筛选。
      * @param current 当前页码，默认1

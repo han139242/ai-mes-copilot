@@ -16,6 +16,7 @@ import com.neuedu.ems.mapper.wms.WmsInventoryMapper;
 import com.neuedu.ems.mapper.wms.WmsStockMovementMapper;
 import com.neuedu.ems.mapper.wms.WmsStocktakeDetailMapper;
 import com.neuedu.ems.mapper.wms.WmsStocktakeOrderMapper;
+import com.neuedu.ems.service.impl.ai.InventoryAutomationTrigger;
 import com.neuedu.ems.service.wms.WmsStocktakeOrderService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -32,6 +33,12 @@ import java.util.Objects;
  */
 @Service
 public class WmsStocktakeOrderServiceImpl extends ServiceImpl<WmsStocktakeOrderMapper, WmsStocktakeOrder> implements WmsStocktakeOrderService {
+    @Autowired private com.neuedu.ems.service.sys.BusinessNumberService numbers;
+    @Autowired(required = false)
+    private InventoryAutomationTrigger inventoryAutomationTrigger;
+    @org.springframework.beans.factory.annotation.Autowired
+    private com.neuedu.ems.service.mdm.MaterialExecutionQuantityService executionQuantities;
+
 
     private static final String DRAFT_STATUS = BusinessStatus.Document.DRAFT;
     private static final String FINISHED_STATUS = BusinessStatus.Production.FINISHED;
@@ -105,6 +112,7 @@ public class WmsStocktakeOrderServiceImpl extends ServiceImpl<WmsStocktakeOrderM
     @Override
     @Transactional
     public boolean saveStocktakeOrder(WmsStocktakeOrder stocktakeOrder) {
+        stocktakeOrder.setStocktakeNo(numbers.next("ST",null));
         if (!StringUtils.hasText(stocktakeOrder.getStocktakeStatus())) {
             stocktakeOrder.setStocktakeStatus(DRAFT_STATUS);
         }
@@ -157,6 +165,7 @@ public class WmsStocktakeOrderServiceImpl extends ServiceImpl<WmsStocktakeOrderM
             return false;
         }
         stocktakeOrder.setDeletedFlag(null);
+        stocktakeOrder.setStocktakeNo(null);
         if (stocktakeOrder.getVersion() == null) {
             stocktakeOrder.setVersion(existing.getVersion());
         }
@@ -320,6 +329,7 @@ public class WmsStocktakeOrderServiceImpl extends ServiceImpl<WmsStocktakeOrderM
         BigDecimal bookQuantity = detail.getBookQuantity() == null ? BigDecimal.ZERO : detail.getBookQuantity();
         BigDecimal actualQuantity = detail.getActualQuantity() == null ? BigDecimal.ZERO : detail.getActualQuantity();
         detail.setBookQuantity(bookQuantity);
+        executionQuantities.validate(detail.getMaterialId(), actualQuantity, true);
         detail.setActualQuantity(actualQuantity);
         detail.setDifferenceQuantity(actualQuantity.subtract(bookQuantity));
     }
@@ -332,6 +342,7 @@ public class WmsStocktakeOrderServiceImpl extends ServiceImpl<WmsStocktakeOrderM
     private BigDecimal calculateDifference(WmsStocktakeDetail detail) {
         BigDecimal bookQuantity = detail.getBookQuantity() == null ? BigDecimal.ZERO : detail.getBookQuantity();
         BigDecimal actualQuantity = detail.getActualQuantity() == null ? BigDecimal.ZERO : detail.getActualQuantity();
+        executionQuantities.validate(detail.getMaterialId(), actualQuantity, true);
         return actualQuantity.subtract(bookQuantity);
     }
 
@@ -404,6 +415,7 @@ public class WmsStocktakeOrderServiceImpl extends ServiceImpl<WmsStocktakeOrderM
             inventory.setInspectionQuantity(BigDecimal.ZERO);
             inventory.setDeletedFlag(0);
             wmsInventoryMapper.insert(inventory);
+            notifyAvailableChanged(detail.getMaterialId());
             return;
         }
         BigDecimal availableQuantity = inventory.getAvailableQuantity() == null ? BigDecimal.ZERO : inventory.getAvailableQuantity();
@@ -412,6 +424,13 @@ public class WmsStocktakeOrderServiceImpl extends ServiceImpl<WmsStocktakeOrderM
         update.setVersion(inventory.getVersion());
         update.setAvailableQuantity(availableQuantity.add(differenceQuantity));
         wmsInventoryMapper.updateById(update);
+        notifyAvailableChanged(detail.getMaterialId());
+    }
+
+    private void notifyAvailableChanged(Long materialId) {
+        if (inventoryAutomationTrigger != null) {
+            inventoryAutomationTrigger.afterChange(materialId);
+        }
     }
 
     /**

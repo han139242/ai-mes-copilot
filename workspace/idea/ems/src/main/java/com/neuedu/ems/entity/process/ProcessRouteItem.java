@@ -25,6 +25,10 @@ public class ProcessRouteItem {
     private Long operationId;
     private Integer sequenceNo;
     private BigDecimal standardTime;
+    private String resourceType;
+    private BigDecimal batchCapacity;
+    private BigDecimal batchDurationMinutes;
+    private String timeSourceReference;
     private Integer qcRequired;
     private String remark;
     private Integer version;

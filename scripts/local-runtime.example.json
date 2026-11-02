@@ -1,0 +1,21 @@
+{
+  "environmentScript": "<existing private environment script path>",
+  "runtimeDirectory": "<ASCII project runtime path>",
+  "cacheNamespace": "lamp:dev",
+  "backend": {
+    "port": 8089,
+    "java": "<JDK 21 bin/java.exe path, not a Java launcher shim>",
+    "smokePort": 18089,
+    "verificationTests": ["RedisOutageStabilityTest", "TokenRevocationServiceTest", "AuthServiceImplTest", "AiAlertStreamStabilityTest", "JwtAuthenticationFilterTest", "GlobalExceptionHandlerTest"]
+  },
+  "frontend": { "port": 5173 },
+  "database": {
+    "port": 3311,
+    "name": "mes_lamp_rehearsal",
+    "dataDirectory": "<verified business data directory>",
+    "config": "<business MySQL configuration file>",
+    "client": "<MySQL bin/mysql.exe path>",
+    "server": "<MySQL bin/mysqld.exe path>",
+    "requiredTables": ["sys_user", "wms_inventory", "mfg_work_order"]
+  }
+}

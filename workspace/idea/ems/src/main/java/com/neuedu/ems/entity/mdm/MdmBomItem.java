@@ -3,6 +3,7 @@ package com.neuedu.ems.entity.mdm;
 import com.baomidou.mybatisplus.annotation.IdType;
 import com.baomidou.mybatisplus.annotation.TableId;
 import com.baomidou.mybatisplus.annotation.TableName;
+import com.baomidou.mybatisplus.annotation.Version;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NoArgsConstructor;
@@ -23,10 +24,14 @@ public class MdmBomItem {
     private Long bomItemId;
     private Long bomId;
     private Long materialId;
+    private Long childBomId;
+    /** 当前BOM版本直接物料的投料工序；历史空值不推断为已配置。 */
+    private Long consumptionOperationId;
     private BigDecimal quantity;
     private BigDecimal lossRate;
     private Integer sequenceNo;
     private String remark;
+    @Version
     private Integer version;
     private Long createdBy;
     private LocalDateTime createdTime;

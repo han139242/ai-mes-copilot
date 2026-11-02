@@ -15,9 +15,25 @@ public class JwtConstants {
     );
 
     /**
-     * JWT过期时间（单位：秒），此处设置为2小时（7200秒）
+     * JWT过期时间（单位：秒）。默认 12 小时，可用 JWT_EXPIRE_SECONDS 覆盖。
+     * 前端登录态按天保存，令牌有效期过短会让用户在使用中途被踢回登录页。
      */
-    public static final long JWT_EXPIRE_TIME = 7200L;
+    public static final long JWT_EXPIRE_TIME = resolveExpireSeconds();
+
+    private static long resolveExpireSeconds() {
+        String configured = System.getenv("JWT_EXPIRE_SECONDS");
+        if (configured != null && !configured.isBlank()) {
+            try {
+                long seconds = Long.parseLong(configured.trim());
+                if (seconds > 0) {
+                    return seconds;
+                }
+            } catch (NumberFormatException ignored) {
+                // 配置非法时退回默认值，避免应用启动失败
+            }
+        }
+        return 43200L;
+    }
 
     /**
      * JWT请求头名称（前端携带token的请求头）

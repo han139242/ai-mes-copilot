@@ -25,6 +25,7 @@ public class QmsInspectionSchemeItem {
     private Long itemId;
     private Long standardId;
     private BigDecimal sampleQuantity;
+    private String samplingMode;
     private Integer sequenceNo;
     private String remark;
     private Integer version;

@@ -30,7 +30,6 @@ public class SwaggerConfig {
                 // 联系人信息
                 .contact(new Contact()
                         .name("开发团队")
-                        .email("maintainer@example.org")
                         .url("https://example.com"))
                 // 许可证信息
                 .license(new License()

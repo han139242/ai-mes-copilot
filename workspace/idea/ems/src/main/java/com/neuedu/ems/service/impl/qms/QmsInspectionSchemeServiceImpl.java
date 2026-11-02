@@ -19,6 +19,7 @@ import java.util.List;
  */
 @Service
 public class QmsInspectionSchemeServiceImpl extends ServiceImpl<QmsInspectionSchemeMapper, QmsInspectionScheme> implements QmsInspectionSchemeService {
+    @Autowired private com.neuedu.ems.service.qms.InspectionStandardReviewService reviewService;
 
     @Autowired
     private QmsInspectionSchemeItemMapper qmsInspectionSchemeItemMapper;
@@ -93,6 +94,8 @@ public class QmsInspectionSchemeServiceImpl extends ServiceImpl<QmsInspectionSch
      */
     @Override
     public boolean saveScheme(QmsInspectionScheme scheme) {
+        if(reviewService.controlled(scheme.getProductId()) && !"DRAFT".equals(scheme.getStatus()))
+            throw new com.neuedu.ems.exception.BusinessException(com.neuedu.ems.common.ResultCode.BUSINESS_ERROR.getCode(),"受控检验方案须先建草稿，维护并确认标准后发布");
         if (scheme.getDeletedFlag() == null) {
             scheme.setDeletedFlag(0);
         }
@@ -105,12 +108,41 @@ public class QmsInspectionSchemeServiceImpl extends ServiceImpl<QmsInspectionSch
      * @return 是否成功
      */
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor=Exception.class)
     public boolean updateScheme(QmsInspectionScheme scheme) {
-        if (scheme.getSchemeId() == null) {
-            return false;
+        var existing=scheme.getSchemeId()==null?null:baseMapper.lockActive(scheme.getSchemeId());
+        if(existing==null)return false;
+        rejectCrossProductChange(scheme,existing);
+        if(reviewService.controlled(existing.getProductId())) {
+            Boolean stopped=stopReleasedControlledScheme(scheme,existing);
+            if(stopped!=null)return stopped;
         }
         scheme.setDeletedFlag(null);
-        return baseMapper.updateById(scheme) > 0;
+        boolean updated=baseMapper.updateById(scheme)>0;
+        if(updated && reviewService.controlled(existing.getProductId()) && "RELEASED".equals(scheme.getStatus()))
+            reviewService.assertSchemePublishable(scheme.getSchemeId());
+        return updated;
+    }
+    /** 历史方案不允许转为受控产品方案，必须另建草稿。 */
+    private void rejectCrossProductChange(QmsInspectionScheme scheme,QmsInspectionScheme existing){
+        if(scheme.getProductId()!=null && !scheme.getProductId().equals(existing.getProductId())
+                && reviewService.controlled(scheme.getProductId()))
+            throw schemeError("不能将历史方案转为受控产品方案，请另建草稿");
+    }
+    /**
+     * 受控方案不能换产品；已发布的受控方案只能停用。
+     * @return 已按「停用」处理时返回是否成功，无需停用时返回 {@code null}
+     */
+    private Boolean stopReleasedControlledScheme(QmsInspectionScheme scheme,QmsInspectionScheme existing){
+        if(scheme.getProductId()!=null && !scheme.getProductId().equals(existing.getProductId()))
+            throw schemeError("受控方案不能转移到其它产品");
+        if(!"RELEASED".equals(existing.getStatus()))return null;
+        if(!"DISABLE".equals(scheme.getStatus()))throw schemeError("已发布受控方案只能停用，修订请另建版本");
+        var stop=new QmsInspectionScheme();stop.setSchemeId(existing.getSchemeId());stop.setStatus("DISABLE");
+        return baseMapper.updateById(stop)>0;
+    }
+    private com.neuedu.ems.exception.BusinessException schemeError(String message){
+        return new com.neuedu.ems.exception.BusinessException(com.neuedu.ems.common.ResultCode.BUSINESS_ERROR.getCode(),message);
     }
 
     /**
@@ -119,7 +151,9 @@ public class QmsInspectionSchemeServiceImpl extends ServiceImpl<QmsInspectionSch
      * @return 是否成功
      */
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor=Exception.class)
     public boolean removeSchemeById(Long schemeId) {
+        reviewService.assertSchemeEditable(schemeId);
         QmsInspectionScheme scheme = new QmsInspectionScheme();
         scheme.setSchemeId(schemeId);
         scheme.setDeletedFlag(1);
@@ -132,17 +166,13 @@ public class QmsInspectionSchemeServiceImpl extends ServiceImpl<QmsInspectionSch
      * @return 是否成功
      */
     @Override
+    @org.springframework.transaction.annotation.Transactional(rollbackFor=Exception.class)
     public boolean removeSchemesByIds(List<Long> schemeIds) {
         if (schemeIds == null || schemeIds.isEmpty()) {
             return false;
         }
-        List<QmsInspectionScheme> schemes = schemeIds.stream().map(schemeId -> {
-            QmsInspectionScheme scheme = new QmsInspectionScheme();
-            scheme.setSchemeId(schemeId);
-            scheme.setDeletedFlag(1);
-            return scheme;
-        }).toList();
-        return updateBatchById(schemes);
+        for(Long id:schemeIds)if(!removeSchemeById(id))throw new com.neuedu.ems.exception.BusinessException(com.neuedu.ems.common.ResultCode.NOT_FOUND);
+        return true;
     }
 
     /**

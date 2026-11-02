@@ -36,6 +36,11 @@ public class WmsOutboundOrderController {
     @Autowired
     private ExcelExportUtil excelExportUtil;
 
+    @GetMapping("/{outboundId}/line-side-preparation")
+    public ResultData lineSidePreparation(@PathVariable Long outboundId) {
+        return ResultData.success(ResultCode.SUCCESS, wmsOutboundOrderService.prepareLineSideTransfer(outboundId));
+    }
+
     /**
      * 分页查询出库单列表，支持单号、类型、仓库、工单、申请人和审核状态筛选。
      * @param current 当前页码，默认1
@@ -142,6 +147,18 @@ public class WmsOutboundOrderController {
         wmsOutboundOrderService.withdrawOutboundOrder(outboundId, userId, getString(request, "remark"));
         return ResultData.success(ResultCode.SUCCESS);
     }
+
+    @PutMapping("/{outboundId}/transfer-to-line-side")
+    public ResultData transferToLineSide(@PathVariable Long outboundId,
+                                        @RequestAttribute("userId") Long userId,
+                                        @RequestBody LineSideTransferRequest request) {
+        wmsOutboundOrderService.transferMaterialIssueToLineSide(
+                outboundId, request.targetLocationId(), userId, request.remark(), request.requestKey());
+        return ResultData.success(ResultCode.SUCCESS);
+    }
+
+    /** 线边移库请求：targetLocationId 必填，requestKey 可选用于命令幂等。 */
+    public record LineSideTransferRequest(Long targetLocationId, String remark, String requestKey) { }
 
     /**
      * 软删除出库单和出库明细，已确认出库单不允许删除。

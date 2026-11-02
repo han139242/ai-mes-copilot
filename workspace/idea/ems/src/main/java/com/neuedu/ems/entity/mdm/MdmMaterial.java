@@ -8,6 +8,7 @@ import lombok.Data;
 import lombok.NoArgsConstructor;
 
 import java.time.LocalDateTime;
+import java.math.BigDecimal;
 
 /**
  * mdm_material
@@ -26,6 +27,8 @@ public class MdmMaterial {
     private String specModel;
     private Long unitId;
     private String materialType;
+    private String quantityMode;
+    private BigDecimal issueStep;
     private String status;
     private String remark;
     private Integer version;

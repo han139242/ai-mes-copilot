@@ -150,6 +150,42 @@ public class QmsInspectionOrderController {
         return flag ? ResultData.success(ResultCode.SUCCESS) : ResultData.fail(ResultCode.FAILED);
     }
 
+    /**
+     * 逐件全检提交：每条结果必须带件号和检验项，缺项直接拒绝。
+     * 件结论与合格/不良数量由后端按逐件结果汇总，不接受前端自报。
+     *
+     * @param inspectionId 检验单ID
+     * @param userId       当前操作人
+     * @param request      请求体，含 results 数组与 remark
+     * @return 操作结果
+     */
+    @PutMapping("/{inspectionId}/submit-piece")
+    public ResultData submitPiece(@PathVariable("inspectionId") Long inspectionId,
+                                  @RequestAttribute("userId") Long userId,
+                                  @RequestBody PieceInspectionRequest request) {
+        boolean flag = qmsInspectionOrderService.submitPieceInspection(inspectionId,
+                request == null ? null : request.getResults(),
+                request == null ? null : request.getRemark(), userId);
+        return flag ? ResultData.success(ResultCode.SUCCESS) : ResultData.fail(ResultCode.FAILED);
+    }
+
+    /**
+     * 查询某张检验单的逐件检验结果，按件号与检验项排序。
+     *
+     * @param inspectionId 检验单ID
+     * @return 逐件结果列表
+     */
+    @GetMapping("/{inspectionId}/piece-results")
+    public ResultData pieceResults(@PathVariable("inspectionId") Long inspectionId) {
+        return ResultData.success(ResultCode.SUCCESS, qmsInspectionOrderService.listPieceResults(inspectionId));
+    }
+
+    @PutMapping("/{inspectionId}/reopen-production-defects")
+    public ResultData reopenProductionDefects(@PathVariable Long inspectionId,@RequestAttribute("userId") Long userId,
+                                              @RequestBody Map<String,Object> request) {
+        return ResultData.success(ResultCode.SUCCESS,qmsInspectionOrderService.reopenProductionDefects(inspectionId,userId,getString(request,"reason")));
+    }
+
     @PutMapping("/{inspectionId}/withdraw")
     public ResultData withdraw(@PathVariable Long inspectionId,
                                @RequestAttribute("userId") Long userId,
@@ -218,6 +254,31 @@ public class QmsInspectionOrderController {
     private String getString(Map<String, Object> request, String key) {
         Object value = request == null ? null : request.get(key);
         return value == null ? null : value.toString();
+    }
+
+    /**
+     * 逐件全检请求体：只接收逐件结果与备注，合格/不良数量由后端统计。
+     */
+    public static class PieceInspectionRequest {
+
+        private List<QmsInspectionResult> results;
+        private String remark;
+
+        public List<QmsInspectionResult> getResults() {
+            return results;
+        }
+
+        public void setResults(List<QmsInspectionResult> results) {
+            this.results = results;
+        }
+
+        public String getRemark() {
+            return remark;
+        }
+
+        public void setRemark(String remark) {
+            this.remark = remark;
+        }
     }
 
     /**

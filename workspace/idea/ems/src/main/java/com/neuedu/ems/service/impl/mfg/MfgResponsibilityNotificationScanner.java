@@ -18,6 +18,7 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDateTime;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -73,37 +74,52 @@ public class MfgResponsibilityNotificationScanner {
 
         Set<Long> dispatchIds = tasks.stream().map(MfgTask::getDispatchId)
                 .filter(Objects::nonNull).collect(Collectors.toSet());
-        Map<Long, MfgDispatchOrder> dispatches = dispatchIds.isEmpty() ? Map.of()
+        Map<Long, MfgDispatchOrder> dispatches = dispatchIds.isEmpty() ? Collections.emptyMap()
                 : activeById(dispatchMapper.selectBatchIds(dispatchIds),
                 MfgDispatchOrder::getDispatchId, MfgDispatchOrder::getDeletedFlag);
         Set<Long> teamIds = dispatches.values().stream().map(MfgDispatchOrder::getTeamId)
                 .filter(Objects::nonNull).collect(Collectors.toSet());
-        Map<Long, OrgTeam> teams = teamIds.isEmpty() ? Map.of()
+        Map<Long, OrgTeam> teams = teamIds.isEmpty() ? Collections.emptyMap()
                 : activeById(teamMapper.selectBatchIds(teamIds), OrgTeam::getTeamId, OrgTeam::getDeletedFlag);
 
         LocalDateTime now = LocalDateTime.now();
         for (MfgTask task : tasks) {
-            List<Long> assignedEmployees = operators.getOrDefault(task.getTaskId(), List.of());
-            MfgDispatchOrder dispatch = dispatches.get(task.getDispatchId());
-            OrgTeam team = dispatch == null ? null : teams.get(dispatch.getTeamId());
+            // 未派工的任务 dispatchId 为 null；Map.of() 得到的不可变 Map 在 get(null) 时直接抛 NPE，
+            // 这里必须先挡掉空键，否则整轮扫描中断、后面的任务全不通知。
+            MfgDispatchOrder dispatch = task.getDispatchId() == null ? null : dispatches.get(task.getDispatchId());
+            OrgTeam team = dispatch == null || dispatch.getTeamId() == null ? null : teams.get(dispatch.getTeamId());
             Long leaderId = team == null ? null : team.getLeaderId();
-            if (BusinessStatus.Production.WAIT_START.equals(task.getStatus())) {
-                if (assignedEmployees.isEmpty()) {
-                    notificationService.publishTaskUnassigned(task,
-                            dispatch == null ? null : dispatch.getTeamId(), leaderId);
-                } else {
-                    assignedEmployees.forEach(employeeId ->
-                            notificationService.publishTaskAssigned(task.getTaskId(), employeeId, null));
-                }
-            }
-            if (BusinessStatus.Production.PAUSED.equals(task.getStatus())) {
-                notificationService.publishTaskPaused(task, leaderId, assignedEmployees);
-            }
-            if (dispatch != null && dispatch.getDueTime() != null && dispatch.getDueTime().isBefore(now)) {
-                notificationService.publishTaskOverdue(task, dispatch, leaderId);
-            }
+            List<Long> assignedEmployees = operators.getOrDefault(task.getTaskId(), List.of());
+            publishWaitingTask(task, dispatch, leaderId, assignedEmployees);
+            publishPausedTask(task, leaderId, assignedEmployees);
+            publishOverdueTask(task, dispatch, leaderId, now);
         }
         synchronizeSubmittedReports(tasks.stream().collect(Collectors.toMap(MfgTask::getTaskId, Function.identity())));
+    }
+    /** 待开工任务：没有派工时通知班组认领，已派工时逐个通知被指派的员工。 */
+    private void publishWaitingTask(MfgTask task, MfgDispatchOrder dispatch, Long leaderId,
+                                    List<Long> assignedEmployees) {
+        if (!BusinessStatus.Production.WAIT_START.equals(task.getStatus())) {
+            return;
+        }
+        if (assignedEmployees.isEmpty()) {
+            notificationService.publishTaskUnassigned(task, dispatch == null ? null : dispatch.getTeamId(), leaderId);
+            return;
+        }
+        assignedEmployees.forEach(employeeId ->
+                notificationService.publishTaskAssigned(task.getTaskId(), employeeId, null));
+    }
+
+    private void publishPausedTask(MfgTask task, Long leaderId, List<Long> assignedEmployees) {
+        if (BusinessStatus.Production.PAUSED.equals(task.getStatus())) {
+            notificationService.publishTaskPaused(task, leaderId, assignedEmployees);
+        }
+    }
+
+    private void publishOverdueTask(MfgTask task, MfgDispatchOrder dispatch, Long leaderId, LocalDateTime now) {
+        if (dispatch != null && dispatch.getDueTime() != null && dispatch.getDueTime().isBefore(now)) {
+            notificationService.publishTaskOverdue(task, dispatch, leaderId);
+        }
     }
 
     private void synchronizeSubmittedReports(Map<Long, MfgTask> knownTasks) {
@@ -113,25 +129,47 @@ public class MfgResponsibilityNotificationScanner {
                 .orderByAsc(MfgWorkReport::getReportId)
                 .last("LIMIT 500"));
         for (MfgWorkReport report : reports) {
-            MfgTask task = knownTasks.get(report.getTaskId());
-            if (task == null && report.getTaskId() != null) {
-                task = taskMapper.selectById(report.getTaskId());
-            }
-            if (task != null && task.getDeletedFlag() != null && task.getDeletedFlag() != 0) {
-                task = null;
-            }
-            MfgDispatchOrder dispatch = task == null || task.getDispatchId() == null
-                    ? null : dispatchMapper.selectById(task.getDispatchId());
-            if (dispatch != null && dispatch.getDeletedFlag() != null && dispatch.getDeletedFlag() != 0) {
-                dispatch = null;
-            }
-            OrgTeam team = dispatch == null || dispatch.getTeamId() == null
-                    ? null : teamMapper.selectById(dispatch.getTeamId());
-            if (team != null && team.getDeletedFlag() != null && team.getDeletedFlag() != 0) {
-                team = null;
-            }
-            notificationService.publishWorkReportSubmitted(report, null, team == null ? null : team.getLeaderId());
+            // 报工单没挂任务时 taskId 为 null，同样不能拿 null 当键去查（不可变 Map 会抛 NPE）。
+            MfgTask knownTask = report.getTaskId() == null ? null : knownTasks.get(report.getTaskId());
+            Long leaderId = reportLeaderId(knownTask, report.getTaskId());
+            notificationService.publishWorkReportSubmitted(report, null, leaderId);
         }
+    }
+
+    /** 顺着报工 → 任务 → 派工 → 班组查班组长；任一环节已删除都按「无班组长」处理。 */
+    private Long reportLeaderId(MfgTask knownTask, Long taskId) {
+        MfgTask task = knownTask == null && taskId != null ? taskMapper.selectById(taskId) : knownTask;
+        Long leaderId = null;
+        if (!isDeleted(task == null ? null : task.getDeletedFlag())) {
+            leaderId = leaderOfTask(task);
+        }
+        return leaderId;
+    }
+
+    /** 任务对应的派工班组长；任务或派工已删除时返回 null。 */
+    private Long leaderOfTask(MfgTask task) {
+        MfgDispatchOrder dispatch = task == null || task.getDispatchId() == null
+                ? null : dispatchMapper.selectById(task.getDispatchId());
+        Long leaderId = null;
+        if (!isDeleted(dispatch == null ? null : dispatch.getDeletedFlag())) {
+            leaderId = leaderOfDispatch(dispatch);
+        }
+        return leaderId;
+    }
+
+    /** 派工对应班组的班组长；派工或班组已删除时返回 null。 */
+    private Long leaderOfDispatch(MfgDispatchOrder dispatch) {
+        OrgTeam team = dispatch == null || dispatch.getTeamId() == null
+                ? null : teamMapper.selectById(dispatch.getTeamId());
+        Long leaderId = null;
+        if (!isDeleted(team == null ? null : team.getDeletedFlag())) {
+            leaderId = team.getLeaderId();
+        }
+        return leaderId;
+    }
+
+    private boolean isDeleted(Integer deletedFlag) {
+        return deletedFlag != null && deletedFlag != 0;
     }
 
     private <T> Map<Long, T> activeById(Collection<T> rows, Function<T, Long> id,

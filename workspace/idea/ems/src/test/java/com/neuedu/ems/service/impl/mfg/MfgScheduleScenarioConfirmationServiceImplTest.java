@@ -73,6 +73,7 @@ class MfgScheduleScenarioConfirmationServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new MfgScheduleScenarioServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
         scenarioMapper = org.mockito.Mockito.mock(MfgScheduleScenarioMapper.class);
         itemMapper = org.mockito.Mockito.mock(MfgScheduleItemMapper.class);
         orderMapper = org.mockito.Mockito.mock(MfgProductionOrderMapper.class);
@@ -135,7 +136,7 @@ class MfgScheduleScenarioConfirmationServiceImplTest {
         assertEquals("CONFIRMED", result.getStatus());
         assertEquals(7L, result.getConfirmedBy());
         assertNotNull(result.getConfirmedTime());
-        assertEquals("SP-1-1", planCaptor.getValue().getPlanNo());
+        assertEquals("T-PL-20261027-001", planCaptor.getValue().getPlanNo());
         assertEquals("RELEASED", planCaptor.getValue().getStatus());
         assertEquals(101L, planCaptor.getValue().getProductionOrderId());
         assertEquals("RELEASED", orderCaptor.getValue().getStatus());

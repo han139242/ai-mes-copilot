@@ -35,6 +35,7 @@ class MfgProductionPlanServiceImplTest {
     @BeforeEach
     void setUp() {
         service = new MfgProductionPlanServiceImpl();
+        com.neuedu.ems.support.BusinessNumberTestData.inject(service);
         planMapper = mock(MfgProductionPlanMapper.class);
         orderMapper = mock(MfgProductionOrderMapper.class);
         SysStatusChangeLogMapper statusLogMapper = mock(SysStatusChangeLogMapper.class);
@@ -62,7 +63,7 @@ class MfgProductionPlanServiceImplTest {
 
         assertEquals(3L, result.getPlanId());
         assertEquals(BusinessStatus.Document.DRAFT, result.getStatus());
-        assertTrue(result.getPlanNo().startsWith("PLN-1-"));
+        assertTrue(result.getPlanNo().startsWith("T-PL-20261027-"));
         verify(planMapper).insert(any(MfgProductionPlan.class));
     }
 
