@@ -1,0 +1,33 @@
+name: 问题反馈 / Bug report
+description: 提供可以复现的问题和运行环境
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: 请先搜索已有 Issue。不要上传真实密钥、密码、令牌、个人资料或数据库快照。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 问题与预期结果
+      description: 实际发生了什么？你期望发生什么？
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 写明涉及模块、操作顺序及必要的演示数据条件。
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: 运行环境
+      description: 项目提交或版本、操作系统、JDK、Node.js、MySQL 版本。
+    validations:
+      required: true
+  - type: textarea
+    id: evidence
+    attributes:
+      label: 脱敏后的日志或截图
+      description: 隐去密钥、密码、令牌、私人邮箱和个人资料。

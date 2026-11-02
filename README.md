@@ -4,6 +4,10 @@
 
 用自然语言驱动制造执行：查数据、分析问题、办理任务、跟踪结果。
 
+An AI-assisted manufacturing execution system built with Spring Boot, Vue 3 and MySQL. Use natural language to query business data and carry out supported tasks through preview, confirmation, execution and result verification.
+
+[运行说明](docs/SETUP.md) · [AI 能力](docs/FEATURES.md) · [参与贡献](CONTRIBUTING.md) · [版本发布](https://github.com/han139242/ai-mes-copilot/releases)
+
 AI-MES Copilot 是一个以智能调光台灯 L100 / L200 为业务场景的 MES（制造执行系统）。基于 Spring Boot、Vue 3 和 MySQL，将采购、库存、生产、质量、设备与发货连接起来，让用户通过 AI 工作台用日常语言推进业务。
 
 ## 核心特色
@@ -79,7 +83,7 @@ node --test scripts/local-runtime.test.mjs scripts/ai-decision-preflight.test.mj
 
 后端使用仓库内 Maven Wrapper；先配置独立测试数据库和环境变量，再从 `workspace/idea/ems` 运行 `./mvnw.cmd -B package`。接库测试会写入测试数据，不与日常演示共用数据库。跳过的测试单独统计。
 
-当前公开源码同步自项目 2026-11-01 最终代码基线。该基线的后端完整回归记录为 **1118 项，0 失败、0 错误、0 跳过**；历史结果与本次公开版检查分别记录在[验证说明](docs/VERIFICATION.md)。
+当前公开源码包含 2026-11-02 的 CodeArts 整改。对应源码在独立验证环境的后端完整回归记录为 **1118 项，0 失败、0 错误、0 跳过**；各轮检查范围分别记录在[验证说明](docs/VERIFICATION.md)。
 
 ## 项目文档
 
@@ -89,6 +93,20 @@ node --test scripts/local-runtime.test.mjs scripts/ai-decision-preflight.test.mj
 - [CodeArts 整改记录](docs/CODE_QUALITY.md)
 
 公开仓库保留源码、数据库结构迁移和示例数据，不包含个人报告、学号、答辩材料、共享数据库凭据、本机运行状态或私有历史记录。
+
+## 贡献者
+
+感谢共同完成项目的成员：
+
+- [@han139242](https://github.com/han139242)
+- [@AnHC-00](https://github.com/AnHC-00)
+- [@zengjingye](https://github.com/zengjingye)
+
+成员署名与后续贡献方式见[贡献者说明](CONTRIBUTORS.md)。
+
+## 项目状态与后续维护
+
+本项目已完成课程交付，并以开源形式保留。后续欢迎社区通过 Issue 反馈问题、通过 Pull Request 提交改进；参与方式见[贡献指南](CONTRIBUTING.md)，版本记录见[CHANGELOG](CHANGELOG.md)。
 
 ## 许可证
 

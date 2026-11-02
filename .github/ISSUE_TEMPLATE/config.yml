@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 环境配置与启动
+    url: https://github.com/han139242/ai-mes-copilot/blob/main/docs/SETUP.md
+    about: 先检查独立数据库、环境变量和启动步骤。
+  - name: 参与贡献
+    url: https://github.com/han139242/ai-mes-copilot/blob/main/CONTRIBUTING.md
+    about: 查看提交规范、验证要求和隐私注意事项。

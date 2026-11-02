@@ -1,0 +1,25 @@
+name: 改进建议 / Feature request
+description: 提出具体业务场景和可检查的完成条件
+labels: [enhancement]
+body:
+  - type: textarea
+    id: scenario
+    attributes:
+      label: 业务场景与问题
+      description: 谁在什么情况下遇到什么困难？
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 建议方案
+      description: 描述期望行为与涉及模块。
+    validations:
+      required: true
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: 完成条件
+      description: 如何检查这项改进确实解决了问题？
+    validations:
+      required: true
