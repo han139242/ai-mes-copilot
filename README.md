@@ -1,5 +1,7 @@
 # AI-MES Copilot
 
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 用自然语言驱动制造执行：查数据、分析问题、办理任务、跟踪结果。
 
 AI-MES Copilot 是一个以智能调光台灯 L100 / L200 为业务场景的 MES（制造执行系统）。基于 Spring Boot、Vue 3 和 MySQL，将采购、库存、生产、质量、设备与发货连接起来，让用户通过 AI 工作台用日常语言推进业务。
@@ -87,3 +89,7 @@ node --test scripts/local-runtime.test.mjs scripts/ai-decision-preflight.test.mj
 - [CodeArts 整改记录](docs/CODE_QUALITY.md)
 
 公开仓库保留源码、数据库结构迁移和示例数据，不包含个人报告、学号、答辩材料、共享数据库凭据、本机运行状态或私有历史记录。
+
+## 许可证
+
+项目原创代码采用 [MIT License](LICENSE)，允许使用、修改和商用，需保留版权及许可声明。第三方依赖保留各自的许可证和版权信息。
