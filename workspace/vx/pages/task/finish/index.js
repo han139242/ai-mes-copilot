@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 任务完工页：对生产中的任务执行完工确认。
 const guard = require('../../../utils/guard')
 const taskApi = require('../../../api/task')

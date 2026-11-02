@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 质检录入页：按检验单录入抽检数量、合格数和不合格数。
 const guard = require('../../../utils/guard')
 const auth = require('../../../utils/auth')

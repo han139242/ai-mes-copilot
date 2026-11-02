@@ -1031,33 +1031,28 @@ public class AiAlertServiceImpl implements AiAlertService {
     private int raiseRepair(AiAlertEvent event, LocalDateTime now, Long operatorId, int stepNo) {
         Long equipmentId = event.getBizId();
         if (equipmentId == null) {
-            recordAction(event.getAlertId(), stepNo, ACTION_REPAIR, AiAlertAction.STATUS_SKIPPED,
-                    "EAM_REPAIR_ORDER", null, "事件未关联设备，跳过维修单", operatorId, now);
+            recordAction(event.getAlertId(), stepNo, ACTION_REPAIR, AiAlertAction.STATUS_SKIPPED, "EAM_REPAIR_ORDER", null, "事件未关联设备，跳过维修单", operatorId, now);
             return 0;
         }
-        EamRepairOrder existing = repairOrderMapper.selectOne(new LambdaQueryWrapper<EamRepairOrder>()
-                .eq(EamRepairOrder::getEquipmentId, equipmentId)
-                .eq(EamRepairOrder::getDeletedFlag, 0)
-                .in(EamRepairOrder::getStatus, "SUBMITTED", "REPAIRING")
-                .last("LIMIT 1"));
+        EamRepairOrder existing = repairOrderMapper.selectOne(new LambdaQueryWrapper<EamRepairOrder>().eq(EamRepairOrder::getEquipmentId, equipmentId).eq(EamRepairOrder::getDeletedFlag, 0).in(EamRepairOrder::getStatus, "SUBMITTED", "REPAIRING").last("LIMIT 1"));
         if (existing != null) {
-            recordAction(event.getAlertId(), stepNo, ACTION_REPAIR, AiAlertAction.STATUS_SKIPPED,
-                    "EAM_REPAIR_ORDER", existing.getRepairNo(), "该设备已有未关闭维修单，不重复开单", operatorId, now);
+            recordAction(event.getAlertId(), stepNo, ACTION_REPAIR, AiAlertAction.STATUS_SKIPPED, "EAM_REPAIR_ORDER", existing.getRepairNo(), "该设备已有未关闭维修单，不重复开单", operatorId, now);
             return 0;
         }
+        return createRepair(event, equipmentId, now, operatorId, stepNo);
+    }
+
+    private int createRepair(AiAlertEvent event, Long equipmentId, LocalDateTime now, Long operatorId, int stepNo) {
         try {
             EamRepairOrder order = newAutoRepairOrder(equipmentId, event, now, operatorId);
             if (repairOrderMapper.insert(order) != 1) {
-                recordAction(event.getAlertId(), stepNo, ACTION_REPAIR, AiAlertAction.STATUS_FAILED,
-                        "EAM_REPAIR_ORDER", null, "维修单写入没有生效，请刷新后重试", operatorId, now);
+                recordAction(event.getAlertId(), stepNo, ACTION_REPAIR, AiAlertAction.STATUS_FAILED, "EAM_REPAIR_ORDER", null, "维修单写入没有生效，请刷新后重试", operatorId, now);
                 return 0;
             }
-            recordAction(event.getAlertId(), stepNo, ACTION_REPAIR, AiAlertAction.STATUS_SUCCEEDED,
-                    "EAM_REPAIR_ORDER", order.getRepairNo(), "已自动开出维修单，等待设备科接单", operatorId, now);
+            recordAction(event.getAlertId(), stepNo, ACTION_REPAIR, AiAlertAction.STATUS_SUCCEEDED, "EAM_REPAIR_ORDER", order.getRepairNo(), "已自动开出维修单，等待设备科接单", operatorId, now);
             return 1;
         } catch (RuntimeException ex) {
-            recordAction(event.getAlertId(), stepNo, ACTION_REPAIR, AiAlertAction.STATUS_FAILED,
-                    "EAM_REPAIR_ORDER", null, trim(ex.getMessage()), operatorId, now);
+            recordAction(event.getAlertId(), stepNo, ACTION_REPAIR, AiAlertAction.STATUS_FAILED, "EAM_REPAIR_ORDER", null, trim(ex.getMessage()), operatorId, now);
             return 0;
         }
     }

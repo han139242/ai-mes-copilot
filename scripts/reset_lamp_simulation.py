@@ -15,6 +15,7 @@ import re
 import socket
 import subprocess
 import pymysql
+from cli_output import write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 # 显式清单，绝不按前缀整批删除主数据或日期排班。
@@ -214,7 +215,7 @@ def main():
             "clears": "所有生产、销售采购、仓储、质检、追溯交易及其预留、幂等、通知、AI执行与旧号映射；线边/半成品/成品库存清零",
         }
         if not args.apply:
-            print(json.dumps(report, ensure_ascii=False, indent=2))
+            write_json(report, ensure_ascii=False, indent=2)
             return
 
         stamp = dt.datetime.now().strftime("%Y%m%d-%H%M%S-%f")
@@ -380,7 +381,7 @@ def main():
             primaryKeysAndNumberCountersNotReset=True,
         )
         (run / "report.json").write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf8")
-        print(json.dumps(report, ensure_ascii=False, indent=2, default=str))
+        write_json(report, ensure_ascii=False, indent=2, default=str)
     finally:
         if locked:
             rows("SELECT RELEASE_LOCK(%s)", (args.database + ":reset-simulation",))

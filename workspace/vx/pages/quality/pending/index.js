@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 待检任务页：质检员查看当前需要处理的检验单。
 const guard = require('../../../utils/guard')
 const auth = require('../../../utils/auth')

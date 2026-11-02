@@ -1299,38 +1299,8 @@ public class WmsOutboundOrderServiceImpl extends ServiceImpl<WmsOutboundOrderMap
     @Override
     @Transactional
     public boolean confirmOutboundOrder(Long outboundId, Long operatorId, String remark) {
-        if (operatorId == null) {
-            throw business(ResultCode.PARAM_ERROR, "当前登录用户不能为空");
-        }
-        WmsOutboundOrder outboundOrder = getOutboundOrderById(outboundId);
-        if (outboundOrder == null) {
-            throw business(ResultCode.NOT_FOUND, "出库单不存在或已删除");
-        }
-        if ("SALE".equals(outboundOrder.getOutboundType())) {
-            throw business(ResultCode.BUSINESS_ERROR, "销售出库必须通过销售发货入口确认并核对出货检验");
-        }
-        if (MATERIAL_ISSUE_TYPE.equals(outboundOrder.getOutboundType())) {
-            MfgWorkOrder workOrder = workOrderMapper.selectById(outboundOrder.getWorkOrderId());
-            if (workOrder == null) throw business(ResultCode.BUSINESS_ERROR, "领料单关联的工单不存在");
-            preparationGate.assertExecutionSupported(workOrder.getProductId());
-        }
-        if (!SUBMITTED_STATUS.equals(outboundOrder.getAuditStatus())) {
-            throw business(ResultCode.BUSINESS_ERROR, "只有 SUBMITTED 状态的出库单可以确认");
-        }
-        if (outboundOrder.getWarehouseId() == null) {
-            throw business(ResultCode.PARAM_ERROR, "出库仓库不能为空");
-        }
-        List<WmsOutboundDetail> details = listActiveDetails(outboundId);
-        if (details.isEmpty()) {
-            throw business(ResultCode.BUSINESS_ERROR, "出库单至少需要一条有效明细");
-        }
-        if (MATERIAL_ISSUE_TYPE.equals(outboundOrder.getOutboundType())
-                && details.stream().anyMatch(detail -> detail.getInspectionId() != null)) {
-            throw business(ResultCode.BUSINESS_ERROR, "库存组件领用必须使用转线边入口，普通确认出库不能建立线边库存");
-        }
-        if (stockComponents != null && MATERIAL_ISSUE_TYPE.equals(outboundOrder.getOutboundType())) {
-            stockComponents.validateStockRelease(outboundOrder, details);
-        }
+        WmsOutboundOrder outboundOrder = requireConfirmableOutboundOrder(outboundId, operatorId);
+        List<WmsOutboundDetail> details = confirmationDetails(outboundOrder, outboundId);
         Map<InventoryKey, InventoryDeduction> deductions = prepareInventoryDeductions(outboundOrder, details);
         List<MaterialIssueUpdate> materialIssueUpdates = prepareMaterialIssueUpdates(outboundOrder, details);
         LocalDateTime now = LocalDateTime.now();
@@ -1353,12 +1323,51 @@ public class WmsOutboundOrderServiceImpl extends ServiceImpl<WmsOutboundOrderMap
         if (MATERIAL_ISSUE_TYPE.equals(outboundOrder.getOutboundType())) {
             mfgDispatchOrderService.refreshMaterialReadiness(outboundOrder.getWorkOrderId(), operatorId);
         }
-        insertStatusChangeLog(outboundOrder.getOutboundId(), outboundOrder.getAuditStatus(), APPROVED_STATUS,
-                "WMS_OUTBOUND_ORDER", "CONFIRM_OUTBOUND", operatorId, remark, now);
+        insertStatusChangeLog(outboundOrder.getOutboundId(), outboundOrder.getAuditStatus(), APPROVED_STATUS, "WMS_OUTBOUND_ORDER", "CONFIRM_OUTBOUND", operatorId, remark, now);
         insertOperationLog(outboundOrder.getOutboundId(), "CONFIRM_OUTBOUND", "wms_outbound_order", operatorId, remark, now);
         responsibilityNotificationService.cancelOutboundPending(outboundId, operatorId);
         responsibilityNotificationService.publishOutboundCompleted(outboundOrder, operatorId);
         return true;
+    }
+
+    private WmsOutboundOrder requireConfirmableOutboundOrder(Long outboundId, Long operatorId) {
+        if (operatorId == null) {
+            throw business(ResultCode.PARAM_ERROR, "当前登录用户不能为空");
+        }
+        WmsOutboundOrder outboundOrder = getOutboundOrderById(outboundId);
+        if (outboundOrder == null) {
+            throw business(ResultCode.NOT_FOUND, "出库单不存在或已删除");
+        }
+        if ("SALE".equals(outboundOrder.getOutboundType())) {
+            throw business(ResultCode.BUSINESS_ERROR, "销售出库必须通过销售发货入口确认并核对出货检验");
+        }
+        if (MATERIAL_ISSUE_TYPE.equals(outboundOrder.getOutboundType())) {
+            MfgWorkOrder workOrder = workOrderMapper.selectById(outboundOrder.getWorkOrderId());
+            if (workOrder == null)
+                throw business(ResultCode.BUSINESS_ERROR, "领料单关联的工单不存在");
+            preparationGate.assertExecutionSupported(workOrder.getProductId());
+        }
+        if (!SUBMITTED_STATUS.equals(outboundOrder.getAuditStatus())) {
+            throw business(ResultCode.BUSINESS_ERROR, "只有 SUBMITTED 状态的出库单可以确认");
+        }
+        if (outboundOrder.getWarehouseId() == null) {
+            throw business(ResultCode.PARAM_ERROR, "出库仓库不能为空");
+        }
+        return outboundOrder;
+    }
+
+    private List<WmsOutboundDetail> confirmationDetails(WmsOutboundOrder outboundOrder, Long outboundId) {
+        List<WmsOutboundDetail> details = listActiveDetails(outboundId);
+        if (details.isEmpty()) {
+            throw business(ResultCode.BUSINESS_ERROR, "出库单至少需要一条有效明细");
+        }
+        if (MATERIAL_ISSUE_TYPE.equals(outboundOrder.getOutboundType()) && details.stream().anyMatch(detail -> detail.getInspectionId() != null)) {
+            throw business(ResultCode.BUSINESS_ERROR, "库存组件领用必须使用转线边入口，普通确认出库不能建立线边库存");
+        }
+        if (stockComponents != null && MATERIAL_ISSUE_TYPE.equals(outboundOrder.getOutboundType())) {
+            stockComponents.validateStockRelease(outboundOrder, details);
+        }
+        return details;
     }
 
     /**
@@ -1696,17 +1705,13 @@ public class WmsOutboundOrderServiceImpl extends ServiceImpl<WmsOutboundOrderMap
      *
      * <p>只有生产领料单才可能有预留；其它出库类型一律按公共可用量处理。</p>
      */
-    private BigDecimal consumeReservation(WmsOutboundOrder outboundOrder, WmsInventory inventory,
-                                          BigDecimal quantity, Long operatorId, LocalDateTime now) {
-        if (outboundOrder == null || !MATERIAL_ISSUE_TYPE.equals(outboundOrder.getOutboundType())
-                || outboundOrder.getWorkOrderId() == null || inventory == null
-                || inventory.getInventoryId() == null) {
+    private BigDecimal consumeReservation(WmsOutboundOrder outboundOrder, WmsInventory inventory, BigDecimal quantity, Long operatorId, LocalDateTime now) {
+        if (!isReservableIssue(outboundOrder) || inventory == null || inventory.getInventoryId() == null) {
             return BigDecimal.ZERO;
         }
         // 预留记在需求归属工单上：组件工单领半成品，预留属于上级整机工单。
         Long ownerId = requirementOwnerId(outboundOrder.getWorkOrderId(), inventory.getMaterialId());
-        BigDecimal consumed = supplyAllocations.consumeReservation(ownerId,
-                inventory.getMaterialId(), inventory.getInventoryId(), quantity, operatorId, now);
+        BigDecimal consumed = supplyAllocations.consumeReservation(ownerId, inventory.getMaterialId(), inventory.getInventoryId(), quantity, operatorId, now);
         return consumed == null ? BigDecimal.ZERO : consumed;
     }
 
@@ -1838,5 +1843,9 @@ public class WmsOutboundOrderServiceImpl extends ServiceImpl<WmsOutboundOrderMap
     }
 
     private record MaterialIssueSource(WmsInventory inventory, WmsMaterialBatch batch) {
+    }
+
+    private boolean isReservableIssue(WmsOutboundOrder outboundOrder) {
+        return outboundOrder != null && MATERIAL_ISSUE_TYPE.equals(outboundOrder.getOutboundType()) && outboundOrder.getWorkOrderId() != null;
     }
 }

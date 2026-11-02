@@ -134,13 +134,9 @@ public class ComponentHandoverService {
     /** 自动衔接的四类前提：来源工单有效、是组件工单、对应该物料、父子关系与产线一致。 */
     private boolean usableDirectSource(Long sourceId, MfgProductionPlan parentPlan, MfgWorkOrderMaterial requirement) {
         MfgWorkOrder source = orders.selectById(sourceId);
-        boolean usable = source != null && Objects.equals(source.getDeletedFlag(), 0)
-                && !CLOSED_OR_CANCELLED.contains(String.valueOf(source.getStatus()))
-                && "COMPONENT".equals(source.getWorkOrderType())
-                && Objects.equals(source.getParentWorkOrderId(), requirement.getWorkOrderId())
-                && matchesSourceRequirement(source, requirement)
-                && matchesMaterial(source, requirement.getMaterialId());
-        return usable && sharesSameLine(source, parentPlan);
+        boolean active = source != null && Objects.equals(source.getDeletedFlag(), 0) && !CLOSED_OR_CANCELLED.contains(String.valueOf(source.getStatus()));
+        boolean related = active && "COMPONENT".equals(source.getWorkOrderType()) && Objects.equals(source.getParentWorkOrderId(), requirement.getWorkOrderId());
+        return related && matchesSourceRequirement(source, requirement) && matchesMaterial(source, requirement.getMaterialId()) && sharesSameLine(source, parentPlan);
     }
 
     /** 来源工单若显式声明了它的用料需求，就必须正是当前这条需求，避免串料。 */

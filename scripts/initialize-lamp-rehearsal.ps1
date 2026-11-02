@@ -13,7 +13,7 @@ try {
         if ($null -eq $LoginCredential) { throw 'Supply -LoginCredential for the application account copied from mes_local.' }
         $env:MYSQL_PWD = $Administrator.GetNetworkCredential().Password
         $env:MYSQL_ADMIN_USER = $Administrator.UserName
-        $prepared = & python scripts/prepare-lamp-rehearsal.py
+        $prepared = & python scripts/prepare_lamp_rehearsal.py
         if ($LASTEXITCODE -ne 0) { throw 'Rehearsal preparation failed.' }
         $prepared = $prepared | ConvertFrom-Json
         [pscustomobject]@{
@@ -29,15 +29,15 @@ try {
     $state = Import-Clixml -LiteralPath $statePath
     if ($state.DbUrl -notmatch '^jdbc:mysql://127\.0\.0\.1:3306/mes_lamp_rehearsal\?') { throw 'Unexpected rehearsal target.' }
     $env:MYSQL_PWD = $state.DbCredential.GetNetworkCredential().Password
-    & python scripts/apply-lamp-foundation.py
+    & python scripts/apply_lamp_foundation.py
     if ($LASTEXITCODE -ne 0) { throw 'Migration failed.' }
-    & python scripts/apply-lamp-foundation.py
+    & python scripts/apply_lamp_foundation.py
     if ($LASTEXITCODE -ne 0) { throw 'Repeated migration failed.' }
-    & python scripts/apply-lamp-preparation.py --repeat 2
+    & python scripts/apply_lamp_preparation.py --repeat 2
     if ($LASTEXITCODE -ne 0) { throw 'Manufacturing preparation migration failed.' }
-    & python scripts/apply-lamp-report-baseline.py --apply --repeat 2
+    & python scripts/apply_lamp_report_baseline.py --apply --repeat 2
     if ($LASTEXITCODE -ne 0) { throw 'Report V1.8 alignment failed; review confirmed/published data before retrying.' }
-    & python scripts/apply-lamp-execution.py --apply --repeat 2
+    & python scripts/apply_lamp_execution.py --apply --repeat 2
     if ($LASTEXITCODE -ne 0) { throw 'Execution structure migration failed; business execution remains blocked.' }
     'Lamp foundation ready; existing database was not replaced.'
 } finally {

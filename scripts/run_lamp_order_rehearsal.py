@@ -11,6 +11,11 @@ import re
 import subprocess
 import urllib.error
 import urllib.request
+from cli_output import write_json
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+LOGGER = logging.getLogger(__name__)
 
 
 def local_now():
@@ -122,7 +127,7 @@ class Rehearsal:
         if key:
             self.state["actions"][key] = result
             self.save()
-            print("完成：" + key, flush=True)
+            LOGGER.info("%s", "完成：" + key)
         return result
 
     def login(self):
@@ -444,7 +449,7 @@ class Rehearsal:
                     "remark": NOTE,
                 },
             )
-            print("排程窗口对齐：" + payload + " ~ " + planned_end, flush=True)
+            LOGGER.info("%s", "排程窗口对齐：" + payload + " ~ " + planned_end)
             return placed
         raise RuntimeError("排程窗口无法对齐到未来班次：" + str(last_error))
 
@@ -807,7 +812,7 @@ class Rehearsal:
                 "backupSha256": hashlib.sha256(backup.read_bytes()).hexdigest(),
             }
             self.save()
-        print("已核对生产入库流水配对，补齐条数：" + str(len(corrections)))
+        LOGGER.info("%s", "已核对生产入库流水配对，补齐条数：" + str(len(corrections)))
 
     def audit(self):
         if "shipped" not in self.state["stages"]:
@@ -922,7 +927,7 @@ class Rehearsal:
             "passed": all(checks.values()),
         }
         self.save()
-        print(json.dumps(self.state["audit"], ensure_ascii=False, indent=2))
+        write_json(self.state["audit"], ensure_ascii=False, indent=2)
         if not all(checks.values()):
             raise RuntimeError("演练对账失败，请保留记录排查")
 
@@ -1238,17 +1243,15 @@ def main():
     ):
         parser.error("仅允许本机纯台灯演练库及受保护的演练记录目录")
     if not args.apply:
-        print(
-            json.dumps(
+        write_json(
                 {"database": args.database, "stage": args.stage, "preview": True, "remark": NOTE}, ensure_ascii=False
             )
-        )
         return
     run = Rehearsal(args)
     if run.sql('SELECT CONCAT(DATABASE(),":",@@port)') != args.database + ":" + str(args.port):
         raise RuntimeError("数据库身份不匹配")
     getattr(run, args.stage)()
-    print("演练阶段完成：" + args.stage)
+    LOGGER.info("%s", "演练阶段完成：" + args.stage)
 
 
 if __name__ == "__main__":

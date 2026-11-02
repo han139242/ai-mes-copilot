@@ -9,6 +9,7 @@ from pathlib import Path
 import re
 import subprocess
 import pymysql
+from cli_output import write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -119,7 +120,7 @@ def main():
             except Exception:
                 db.rollback()
                 raise
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        write_json(report, ensure_ascii=False, indent=2)
     finally:
         db.close()
 

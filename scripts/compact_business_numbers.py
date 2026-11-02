@@ -15,6 +15,7 @@ import re
 import subprocess
 from zoneinfo import ZoneInfo
 import pymysql
+from cli_output import write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 CURRENT = re.compile(r"^(?P<prefix>[A-Z][A-Z0-9]{0,7})-(?P<kind>[A-Z]{2,3})-(?P<date>\d{8})-(?P<sequence>\d{3,})$")
@@ -290,7 +291,7 @@ def main():
                     )
             db.commit()
         report["converted"] = len(report["mapping"])
-        print(json.dumps(report, ensure_ascii=False, default=str, indent=2))
+        write_json(report, ensure_ascii=False, default=str, indent=2)
     except BaseException:
         db.rollback()
         raise

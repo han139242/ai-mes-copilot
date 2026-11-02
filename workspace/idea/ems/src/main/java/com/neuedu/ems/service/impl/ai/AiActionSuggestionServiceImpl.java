@@ -176,12 +176,12 @@ public class AiActionSuggestionServiceImpl implements AiActionSuggestionService 
             if (suggestion == null) {
                 continue;
             }
-            String targetNo = suggestion.params() == null ? null
-                    : text(suggestion.params().get("targetNo"));
-            String key = suggestion.code() + "|" + (targetNo == null ? "" : targetNo)
-                    + "|" + (suggestion.params() == null ? "" : suggestion.params().get("focus"))
-                    + "|" + (suggestion.params() == null ? "" : suggestion.params().get("targetId"))
-                    + "|" + (suggestion.route() == null ? "" : suggestion.route());
+            String targetNo = suggestion.params() == null ? null : text(suggestion.params().get("targetNo"));
+            String safeTarget = targetNo == null ? "" : targetNo;
+            String focus = actionParameterKey(suggestion, "focus");
+            String targetId = actionParameterKey(suggestion, "targetId");
+            String route = suggestion.route() == null ? "" : suggestion.route();
+            String key = suggestion.code() + "|" + safeTarget + "|" + focus + "|" + targetId + "|" + route;
             unique.putIfAbsent(key, suggestion);
         }
         return new ArrayList<>(unique.values());
@@ -420,108 +420,87 @@ public class AiActionSuggestionServiceImpl implements AiActionSuggestionService 
      * 这里按「终检合格批次有没有入库 → 有没有发货单 → 有没有出货检验 → 检验过没过」
      * 依次判断，只给当前真正缺的那一个动作。</p>
      */
-    private List<ActionSuggestion> deliveryActions(List<Map<String, Object>> rows,
-                                                   AuthorizationContext authorization) {
+    private List<ActionSuggestion> deliveryActions(List<Map<String, Object>> rows, AuthorizationContext authorization) {
         List<ActionSuggestion> actions = new ArrayList<>();
         com.neuedu.ems.entity.mfg.MfgProductionOrder order = findProductionOrder(rows);
-        if (order == null) {
+        if (order == null || List.of("CANCELLED", "CLOSED").contains(order.getStatus())) {
             return actions;
         }
-        if (List.of("CANCELLED", "CLOSED").contains(order.getStatus())) {
-            return actions;
-        }
-        // 订单还没排产时，入库和发货都无从谈起，下一步只能是排产。
-        // 不先判这一步，就会给出一张「生成成品入库单」的按钮，而那张单根本不该存在。
         if (BusinessStatus.Document.DRAFT.equals(order.getStatus())) {
             if (hasPermission(authorization, PERM_SCHEDULE_CONFIRM)) {
-                addCommandAction(actions, ACTION_SCHEDULE_ORDER, "安排生产订单",
-                        PERM_SCHEDULE_CONFIRM, order.getProductionOrderNo(),
-                        order.getProductionOrderId(), authorization);
+                addCommandAction(actions, ACTION_SCHEDULE_ORDER, "安排生产订单", PERM_SCHEDULE_CONFIRM, order.getProductionOrderNo(), order.getProductionOrderId(), authorization);
             }
-            return actions;
-        }
-        List<Long> orderWorkOrderIds = orderWorkOrderIds(order);
-        // 已排产但还没生成工单时，下一步是生成工单，同样不该出现入库/发货按钮。
-        if (orderWorkOrderIds.isEmpty()) {
-            if (hasPermission(authorization, PERM_WORK_ORDER_GENERATE)) {
-                addCommandAction(actions, ACTION_GENERATE_WORK_ORDER, "按订单生成工单",
-                        PERM_WORK_ORDER_GENERATE, order.getProductionOrderNo(),
-                        order.getProductionOrderId(), authorization);
-            }
-            return actions;
-        }
-        // 先看还有没有终检合格但未入库的批次：有就说明第 7 阶段还没办。
-        List<com.neuedu.ems.entity.trace.TraceProductLot> pendingLots =
-                pendingInboundLots(order.getProductId(), orderWorkOrderIds);
-        if (!pendingLots.isEmpty() && hasPermission(authorization, PERM_INBOUND_CREATE)) {
-            com.neuedu.ems.entity.trace.TraceProductLot lot = pendingLots.getFirst();
-            addCommandAction(actions, ACTION_GENERATE_PRODUCTION_INBOUND,
-                    "生成成品入库单 " + lot.getLotNo(), PERM_INBOUND_CREATE,
-                    lot.getLotNo(), lot.getProductLotId(), authorization);
-            return actions;
-        }
-        List<com.neuedu.ems.entity.wms.WmsOutboundOrder> outbounds =
-                activeSalesOutbounds(order.getProductionOrderId());
-        if (outbounds.isEmpty()) {
-            // 订单还没全部完工时不能生成发货单：领域服务会以「工单尚未完成」拒绝，
-            // 提前在这里挡住，避免给用户一个点了必然失败的按钮。
-            if (!allWorkOrdersFinished(order)) {
-                return actions;
-            }
-            if (hasPermission(authorization, PERM_SALES_OUTBOUND_CREATE)) {
-                addCommandAction(actions, ACTION_GENERATE_SALES_OUTBOUND, "生成发货单",
-                        PERM_SALES_OUTBOUND_CREATE, order.getProductionOrderNo(),
-                        order.getProductionOrderId(), authorization);
-            }
-            return actions;
-        }
-        com.neuedu.ems.entity.wms.WmsOutboundOrder outbound = outbounds.getFirst();
-        // 已经确认发货的单据不再给按钮：再点一次只会被判「只有待确认的销售出库单可以确认发货」。
-        if (BusinessStatus.Document.APPROVED.equals(outbound.getAuditStatus())) {
-            return actions;
-        }
-        if (outbound.getInspectionId() == null) {
-            if (hasPermission(authorization, PERM_SALES_INSPECTION)) {
-                addCommandAction(actions, ACTION_CREATE_OUTGOING_INSPECTION, "生成出货检验单",
-                        PERM_SALES_INSPECTION, outbound.getOutboundNo(), outbound.getOutboundId(),
-                        authorization);
-            }
-            return actions;
-        }
-        QmsInspectionOrder inspection = findInspectionById(outbound.getInspectionId());
-        if (inspection != null && BusinessStatus.Document.DRAFT.equals(inspection.getStatus())
-                && hasPermission(authorization, PERM_INSPECTION_SUBMIT)) {
-            // 出货检验单建好了还没录结论，先给「提交检验结果」，否则确认发货必然被拒。
-            addCommandAction(actions, ACTION_SUBMIT_INSPECTION_OUTGOING,
-                    "提交出货检验结果 " + inspection.getInspectionNo(), PERM_INSPECTION_SUBMIT,
-                    inspection.getInspectionNo(), inspection.getInspectionId(), authorization);
-            return actions;
-        }
-        if (hasPermission(authorization, PERM_SALES_CONFIRM)) {
-            addCommandAction(actions, ACTION_CONFIRM_SALES_OUTBOUND, "确认发货 " + outbound.getOutboundNo(),
-                    PERM_SALES_CONFIRM, outbound.getOutboundNo(), outbound.getOutboundId(), authorization);
+        } else {
+            releasedOrderActions(order, authorization, actions);
         }
         return actions;
     }
 
+    private void releasedOrderActions(com.neuedu.ems.entity.mfg.MfgProductionOrder order, AuthorizationContext authorization, List<ActionSuggestion> actions) {
+        List<Long> orderWorkOrderIds = orderWorkOrderIds(order);
+        // 已排产但还没生成工单时，下一步是生成工单，同样不该出现入库/发货按钮。
+        if (orderWorkOrderIds.isEmpty()) {
+            if (hasPermission(authorization, PERM_WORK_ORDER_GENERATE)) {
+                addCommandAction(actions, ACTION_GENERATE_WORK_ORDER, "按订单生成工单", PERM_WORK_ORDER_GENERATE, order.getProductionOrderNo(), order.getProductionOrderId(), authorization);
+            }
+            return;
+        }
+        // 先看还有没有终检合格但未入库的批次：有就说明第 7 阶段还没办。
+        List<com.neuedu.ems.entity.trace.TraceProductLot> pendingLots = pendingInboundLots(order.getProductId(), orderWorkOrderIds);
+        if (!pendingLots.isEmpty() && hasPermission(authorization, PERM_INBOUND_CREATE)) {
+            com.neuedu.ems.entity.trace.TraceProductLot lot = pendingLots.getFirst();
+            addCommandAction(actions, ACTION_GENERATE_PRODUCTION_INBOUND, "生成成品入库单 " + lot.getLotNo(), PERM_INBOUND_CREATE, lot.getLotNo(), lot.getProductLotId(), authorization);
+            return;
+        }
+        shippingActions(order, authorization, actions);
+    }
+
+    private void shippingActions(com.neuedu.ems.entity.mfg.MfgProductionOrder order, AuthorizationContext authorization, List<ActionSuggestion> actions) {
+        List<com.neuedu.ems.entity.wms.WmsOutboundOrder> outbounds = activeSalesOutbounds(order.getProductionOrderId());
+        if (outbounds.isEmpty()) {
+            // 订单还没全部完工时不能生成发货单：领域服务会以「工单尚未完成」拒绝，
+            // 提前在这里挡住，避免给用户一个点了必然失败的按钮。
+            if (allWorkOrdersFinished(order) && hasPermission(authorization, PERM_SALES_OUTBOUND_CREATE)) {
+                addCommandAction(actions, ACTION_GENERATE_SALES_OUTBOUND, "生成发货单", PERM_SALES_OUTBOUND_CREATE, order.getProductionOrderNo(), order.getProductionOrderId(), authorization);
+            }
+            return;
+        }
+        com.neuedu.ems.entity.wms.WmsOutboundOrder outbound = outbounds.getFirst();
+        // 已经确认发货的单据不再给按钮：再点一次只会被判「只有待确认的销售出库单可以确认发货」。
+        if (BusinessStatus.Document.APPROVED.equals(outbound.getAuditStatus())) {
+            return;
+        }
+        if (outbound.getInspectionId() == null) {
+            if (hasPermission(authorization, PERM_SALES_INSPECTION)) {
+                addCommandAction(actions, ACTION_CREATE_OUTGOING_INSPECTION, "生成出货检验单", PERM_SALES_INSPECTION, outbound.getOutboundNo(), outbound.getOutboundId(), authorization);
+            }
+            return;
+        }
+        inspectionOrShipmentActions(outbound, authorization, actions);
+    }
+
+    private void inspectionOrShipmentActions(com.neuedu.ems.entity.wms.WmsOutboundOrder outbound, AuthorizationContext authorization, List<ActionSuggestion> actions) {
+        QmsInspectionOrder inspection = findInspectionById(outbound.getInspectionId());
+        if (inspection != null && BusinessStatus.Document.DRAFT.equals(inspection.getStatus()) && hasPermission(authorization, PERM_INSPECTION_SUBMIT)) {
+            // 出货检验单建好了还没录结论，先给「提交检验结果」，否则确认发货必然被拒。
+            addCommandAction(actions, ACTION_SUBMIT_INSPECTION_OUTGOING, "提交出货检验结果 " + inspection.getInspectionNo(), PERM_INSPECTION_SUBMIT, inspection.getInspectionNo(), inspection.getInspectionId(), authorization);
+            return;
+        }
+        if (hasPermission(authorization, PERM_SALES_CONFIRM)) {
+            addCommandAction(actions, ACTION_CONFIRM_SALES_OUTBOUND, "确认发货 " + outbound.getOutboundNo(), PERM_SALES_CONFIRM, outbound.getOutboundNo(), outbound.getOutboundId(), authorization);
+        }
+    }
+
     /** 从查询行里定位生产订单。 */
     private com.neuedu.ems.entity.mfg.MfgProductionOrder findProductionOrder(List<Map<String, Object>> rows) {
-        if (productionOrderMapper == null) {
-            return null;
-        }
-        if (rows == null || rows.isEmpty()) {
+        if (productionOrderMapper == null || rows == null || rows.isEmpty()) {
             return null;
         }
         String orderNo = text(rows.get(0).get("productionOrderNo"));
         if (!StringUtils.hasText(orderNo)) {
             return null;
         }
-        return productionOrderMapper.selectOne(
-                new LambdaQueryWrapper<com.neuedu.ems.entity.mfg.MfgProductionOrder>()
-                        .eq(com.neuedu.ems.entity.mfg.MfgProductionOrder::getProductionOrderNo,
-                                currentDocumentNumber(orderNo))
-                        .eq(com.neuedu.ems.entity.mfg.MfgProductionOrder::getDeletedFlag, 0)
-                        .last("limit 1"));
+        return productionOrderMapper.selectOne(new LambdaQueryWrapper<com.neuedu.ems.entity.mfg.MfgProductionOrder>().eq(com.neuedu.ems.entity.mfg.MfgProductionOrder::getProductionOrderNo, currentDocumentNumber(orderNo)).eq(com.neuedu.ems.entity.mfg.MfgProductionOrder::getDeletedFlag, 0).last("limit 1"));
     }
 
     /**
@@ -576,23 +555,12 @@ public class AiActionSuggestionServiceImpl implements AiActionSuggestionService 
         if (order == null || workOrderMapper == null) {
             return List.of();
         }
-        List<MfgProductionPlan> plans = productionPlanMapper == null ? List.of()
-                : productionPlanMapper.selectList(new LambdaQueryWrapper<MfgProductionPlan>()
-                        .eq(MfgProductionPlan::getProductionOrderId, order.getProductionOrderId())
-                        .eq(MfgProductionPlan::getDeletedFlag, 0));
-        if (plans.isEmpty()) {
-            return List.of();
-        }
-        List<Long> planIds = plans.stream().map(MfgProductionPlan::getPlanId)
-                .filter(java.util.Objects::nonNull).toList();
+        List<MfgProductionPlan> plans = productionPlanMapper == null ? List.of() : productionPlanMapper.selectList(new LambdaQueryWrapper<MfgProductionPlan>().eq(MfgProductionPlan::getProductionOrderId, order.getProductionOrderId()).eq(MfgProductionPlan::getDeletedFlag, 0));
+        List<Long> planIds = plans.stream().map(MfgProductionPlan::getPlanId).filter(java.util.Objects::nonNull).toList();
         if (planIds.isEmpty()) {
             return List.of();
         }
-        return workOrderMapper.selectList(new LambdaQueryWrapper<MfgWorkOrder>()
-                        .in(MfgWorkOrder::getPlanId, planIds)
-                        .eq(MfgWorkOrder::getDeletedFlag, 0))
-                .stream().map(MfgWorkOrder::getWorkOrderId)
-                .filter(java.util.Objects::nonNull).toList();
+        return workOrderMapper.selectList(new LambdaQueryWrapper<MfgWorkOrder>().in(MfgWorkOrder::getPlanId, planIds).eq(MfgWorkOrder::getDeletedFlag, 0)).stream().map(MfgWorkOrder::getWorkOrderId).filter(java.util.Objects::nonNull).toList();
     }
 
     /** 该批次是否已经生成过入库单（含待确认和已确认）。 */
@@ -748,5 +716,9 @@ public class AiActionSuggestionServiceImpl implements AiActionSuggestionService 
     /** 意图编码统一小写比较，避免调用方传大写时匹配不到路由。 */
     static String normalizeIntent(String intent) {
         return StringUtils.hasText(intent) ? intent.trim().toLowerCase(Locale.ROOT) : "";
+    }
+
+    private String actionParameterKey(ActionSuggestion suggestion, String key) {
+        return suggestion.params() == null ? "" : String.valueOf(suggestion.params().get(key));
     }
 }

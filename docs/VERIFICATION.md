@@ -31,3 +31,7 @@
 运行工具：从根目录运行 `node --test scripts/local-runtime.test.mjs scripts/ai-decision-preflight.test.mjs`。
 
 后端：按 SETUP.md 初始化独立测试库并配置环境变量，在 `workspace/idea/ems` 运行 `./mvnw.cmd -B package`；仅编译时使用 `./mvnw.cmd -B compile`。
+
+## 2026-11-02 CodeArts 整改后回归
+
+后端1118项0失败/错误/跳过并打包成功，前端71项与生产构建通过，运行监管/推演20项和Python工具4项通过。回归仅连接独立验证库，源码在本轮完整回归期间保持不变。首次暴露的日期夹具问题已修正并保留原断言，随后完整1118项重新执行全绿。云端扫描由维护者自行执行。

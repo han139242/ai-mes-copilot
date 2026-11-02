@@ -293,21 +293,14 @@ public class AiServiceImpl implements AiService {
         }
         SpokenDocumentResolver.Expansion expansion = SpokenDocumentResolver.expand(question, spokenHistory);
         if (expansion.clarified()) {
-            return buildClarifyAnswer(new com.neuedu.ems.service.ai.AiPlan("clarify", "", Map.of(),
-                    expansion.clarify(), "", List.of("说出完整的生产订单号"), "短单号同时对上订单和工单"), startedAt);
+            return buildClarifyAnswer(new com.neuedu.ems.service.ai.AiPlan("clarify", "", Map.of(), expansion.clarify(), "", List.of("说出完整的生产订单号"), "短单号同时对上订单和工单"), startedAt);
         }
         question = expansion.question();
         String module = normalizeModule(request.getModule());
         DateRange dateRange = resolveOptionalDateRange(request.getContext());
         Map<String, Object> context = request.getContext() == null ? Map.of() : request.getContext();
-        if (history.stream().noneMatch(message -> WORK_ORDER_REFERENCE.matcher(message.getContent()).find())
-                && (question.contains("这个工单") || question.contains("这张工单")
-                || question.contains("该工单") || question.contains("这笔工单"))
-                && !WORK_ORDER_REFERENCE.matcher(question).find()
-                && !WORK_ORDER_REFERENCE.matcher(String.valueOf(context)).find()) {
-            return buildClarifyAnswer(new com.neuedu.ems.service.ai.AiPlan("clarify", "", Map.of(),
-                    "你要查哪张工单？当前对话还没有确定工单，请提供工单号，或先查询某张订单的工单清单。",
-                    "", List.of("查看可以下达的工单"), "缺少可核实的工单目标"), startedAt);
+        if (needsWorkOrderClarification(question, history, context)) {
+            return buildClarifyAnswer(new com.neuedu.ems.service.ai.AiPlan("clarify", "", Map.of(), "你要查哪张工单？当前对话还没有确定工单，请提供工单号，或先查询某张订单的工单清单。", "", List.of("查看可以下达的工单"), "缺少可核实的工单目标"), startedAt);
         }
         return routeAgentQuestion(question, history, request, context, dateRange, module, authorization, startedAt);
     }
@@ -362,16 +355,8 @@ public class AiServiceImpl implements AiService {
     }
 
     /** 已给单号且明确在问状态时直接查业务库，避免先等模型造成长时间卡在「处理中」。 */
-    private Map<String, Object> tryDirectDocumentQuery(String question,
-                                                       com.neuedu.ems.common.AuthorizationContext authorization,
-                                                       long startedAt) {
-        if (intentRouter == null || (!ORDER_REFERENCE.matcher(question).find()
-                && !WORK_ORDER_REFERENCE.matcher(question).find())) {
-            return null;
-        }
-        if (!(question.contains("进度") || question.contains("到哪") || question.contains("状态")
-                || question.contains("下一步") || question.contains("情况") || question.contains("还差什么")
-                || question.contains("能不能开工") || question.contains("卡在哪"))) {
+    private Map<String, Object> tryDirectDocumentQuery(String question, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt) {
+        if (intentRouter == null || !asksDirectDocumentQuery(question)) {
             return null;
         }
         AiIntentRouter.RouteResult route = intentRouter.route(question, List.of(), null);
@@ -379,13 +364,20 @@ public class AiServiceImpl implements AiService {
             return null;
         }
         com.neuedu.ems.service.ai.AiQueryAccessPolicy.requireIntent(authorization, route.intent());
+        return executeDirectDocumentQuery(question, route, authorization, startedAt);
+    }
+
+    private static boolean asksDirectDocumentQuery(String question) {
+        boolean hasDocument = ORDER_REFERENCE.matcher(question).find() || WORK_ORDER_REFERENCE.matcher(question).find();
+        return hasDocument && hasWorkflowKeyword(question, "进度", "到哪", "状态", "下一步", "情况", "还差什么", "能不能开工", "卡在哪");
+    }
+
+    private Map<String, Object> executeDirectDocumentQuery(String question, AiIntentRouter.RouteResult route, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt) {
         try {
             AiQueryResult result = intentRouter.execute(route);
-            return result == null ? queryUnavailableAnswer(route.intent(), startedAt)
-                    : buildRuleAnswer(question, route, result, startedAt, authorization);
+            return result == null ? queryUnavailableAnswer(route.intent(), startedAt) : buildRuleAnswer(question, route, result, startedAt, authorization);
         } catch (RuntimeException e) {
-            LOG.warn("单据实时查询失败 intent={} type={} message={}",
-                    route.intent(), e.getClass().getSimpleName(), e.getMessage());
+            LOG.warn("单据实时查询失败 intent={} type={} message={}", route.intent(), e.getClass().getSimpleName(), e.getMessage());
             return queryUnavailableAnswer(route.intent(), startedAt);
         }
     }
@@ -406,154 +398,161 @@ public class AiServiceImpl implements AiService {
     }
 
     /** 派工受阻追问重新读取领域条件，不以工单概况代替具体失败原因。 */
-    private Map<String, Object> tryContextualDispatchFailure(String question, List<AiChatMessage> history,
-            AiChatRequest request, Map<String, Object> context,
-            com.neuedu.ems.common.AuthorizationContext authorization, long startedAt) {
-        if (aiCommandService == null || authorization == null || !authorization.isSuperAdmin()
-                || !(question.contains("派工") || question.contains("派单"))
-                || !(question.contains("失败") || question.contains("不下") || question.contains("卡")
-                     || question.contains("怎么办") || question.contains("怎么处理"))) return null;
+    private Map<String, Object> tryContextualDispatchFailure(String question, List<AiChatMessage> history, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt) {
+        if (aiCommandService == null || !hasSuperAdminAuthorization(authorization) || !asksDispatchFailure(question)) {
+            return null;
+        }
         String no = recentWorkOrderReference(question, history);
-        if (no == null) return null;
+        if (no == null)
+            return null;
+        return previewDispatchFailure(question, no, request, context, authorization, startedAt);
+    }
+
+    private static boolean asksDispatchFailure(String question) {
+        return hasWorkflowKeyword(question, "派工", "派单") && hasWorkflowKeyword(question, "失败", "不下", "卡", "怎么办", "怎么处理");
+    }
+
+    private Map<String, Object> previewDispatchFailure(String question, String no, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt) {
         try {
-            var preview = aiCommandService.previewExplicit("GENERATE_DISPATCH_ORDER", no, Map.of(),
-                    new AiCommandService.AiCommandPreviewRequest(question, conversationIdOf(request, context), sourceOf(context), context),
-                    authorization);
-            String failures = previewPreconditions(preview).stream()
-                    .filter(item -> item instanceof Map<?, ?> map && !Boolean.TRUE.equals(map.get("passed")))
-                    .map(item -> { var map = (Map<?, ?>) item;
-                        return StringUtils.hasText(textOf(map.get("detail"))) ? textOf(map.get("detail")) : textOf(map.get("label")); })
-                    .collect(java.util.stream.Collectors.joining("；"));
+            var preview = aiCommandService.previewExplicit("GENERATE_DISPATCH_ORDER", no, Map.of(), new AiCommandService.AiCommandPreviewRequest(question, conversationIdOf(request, context), sourceOf(context), context), authorization);
+            String failures = previewPreconditions(preview).stream().filter(item -> item instanceof Map<?, ?> map && !Boolean.TRUE.equals(map.get("passed"))).map(item -> {
+                var map = (Map<?, ?>) item;
+                return StringUtils.hasText(textOf(map.get("detail"))) ? textOf(map.get("detail")) : textOf(map.get("label"));
+            }).collect(java.util.stream.Collectors.joining("；"));
             boolean ready = Boolean.TRUE.equals(preview.get("canExecute"));
-            String message = "已重新核对工单 " + no + " 的派工条件。"
-                    + (ready ? "当前可以派工，核对卡片中的班组和时段后确认执行。"
-                    : "当前受阻：" + failures + "。先处理这些条件，再点“重新检查”；本轮没有执行派工。");
+            String message = "已重新核对工单 " + no + " 的派工条件。" + (ready ? "当前可以派工，核对卡片中的班组和时段后确认执行。" : "当前受阻：" + failures + "。先处理这些条件，再点“重新检查”；本轮没有执行派工。");
             return commandAnswerData(message, preview, "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
         } catch (com.neuedu.ems.exception.BusinessException e) {
-            return commandFailureAnswer("工单 " + no + " 派工核查未通过：" + e.getMessage(),
-                    List.of("查看 " + no + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
+            return commandFailureAnswer("工单 " + no + " 派工核查未通过：" + e.getMessage(), List.of("查看 " + no + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
         }
     }
 
     private static String recentWorkOrderReference(String question, List<AiChatMessage> history) {
         List<AiChatMessage> references = new ArrayList<>(history);
         references.add(new AiChatMessage("user", question));
+        String result = null;
         for (int i = references.size() - 1; i >= 0; i--) {
-            var message = references.get(i);
-            if ("assistant".equals(message.getRole()) && message.getContent().contains("已成功创建生产订单")) return null;
-            if (!"user".equals(message.getRole())) continue;
-            Matcher matcher = WORK_ORDER_REFERENCE.matcher(message.getContent());
-            LinkedHashSet<String> candidates = new LinkedHashSet<>();
-            while (matcher.find()) candidates.add(matcher.group().toUpperCase(Locale.ROOT));
-            if (candidates.size() > 1) return null;
-            if (candidates.size() == 1) return candidates.iterator().next();
-            if (!orderReferences(message.getContent()).isEmpty()) return null;
-        }
-        return null;
-    }
-
-    private Map<String, Object> tryContextualTasks(String question, List<AiChatMessage> history,
-            AiChatRequest request, Map<String, Object> context,
-            com.neuedu.ems.common.AuthorizationContext authorization, long startedAt) {
-        if (aiReadOnlyQueryService == null || authorization == null || !authorization.isSuperAdmin()
-                || !(question.contains("工序任务") || question.contains("先开哪") || question.contains("任务清单"))) return null;
-        if (StringUtils.hasText(deterministicAction(question))) return null;
-        String no = recentWorkOrderReference(question, history);
-        if (no == null) return null;
-        AiQueryResult tasks = queryResource("mfg_task", Map.of("workOrderNo", no), authorization);
-        var route = new AiIntentRouter.RouteResult("work_order_tasks", Map.of("workOrderNo", no), true);
-        Map<String, Object> answer = buildRuleAnswer(question, route, tasks, startedAt, authorization);
-        List<Map<String, Object>> observations = new ArrayList<>();
-        observations.add(observationOf("mfg_task", route.params(), tasks));
-        String advice = "工单 " + no + " 当前查到 " + orEmptyList(tasks.getRows()).size() + " 道工序任务。";
-        List<Map<String, Object>> actions = new ArrayList<>();
-        if (aiCommandService != null) {
-            for (Map<String, Object> task : orEmptyList(tasks.getRows()).stream().limit(8).toList()) {
-                if (!"WAIT_START".equals(textOf(task.get("status")))) continue;
-                String taskNo = textOf(task.get("taskNo"));
-                if (!StringUtils.hasText(taskNo)) continue;
-                try {
-                    var check = aiCommandService.previewExplicit("START_TASK", taskNo, Map.of(),
-                            new AiCommandService.AiCommandPreviewRequest(question, conversationIdOf(request, context), sourceOf(context), context), authorization);
-                    observations.add(Map.of("resource", "task_preflight", "taskNo", taskNo,
-                            "canExecute", Boolean.TRUE.equals(check.get("canExecute")), "checks", previewPreconditions(check)));
-                    if (Boolean.TRUE.equals(check.get("canExecute"))) {
-                        advice += "已核查可先开工 " + taskNo + "（" + textOf(task.get("operationName")) + "），确认后才执行。";
-                        actions.add(Map.of("code", "START_TASK", "label", "开工 " + taskNo, "kind", "command",
-                                "params", Map.of("targetNo", taskNo, "capability", "START_TASK")));
-                        break;
-                    }
-                } catch (RuntimeException e) {
-                    observations.add(Map.of("resource", "task_preflight", "taskNo", taskNo, "error", "本次开工条件未能核查，不得判为可开工"));
-                }
+            WorkOrderReference reference = workOrderReferenceOf(references.get(i));
+            if (reference.stop()) {
+                result = reference.number();
+                break;
             }
         }
-        boolean allFinished = !orEmptyList(tasks.getRows()).isEmpty()
-                && tasks.getRows().stream().allMatch(task -> "FINISHED".equals(textOf(task.get("status")))) ;
-        if (allFinished) advice += "所有已查询工序均已完成，无需再次开工。可继续核对当前订单进度和待检验单。";
-        else if (actions.isEmpty()) advice += "本次没有确认可直接开工的任务；请核对任务状态、前序和工位，勿重复或越序开工。";
-        answer.put("answer", advice);
-        answer.put("actions", actions);
-        answer.put("suggestions", List.of("查询 " + no + " 关联的待检验单", "查看 " + no + " 的当前进度"));
-        var refined = allFinished ? null : revisePlan(question
-                + "。仅依据任务与开工预检回答，单号写全；可办理能力限于本轮actions，不得声称可以办理未提供的动作。", observations);
-        if (refined != null && refinesChatAnswer(refined)) answer.put("answer", refined.answer());
-        answer.put("toolRounds", observations.size());
-        answer.put("elapsedMs", System.currentTimeMillis() - startedAt);
-        return answer;
+        return result;
+    }
+
+    private record WorkOrderReference(boolean stop, String number) { }
+
+    private static WorkOrderReference workOrderReferenceOf(AiChatMessage message) {
+        WorkOrderReference result = new WorkOrderReference(false, null);
+        if ("assistant".equals(message.getRole()) && message.getContent().contains("已成功创建生产订单")) {
+            result = new WorkOrderReference(true, null);
+        } else if ("user".equals(message.getRole())) {
+            result = userWorkOrderReference(message.getContent());
+        }
+        return result;
+    }
+
+    private static WorkOrderReference userWorkOrderReference(String content) {
+        Matcher matcher = WORK_ORDER_REFERENCE.matcher(content);
+        LinkedHashSet<String> candidates = new LinkedHashSet<>();
+        while (matcher.find()) {
+            candidates.add(matcher.group().toUpperCase(Locale.ROOT));
+        }
+        if (candidates.size() == 1) {
+            return new WorkOrderReference(true, candidates.iterator().next());
+        }
+        return new WorkOrderReference(candidates.size() > 1 || !orderReferences(content).isEmpty(), null);
+    }
+
+    private boolean canQueryContextualTasks(String question, com.neuedu.ems.common.AuthorizationContext authorization) {
+        if (aiReadOnlyQueryService == null || !hasSuperAdminAuthorization(authorization) || !hasWorkflowKeyword(question, "工序任务", "先开哪", "任务清单")) {
+            return false;
+        }
+        return !StringUtils.hasText(deterministicAction(question));
+    }
+
+    private String startableTaskAdvice(AiQueryResult tasks, String question, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, List<Map<String, Object>> observations, List<Map<String, Object>> actions) {
+        if (aiCommandService == null) {
+            return "";
+        }
+        for (Map<String, Object> task : orEmptyList(tasks.getRows()).stream().limit(8).toList()) {
+            String advice = taskPreflightAdvice(task, question, request, context, authorization, observations, actions);
+            if (advice != null) {
+                return advice;
+            }
+        }
+        return "";
+    }
+
+    private String taskPreflightAdvice(Map<String, Object> task, String question, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, List<Map<String, Object>> observations, List<Map<String, Object>> actions) {
+        if (!"WAIT_START".equals(textOf(task.get("status")))) {
+            return null;
+        }
+        String taskNo = textOf(task.get("taskNo"));
+        if (!StringUtils.hasText(taskNo)) {
+            return null;
+        }
+        String advice = null;
+        try {
+            var check = aiCommandService.previewExplicit("START_TASK", taskNo, Map.of(), new AiCommandService.AiCommandPreviewRequest(question, conversationIdOf(request, context), sourceOf(context), context), authorization);
+            observations.add(Map.of("resource", "task_preflight", "taskNo", taskNo, "canExecute", Boolean.TRUE.equals(check.get("canExecute")), "checks", previewPreconditions(check)));
+            if (Boolean.TRUE.equals(check.get("canExecute"))) {
+                advice = "已核查可先开工 " + taskNo + "（" + textOf(task.get("operationName")) + "），确认后才执行。";
+                actions.add(Map.of("code", "START_TASK", "label", "开工 " + taskNo, "kind", "command", "params", Map.of("targetNo", taskNo, "capability", "START_TASK")));
+            }
+        } catch (RuntimeException e) {
+            observations.add(Map.of("resource", "task_preflight", "taskNo", taskNo, "error", "本次开工条件未能核查，不得判为可开工"));
+        }
+        return advice;
     }
 
     /** 省略订单号的流程追问，以本轮数据库状态为准，不沿用上一轮的静态回答。 */
-    private Map<String, Object> tryContextualOrderFlow(String question, List<AiChatMessage> history,
-                                                      AiChatRequest request, Map<String, Object> context,
-                                                      com.neuedu.ems.common.AuthorizationContext authorization,
-                                                      long startedAt) {
-        if (intentRouter == null || authorization == null || !authorization.isSuperAdmin()) {
+    private Map<String, Object> tryContextualOrderFlow(String question, List<AiChatMessage> history, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt) {
+        if (intentRouter == null || !hasSuperAdminAuthorization(authorization)) {
             return null;
         }
         String text = question.trim();
-        boolean releaseComponents = text.contains("工单") && text.contains("下达")
-                && (text.contains("这些") || text.contains("这三张") || text.contains("三张")
-                || text.contains("这几个") || text.contains("这几张")
-                || text.contains("全部") || text.contains("所有") || text.contains("都"));
-        boolean followComponents = text.contains("组件") && (text.contains("完成") || text.contains("继续"));
-        boolean askNext = (text.contains("下一步") || text.contains("接下来") || text.contains("然后呢")
-                || text.contains("怎么办") || text.contains("干什么") || text.contains("怎么做")
-                || text.contains("到哪一步") || text.contains("进行到") || text.contains("做到哪")
-                || followComponents) && !text.contains("检验")
-                && !text.contains("库存") && !text.contains("产线") && !text.contains("排程");
-        if (!releaseComponents && !askNext) {
+        boolean askNext = asksOrderNextStep(text);
+        if ((!asksComponentRelease(text) && !askNext) || WORK_ORDER_REFERENCE.matcher(text).find()) {
             return null;
         }
-        // 用户明确说了工单号时沿用单据路由；这里只处理省略主语的对话。
-        if (WORK_ORDER_REFERENCE.matcher(text).find()) {
+        return contextualOrderAnswer(question, text, history, request, context, authorization, startedAt, askNext);
+    }
+
+        private record ContextualOrderReference(String orderNo, Map<String, Object> clarification) { }
+
+    private Map<String, Object> contextualOrderAnswer(String question, String text, List<AiChatMessage> history, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt, boolean askNext) {
+        ContextualOrderReference reference = resolveContextualOrder(text, history, authorization, startedAt);
+        if (reference.clarification() != null) {
+            return reference.clarification();
+        }
+        if (!StringUtils.hasText(reference.orderNo())) {
             return null;
         }
+        return answerOrderProgress(question, reference.orderNo(), request, context, authorization, startedAt, askNext);
+    }
+
+    private ContextualOrderReference resolveContextualOrder(String text, List<AiChatMessage> history, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt) {
         String orderNo = recentOrderReference(text, history);
-        if (orderReferences(text).isEmpty() && aiReadOnlyQueryService != null
-                && !text.matches(".*(另一个订单|另一张订单|上一张订单|前一个订单).*")) {
+        if (orderReferences(text).isEmpty() && aiReadOnlyQueryService != null && !text.matches(".*(另一个订单|另一张订单|上一张订单|前一个订单).*")) {
             String workOrderNo = recentWorkOrderReference(text, history);
             if (workOrderNo != null) {
                 var relation = queryResource("mfg_work_order", Map.of("workOrderNo", workOrderNo), authorization);
-                var related = orEmptyList(relation.getRows()).stream()
-                        .filter(row -> workOrderNo.equals(textOf(row.get("workOrderNo"))))
-                        .map(row -> textOf(row.get("productionOrderNo")))
-                        .filter(StringUtils::hasText).distinct().toList();
+                var related = orEmptyList(relation.getRows()).stream().filter(row -> workOrderNo.equals(textOf(row.get("workOrderNo")))).map(row -> textOf(row.get("productionOrderNo"))).filter(StringUtils::hasText).distinct().toList();
                 // 当前工单优先于更早订单；查不到归属时不回退到旧订单。
                 if (related.size() != 1) {
-                    return buildClarifyAnswer(new com.neuedu.ems.service.ai.AiPlan("clarify", "", Map.of(),
-                            "本轮未能确认工单 " + workOrderNo + " 唯一所属的生产订单，请提供订单号；尚未执行任何操作。",
-                            "", List.of("查询 " + workOrderNo + " 的当前进度"), "工单与订单关系未能确定"), startedAt);
+                    return new ContextualOrderReference(null, buildClarifyAnswer(new com.neuedu.ems.service.ai.AiPlan("clarify", "", Map.of(), "本轮未能确认工单 " + workOrderNo + " 唯一所属的生产订单，请提供订单号；尚未执行任何操作。", "", List.of("查询 " + workOrderNo + " 的当前进度"), "工单与订单关系未能确定"), startedAt));
                 }
                 orderNo = related.getFirst();
             }
         }
-        if (!StringUtils.hasText(orderNo)) {
-            return null;
-        }
+        return new ContextualOrderReference(orderNo, null);
+    }
+
+    private Map<String, Object> answerOrderProgress(String question, String orderNo, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt, boolean askNext) {
         com.neuedu.ems.service.ai.AiQueryAccessPolicy.requireIntent(authorization, "order_progress");
-        AiIntentRouter.RouteResult route = new AiIntentRouter.RouteResult(
-                "order_progress", Map.of("orderNo", orderNo), true);
+        AiIntentRouter.RouteResult route = new AiIntentRouter.RouteResult("order_progress", Map.of("orderNo", orderNo), true);
         AiQueryResult current = executeRoute(route);
         if (current == null) {
             return queryUnavailableAnswer("order_progress", startedAt);
@@ -561,106 +560,50 @@ public class AiServiceImpl implements AiService {
         if (current.getRows() == null || current.getRows().isEmpty()) {
             return null;
         }
-        if (askNext) {
-            return contextualNextAnswer(question, route, current, startedAt, authorization);
-        }
-        return previewContextualComponentRelease(question, request, context, authorization,
-                startedAt, route, current);
+        return askNext ? contextualNextAnswer(question, route, current, startedAt, authorization) : previewContextualComponentRelease(question, request, context, authorization, startedAt, route, current);
+    }
+
+    private static boolean asksComponentRelease(String text) {
+        return text.contains("工单") && text.contains("下达") && hasWorkflowKeyword(text, "这些", "这三张", "三张", "这几个", "这几张", "全部", "所有", "都");
+    }
+
+    private static boolean asksOrderNextStep(String text) {
+        boolean followComponents = text.contains("组件") && hasWorkflowKeyword(text, "完成", "继续");
+        boolean next = hasWorkflowKeyword(text, "下一步", "接下来", "然后呢", "怎么办", "干什么", "怎么做", "到哪一步", "进行到", "做到哪") || followComponents;
+        return next && !hasWorkflowKeyword(text, "检验", "库存", "产线", "排程");
     }
 
     /** 对流程追问补查具体工单的领域处置方案，再让模型依据真实观测解释。 */
-    private Map<String, Object> contextualNextAnswer(String question, AiIntentRouter.RouteResult route,
-            AiQueryResult current, long startedAt,
-            com.neuedu.ems.common.AuthorizationContext authorization) {
+    private Map<String, Object> contextualNextAnswer(String question, AiIntentRouter.RouteResult route, AiQueryResult current, long startedAt, com.neuedu.ems.common.AuthorizationContext authorization) {
         Map<String, Object> answer = buildRuleAnswer(question, route, current, startedAt, authorization);
         List<Map<String, Object>> observations = new ArrayList<>();
         observations.add(observationOf("order_progress", route.params(), current));
         List<String> details = new ArrayList<>();
         List<Map<String, Object>> actions = new ArrayList<>();
-        LinkedHashSet<String> targets = new LinkedHashSet<>();
-        if (current.getBlocks() != null) {
-            for (AiBlock block : current.getBlocks()) {
-                if (!"组件工单".equals(block.getTitle()) || block.getRows() == null) continue;
-                for (Map<String, Object> row : block.getRows()) {
-                    String state = textOf(row.get("status"));
-                    String no = textOf(row.get("workOrderNo"));
-                    // 状态口径要同时认英文码和界面中文：查询层输出的是「已完成」，只判 FINISHED
-                    // 会把已完工的组件工单当成待办，进而给出「尚未生成工序任务」这类错答。
-                    if (StringUtils.hasText(no) && !FINISHED_WORK_ORDER_STATES.contains(state)) {
-                        targets.add(no);
-                    }
-                }
-            }
-        }
-        // 组件已完成或无需组件时，核对根工单；不将已完成订单重新拉回开工。
-        if (targets.isEmpty() && current.getBlocks() != null) {
-            for (AiBlock block : current.getBlocks()) {
-                if (block.getRows() == null) continue;
-                for (Map<String, Object> row : block.getRows()) {
-                    if (row.containsKey("workOrderStatus")
-                            && PENDING_WORK_ORDER_STATES.contains(textOf(row.get("workOrderStatus")))) {
-                        String no = textOf(row.get("workOrderNo"));
-                        if (StringUtils.hasText(no)) targets.add(no);
-                    }
-                }
-            }
-        }
+        LinkedHashSet<String> targets = pendingContextualWorkOrders(current);
         // 生产结束后仍可能待入库、出货检验或发货，沿用领域建议，不让模型猜状态。
         if (targets.isEmpty()) {
             Object available = answer.get("actions");
             if (available instanceof List<?> items) {
-                items.stream().filter(item -> item instanceof Map<?, ?> action
-                                && "command".equals(action.get("kind")))
-                        .map(item -> (Map<?, ?>) item).findFirst().ifPresent(action ->
-                                answer.put("answer", "下一步：" + action.get("label")
-                                        + "，先核对办理预览中的条件和影响。\n" + answer.get("answer")));
+                items.stream().filter(item -> item instanceof Map<?, ?> action && "command".equals(action.get("kind"))).map(item -> (Map<?, ?>) item).findFirst().ifPresent(action -> answer.put("answer", "下一步：" + action.get("label") + "，先核对办理预览中的条件和影响。\n" + answer.get("answer")));
             }
             return answer;
         }
         for (String no : targets.stream().limit(4).toList()) {
-            if (question.contains("派") && aiCommandService != null) {
-                try {
-                    var preview = aiCommandService.previewExplicit("GENERATE_DISPATCH_ORDER", no, Map.of(),
-                            new AiCommandService.AiCommandPreviewRequest(question, null, "WORKBENCH", Map.of()), authorization);
-                    if (preview != null) {
-                        Map<String, Object> check = new LinkedHashMap<>();
-                        check.put("resource", "dispatch_preflight");
-                        check.put("workOrderNo", no);
-                        check.put("canExecute", preview.get("canExecute"));
-                        check.put("checks", preview.get("preconditions"));
-                        observations.add(check);
-                        if (!Boolean.TRUE.equals(preview.get("canExecute"))) {
-                            List<String> reasons = new ArrayList<>();
-                            for (Object item : previewPreconditions(preview)) {
-                                if (item instanceof Map<?, ?> condition && Boolean.FALSE.equals(condition.get("passed"))) {
-                                    reasons.add(textOf(condition.get("label")) + "：" + textOf(condition.get("detail")));
-                                }
-                            }
-                            if (!reasons.isEmpty()) details.add(no + " 派工预检：" + String.join("；", reasons));
-                        }
-                    }
-                } catch (RuntimeException e) {
-                    observations.add(Map.of("resource", "dispatch_preflight", "workOrderNo", no,
-                            "error", "本轮派工预览未能完成，不能确定派工失败的具体原因"));
-                }
-            }
+            observeDispatchPreflight(question, no, authorization, observations, details);
             com.neuedu.ems.service.ai.AiQueryAccessPolicy.requireIntent(authorization, "work_order_start_plan");
             var detailRoute = new AiIntentRouter.RouteResult("work_order_start_plan", Map.of("workOrderNo", no), true);
             AiQueryResult detail = executeRoute(detailRoute);
             if (detail == null) {
                 details.add(no + "：本次条件核查读取失败，尚未确定下一步，未执行任何操作。");
-                observations.add(Map.of("resource", "work_order_start_plan", "workOrderNo", no,
-                        "error", "本轮数据读取失败，不得推测状态或建议直接执行"));
+                observations.add(Map.of("resource", "work_order_start_plan", "workOrderNo", no, "error", "本轮数据读取失败，不得推测状态或建议直接执行"));
                 continue;
             }
             Map<String, Object> observed = observationOf("work_order_start_plan", detailRoute.params(), detail);
-            List<Map<String, Object>> steps = orEmptyList(detail.getBlocks()).stream()
-                    .filter(block -> "处置步骤".equals(block.getTitle()))
-                    .flatMap(block -> orEmptyList(block.getRows()).stream()).limit(6).toList();
+            List<Map<String, Object>> steps = orEmptyList(detail.getBlocks()).stream().filter(block -> "处置步骤".equals(block.getTitle())).flatMap(block -> orEmptyList(block.getRows()).stream()).limit(6).toList();
             observed.put("verifiedNextSteps", steps);
             observations.add(observed);
-            String nextSteps = steps.stream().map(step -> textOf(step.get("action")) + "；"
-                    + textOf(step.get("reason"))).collect(java.util.stream.Collectors.joining("\n"));
+            String nextSteps = steps.stream().map(step -> textOf(step.get("action")) + "；" + textOf(step.get("reason"))).collect(java.util.stream.Collectors.joining("\n"));
             details.add(no + "：" + detail.getSummary() + (steps.isEmpty() ? "" : "\n" + nextSteps));
             actions.addAll(buildActions(detailRoute.intent(), detailRoute.params(), detail, authorization));
         }
@@ -668,25 +611,7 @@ public class AiServiceImpl implements AiService {
             answer.put("answer", "已重新核对订单及相关工单，当前可处理事项：\n" + String.join("\n", details));
             answer.put("actions", dedupeActions(actions));
         }
-        boolean keepDomainAnswer = question.contains("完成") || question.contains("到哪")
-                || question.contains("进行下一步") || question.contains("下一步");
-        var refined = keepDomainAnswer ? null : revisePlan("用户在跟进当前订单：" + question
-                + "。请直接回答这次问题，先说具体下一步及原因，再给出可办理的建议。"
-                + "只依据本轮观测下结论；观测里没有的环节就直说本轮没查到，不要臆测用户说过什么，"
-                + "不要重述整份订单概况，不要声称已执行或编造质检结果。", observations);
-        java.util.Set<String> allowedNumbers = documentNumbers(current);
-        if (refined != null && refinesChatAnswer(refined) && !mentionsOtherDocument(refined.answer(), allowedNumbers)) {
-            answer.put("answer", refined.answer());
-            answer.put("model", "PLANNER+DATABASE+TOOL");
-        }
-        if (refined != null && refined.suggestions() != null) {
-            List<String> kept = refined.suggestions().stream()
-                    .filter(item -> !mentionsOtherDocument(item, allowedNumbers))
-                    .toList();
-            if (!kept.isEmpty()) {
-                answer.put("suggestions", kept);
-            }
-        }
+        refineContextualNextAnswer(question, current, answer, observations);
         answer.put("answer", "当前只核对你指定的这张订单，不引用其他订单。\n" + answer.get("answer"));
         answer.put("toolRounds", observations.size());
         answer.put("elapsedMs", System.currentTimeMillis() - startedAt);
@@ -695,10 +620,15 @@ public class AiServiceImpl implements AiService {
 
     /** 当前话语优先；省略时仅继承最近一条明确提及单个订单的消息。 */
     private static String recentOrderReference(String question, List<AiChatMessage> history) {
-        if (question.matches(".*(另一个订单|另一张订单|上一张订单|前一个订单).*")) return null;
+        if (question.matches(".*(另一个订单|另一张订单|上一张订单|前一个订单).*"))
+            return null;
         if (!orderReferences(question).isEmpty()) {
             return SpokenDocumentResolver.lastOrderNumber(question);
         }
+        return historyOrderReference(history);
+    }
+
+    private static String historyOrderReference(List<AiChatMessage> history) {
         for (int i = history.size() - 1; i >= 0; i--) {
             AiChatMessage message = history.get(i);
             if (!"user".equalsIgnoreCase(message.getRole())) {
@@ -747,12 +677,7 @@ public class AiServiceImpl implements AiService {
                 continue;
             }
             for (Map<String, Object> row : block.getRows()) {
-                for (String key : List.of("productionOrderNo", "workOrderNo", "planNo", "docNo")) {
-                    String value = textOf(row.get(key));
-                    if (StringUtils.hasText(value)) {
-                        numbers.add(value.toUpperCase(Locale.ROOT));
-                    }
-                }
+                collectDocumentNumbers(row, numbers);
             }
         }
         return numbers;
@@ -774,57 +699,62 @@ public class AiServiceImpl implements AiService {
      * 用户只说订单号和动作时，对上这张订单里真实的领料单或领用复验单。
      * 转线边认待确认领料单，复验认这些工单上还没提交的检验单。
      */
-    private Map<String, Object> tryOrderDocumentAction(String question, List<AiChatMessage> history,
-                                                       AiChatRequest request, Map<String, Object> context,
-                                                       com.neuedu.ems.common.AuthorizationContext authorization,
-                                                       long startedAt) {
+    private Map<String, Object> tryOrderDocumentAction(String question, List<AiChatMessage> history, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt) {
         if (aiCommandService == null || aiReadOnlyQueryService == null || authorization == null) {
             return null;
         }
         String text = question == null ? "" : question.trim();
         List<String> actions = orderActions(text);
-        if (actions.isEmpty()) {
+        if (actions.isEmpty() || referencesOrderSubdocument(text)) {
             return null;
         }
-        if (WORK_ORDER_REFERENCE.matcher(text).find()
-                || text.matches("(?s).*-(?:DO|MI|QI|IN|SI)-\\d{8}-\\d{3,}.*")) {
-            return null;
-        }
+        return previewContextualOrderActions(question, text, actions, history, request, context, authorization, startedAt);
+    }
+
+    private static boolean referencesOrderSubdocument(String text) {
+        return WORK_ORDER_REFERENCE.matcher(text).find() || text.matches("(?s).*-(?:DO|MI|QI|IN|SI)-\\d{8}-\\d{3,}.*");
+    }
+
+    private Map<String, Object> previewContextualOrderActions(String question, String text, List<String> actions, List<AiChatMessage> history, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt) {
         String orderNo = recentOrderReference(text, history);
         if (!StringUtils.hasText(orderNo)) {
             return null;
         }
         AiQueryResult workOrders = queryResource("mfg_work_order", Map.of("productionOrderNo", orderNo), authorization);
-        List<Map<String, Object>> orderWorkOrders = orEmptyList(workOrders.getRows()).stream()
-                .filter(row -> orderNo.equalsIgnoreCase(textOf(row.get("productionOrderNo"))))
-                .toList();
+        List<Map<String, Object>> orderWorkOrders = orEmptyList(workOrders.getRows()).stream().filter(row -> orderNo.equalsIgnoreCase(textOf(row.get("productionOrderNo")))).toList();
         List<com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput> steps = new ArrayList<>();
         List<String> notes = new ArrayList<>();
         for (String action : actions) {
             appendOrderAction(action, actions, text, orderNo, orderWorkOrders, steps, notes, authorization);
         }
         if (steps.isEmpty()) {
-            String message = notes.isEmpty()
-                    ? "订单 " + orderNo + " 对不上可办理的单据。" : String.join("\n", notes);
-            return commandFailureAnswer(message, List.of("查询 " + orderNo + " 的当前进度"),
-                    "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
+            String message = notes.isEmpty() ? "订单 " + orderNo + " 对不上可办理的单据。" : String.join("\n", notes);
+            return commandFailureAnswer(message, List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
         }
+        return previewOrderSequence(question, orderNo, steps, notes, request, context, authorization, startedAt);
+    }
+
+    private Map<String, Object> previewOrderSequence(String question, String orderNo, List<com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput> steps, List<String> notes, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt) {
         try {
-            Map<String, Object> sequence = aiCommandService.previewSequenceExplicit(steps, question,
-                    conversationIdOf(request, context), sourceOf(context), authorization);
+            Map<String, Object> sequence = aiCommandService.previewSequenceExplicit(steps, question, conversationIdOf(request, context), sourceOf(context), authorization);
             Map<String, Object> answer = buildSequenceAnswer(sequence, startedAt);
-            answer.put("answer", "已按订单 " + orderNo + " 对上要办的单据，不需要再手填下级单号。\n"
-                    + (notes.isEmpty() ? "" : String.join("\n", notes) + "\n") + answer.get("answer"));
+            answer.put("answer", "已按订单 " + orderNo + " 对上要办的单据，不需要再手填下级单号。\n" + (notes.isEmpty() ? "" : String.join("\n", notes) + "\n") + answer.get("answer"));
             return answer;
         } catch (com.neuedu.ems.exception.BusinessException e) {
-            return commandFailureAnswer("订单 " + orderNo + " 的办理没有生成预览：" + e.getMessage(),
-                    List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
+            return commandFailureAnswer("订单 " + orderNo + " 的办理没有生成预览：" + e.getMessage(), List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
         }
     }
 
     /** 一句话里点名的办理动作，按实际生产顺序排列。说了工单号或领料单号时不在这里猜。 */
     private static List<String> orderActions(String text) {
         List<String> actions = new ArrayList<>();
+        appendOrderPreparationActions(text, actions);
+        appendOrderExecutionActions(text, actions);
+        appendOrderDeliveryActions(text, actions);
+        return actions;
+    }
+
+    private static void appendOrderPreparationActions(String text, List<String> actions) {
         if (text.contains("安排排产")) {
             actions.add("SCHEDULE_PRODUCTION_ORDER");
         }
@@ -843,6 +773,9 @@ public class AiServiceImpl implements AiService {
         if (text.contains("转线边")) {
             actions.add("TRANSFER_TO_LINE_SIDE");
         }
+    }
+
+    private static void appendOrderExecutionActions(String text, List<String> actions) {
         if (text.contains("生成派工") || text.contains("创建派工")) {
             actions.add("GENERATE_DISPATCH_ORDER");
         }
@@ -861,6 +794,9 @@ public class AiServiceImpl implements AiService {
         if (text.contains("审核报工")) {
             actions.add("AUDIT_WORK_REPORT");
         }
+    }
+
+    private static void appendOrderDeliveryActions(String text, List<String> actions) {
         if (text.contains("生产检验") || text.contains("终检")) {
             actions.add("INSPECT_PRODUCTION");
         }
@@ -879,7 +815,6 @@ public class AiServiceImpl implements AiService {
         if (text.contains("确认发货")) {
             actions.add("CONFIRM_SALES_OUTBOUND");
         }
-        return actions;
     }
 
     private void appendOrderAction(String action, List<String> actions, String text, String orderNo,
@@ -933,13 +868,9 @@ public class AiServiceImpl implements AiService {
         notes.add(label + "：" + String.join("、", numbers));
     }
 
-    private void addIssueSteps(String text, List<Map<String, Object>> open,
-                               List<com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput> steps,
-                               List<String> notes, String orderNo) {
-        List<Map<String, Object>> components = open.stream()
-                .filter(row -> "COMPONENT".equals(textOf(row.get("workOrderType")))).toList();
-        List<Map<String, Object>> targets = text.contains("半成品") || !components.isEmpty()
-                ? (components.isEmpty() ? preferRoots(open) : components) : preferRoots(open);
+    private void addIssueSteps(String text, List<Map<String, Object>> open, List<com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput> steps, List<String> notes, String orderNo) {
+        List<Map<String, Object>> components = open.stream().filter(row -> "COMPONENT".equals(textOf(row.get("workOrderType")))).toList();
+        List<Map<String, Object>> targets = components.isEmpty() ? preferRoots(open) : components;
         if (text.contains("原料")) {
             targets = preferRoots(open);
         }
@@ -949,14 +880,12 @@ public class AiServiceImpl implements AiService {
         } else if (text.contains("原料")) {
             params.put("warehouseType", "RAW");
         }
-        List<String> numbers = targets.stream().map(row -> textOf(row.get("workOrderNo")))
-                .filter(StringUtils::hasText).distinct().toList();
+        List<String> numbers = targets.stream().map(row -> textOf(row.get("workOrderNo"))).filter(StringUtils::hasText).distinct().toList();
         if (numbers.isEmpty()) {
             notes.add("订单 " + orderNo + " 没有可以生成领料单的工单。");
             return;
         }
-        numbers.forEach(number -> steps.add(new com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput(
-                "GENERATE_MATERIAL_ISSUE", number, params)));
+        numbers.forEach(number -> steps.add(new com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput("GENERATE_MATERIAL_ISSUE", number, params)));
         notes.add("领料工单：" + String.join("、", numbers));
     }
 
@@ -1135,76 +1064,49 @@ public class AiServiceImpl implements AiService {
     }
 
     /** 订单上的派工：生成对已下达的整机工单，下达承接刚生成的派工单。 */
-    private Map<String, Object> previewOrderDispatch(String question, AiChatRequest request,
-                                                     Map<String, Object> context,
-                                                     com.neuedu.ems.common.AuthorizationContext authorization,
-                                                     long startedAt, String orderNo,
-                                                     List<Map<String, Object>> workOrders,
-                                                     boolean generate, boolean release) {
-        List<Map<String, Object>> active = workOrders.stream()
-                .filter(row -> List.of("RELEASED", "RUNNING").contains(textOf(row.get("status"))))
-                .sorted((left, right) -> {
-                    int type = Boolean.compare(!"ROOT".equals(textOf(left.get("workOrderType"))),
-                            !"ROOT".equals(textOf(right.get("workOrderType"))));
-                    return type != 0 ? type : textOf(left.get("workOrderNo")).compareTo(textOf(right.get("workOrderNo")));
-                })
-                .toList();
-        List<Map<String, Object>> targets = active.stream()
-                .anyMatch(row -> "ROOT".equals(textOf(row.get("workOrderType"))))
-                ? active.stream().filter(row -> "ROOT".equals(textOf(row.get("workOrderType")))).toList()
-                : active;
+    private Map<String, Object> previewOrderDispatch(String question, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt, String orderNo, List<Map<String, Object>> workOrders, boolean generate, boolean release) {
+        List<Map<String, Object>> active = workOrders.stream().filter(row -> List.of("RELEASED", "RUNNING").contains(textOf(row.get("status")))).sorted(workOrderPriority("workOrderNo")).toList();
+        List<Map<String, Object>> targets = active.stream().anyMatch(row -> "ROOT".equals(textOf(row.get("workOrderType")))) ? active.stream().filter(row -> "ROOT".equals(textOf(row.get("workOrderType")))).toList() : active;
         if (targets.isEmpty()) {
-            return commandFailureAnswer("订单 " + orderNo + " 没有已下达、可以派工的工单。",
-                    List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
+            return commandFailureAnswer("订单 " + orderNo + " 没有已下达、可以派工的工单。", List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
         }
         List<String> names = targets.stream().map(row -> textOf(row.get("workOrderNo"))).filter(StringUtils::hasText).toList();
         if (!generate && release) {
-            return commandFailureAnswer("订单 " + orderNo + " 只说了下达派工。请连同生成一起说，系统会先给 "
-                    + String.join("、", names) + " 生成派工单，再下达刚生成的那张。",
-                    List.of("完成订单 " + orderNo + " 的生成派工单和下达派工单"),
-                    "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
+            return commandFailureAnswer("订单 " + orderNo + " 只说了下达派工。请连同生成一起说，系统会先给 " + String.join("、", names) + " 生成派工单，再下达刚生成的那张。", List.of("完成订单 " + orderNo + " 的生成派工单和下达派工单"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
         }
         List<com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput> steps = new ArrayList<>();
         for (String workOrderNo : names) {
-            steps.add(new com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput(
-                    "GENERATE_DISPATCH_ORDER", workOrderNo, Map.of()));
+            steps.add(new com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput("GENERATE_DISPATCH_ORDER", workOrderNo, Map.of()));
             if (release) {
-                steps.add(new com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput(
-                        "RELEASE_DISPATCH_ORDER", null, Map.of()));
+                steps.add(new com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput("RELEASE_DISPATCH_ORDER", null, Map.of()));
             }
         }
+        return presentOrderDispatch(question, request, context, authorization, startedAt, new OrderSequencePresentation(orderNo, names, steps), release);
+    }
+
+    private Map<String, Object> presentOrderDispatch(String question, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt, OrderSequencePresentation presentation, boolean release) {
+        String orderNo = presentation.orderNo();
+        List<String> names = presentation.names();
+        var steps = presentation.steps();
         if (steps.isEmpty()) {
             return null;
         }
         try {
-            Map<String, Object> sequence = aiCommandService.previewSequenceExplicit(steps, question,
-                    conversationIdOf(request, context), sourceOf(context), authorization);
+            Map<String, Object> sequence = aiCommandService.previewSequenceExplicit(steps, question, conversationIdOf(request, context), sourceOf(context), authorization);
             Map<String, Object> answer = buildSequenceAnswer(sequence, startedAt);
-            answer.put("answer", "已按订单 " + orderNo + " 对上整机工单 " + String.join("、", names)
-                    + "。" + (release ? "先生成派工单，再下达刚生成的那张。" : "本次只生成派工单。") + "\n"
-                    + answer.get("answer"));
+            answer.put("answer", "已按订单 " + orderNo + " 对上整机工单 " + String.join("、", names) + "。" + (release ? "先生成派工单，再下达刚生成的那张。" : "本次只生成派工单。") + "\n" + answer.get("answer"));
             return answer;
         } catch (com.neuedu.ems.exception.BusinessException e) {
-            return commandFailureAnswer("订单 " + orderNo + " 的派工没有生成预览：" + e.getMessage(),
-                    List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
+            return commandFailureAnswer("订单 " + orderNo + " 的派工没有生成预览：" + e.getMessage(), List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
         }
     }
 
     /** 把订单上的待确认领料单排成转线边预览。整机原料单放前面，半成品复验没过的会在卡片里标红。 */
-    private Map<String, Object> previewOrderTransfers(String question, AiChatRequest request,
-                                                      Map<String, Object> context,
-                                                      com.neuedu.ems.common.AuthorizationContext authorization,
-                                                      long startedAt, String orderNo,
-                                                      List<Map<String, Object>> issues) {
+    private Map<String, Object> previewOrderTransfers(String question, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt, String orderNo, List<Map<String, Object>> issues) {
         if (issues.isEmpty()) {
-            return commandFailureAnswer("订单 " + orderNo + " 没有待转线边的领料单。先生成领料单；已经转完的不会再出现在这里。",
-                    List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
+            return commandFailureAnswer("订单 " + orderNo + " 没有待转线边的领料单。先生成领料单；已经转完的不会再出现在这里。", List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
         }
-        issues.sort((left, right) -> {
-            int type = Boolean.compare(!"ROOT".equals(textOf(left.get("workOrderType"))),
-                    !"ROOT".equals(textOf(right.get("workOrderType"))));
-            return type != 0 ? type : textOf(left.get("outboundNo")).compareTo(textOf(right.get("outboundNo")));
-        });
+        issues.sort(workOrderPriority("outboundNo"));
         List<com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput> steps = new ArrayList<>();
         List<String> names = new ArrayList<>();
         for (Map<String, Object> issue : issues) {
@@ -1212,114 +1114,102 @@ public class AiServiceImpl implements AiService {
             if (!StringUtils.hasText(outboundNo)) {
                 continue;
             }
-            steps.add(new com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput(
-                    "TRANSFER_TO_LINE_SIDE", outboundNo, Map.of()));
+            steps.add(new com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput("TRANSFER_TO_LINE_SIDE", outboundNo, Map.of()));
             names.add(textOf(issue.get("workOrderNo")) + " → " + outboundNo);
         }
         if (steps.isEmpty()) {
             return null;
         }
+        return presentOrderTransfers(question, request, context, authorization, startedAt, new OrderSequencePresentation(orderNo, names, steps));
+    }
+
+    private Map<String, Object> presentOrderTransfers(String question, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt, OrderSequencePresentation presentation) {
+        String orderNo = presentation.orderNo();
+        List<String> names = presentation.names();
+        var steps = presentation.steps();
         try {
-            Map<String, Object> sequence = aiCommandService.previewSequenceExplicit(steps, question,
-                    conversationIdOf(request, context), sourceOf(context), authorization);
+            Map<String, Object> sequence = aiCommandService.previewSequenceExplicit(steps, question, conversationIdOf(request, context), sourceOf(context), authorization);
             Map<String, Object> answer = buildSequenceAnswer(sequence, startedAt);
-            answer.put("answer", "已按订单 " + orderNo + " 对上 " + steps.size() + " 张待确认领料单："
-                    + String.join("、", names) + "。\n整机原料单可以直接转线边。半成品领料要先领用复验合格，没过的步骤会标红，先不要确认那一步。\n"
-                    + answer.get("answer"));
+            answer.put("answer", "已按订单 " + orderNo + " 对上 " + steps.size() + " 张待确认领料单：" + String.join("、", names) + "。\n整机原料单可以直接转线边。半成品领料要先领用复验合格，没过的步骤会标红，先不要确认那一步。\n" + answer.get("answer"));
             return answer;
         } catch (com.neuedu.ems.exception.BusinessException e) {
-            return commandFailureAnswer("订单 " + orderNo + " 的领料转线边没有生成预览：" + e.getMessage(),
-                    List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
+            return commandFailureAnswer("订单 " + orderNo + " 的领料转线边没有生成预览：" + e.getMessage(), List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
         }
     }
 
     /** 订单上的领用复验：对上还没提交的检验单，不要求用户先报检验单号。 */
-    private Map<String, Object> previewOrderRechecks(String question, AiChatRequest request,
-                                                     Map<String, Object> context,
-                                                     com.neuedu.ems.common.AuthorizationContext authorization,
-                                                     long startedAt, String orderNo,
-                                                     List<Map<String, Object>> inspections) {
+    private Map<String, Object> previewOrderRechecks(String question, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt, String orderNo, List<Map<String, Object>> inspections) {
         if (inspections.isEmpty()) {
-            return commandFailureAnswer("订单 " + orderNo + " 没有待提交的领用复验。半成品领料单生成后才会出现复验单。",
-                    List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
+            return commandFailureAnswer("订单 " + orderNo + " 没有待提交的领用复验。半成品领料单生成后才会出现复验单。", List.of("查询 " + orderNo + " 的当前进度"), "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
         }
-        List<String> names = inspections.stream()
-                .map(row -> textOf(row.get("workOrderNo")) + " → " + textOf(row.get("inspectionNo")))
-                .filter(StringUtils::hasText)
-                .distinct()
-                .toList();
+        List<String> names = inspections.stream().map(row -> textOf(row.get("workOrderNo")) + " → " + textOf(row.get("inspectionNo"))).filter(StringUtils::hasText).distinct().toList();
         List<com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput> steps = new ArrayList<>();
         for (Map<String, Object> row : inspections) {
             String inspectionNo = textOf(row.get("inspectionNo"));
             if (StringUtils.hasText(inspectionNo)) {
-                steps.add(new com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput(
-                        "SUBMIT_INSPECTION", inspectionNo, Map.of()));
+                steps.add(new com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput("SUBMIT_INSPECTION", inspectionNo, Map.of()));
             }
         }
         if (steps.isEmpty()) {
             return null;
         }
+        return presentOrderRechecks(question, request, context, authorization, startedAt, new OrderSequencePresentation(orderNo, names, steps));
+    }
+
+    private Map<String, Object> presentOrderRechecks(String question, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt, OrderSequencePresentation presentation) {
+        String orderNo = presentation.orderNo();
+        List<String> names = presentation.names();
+        var steps = presentation.steps();
         try {
-            Map<String, Object> sequence = aiCommandService.previewSequenceExplicit(steps, question,
-                    conversationIdOf(request, context), sourceOf(context), authorization);
+            Map<String, Object> sequence = aiCommandService.previewSequenceExplicit(steps, question, conversationIdOf(request, context), sourceOf(context), authorization);
             Map<String, Object> answer = buildSequenceAnswer(sequence, startedAt);
-            answer.put("answer", "已按订单 " + orderNo + " 对上 " + names.size() + " 张待复验单："
-                    + String.join("、", names) + "。逐件点全部合格后再提交，提交完才能转线边。\n"
-                    + answer.get("answer"));
+            answer.put("answer", "已按订单 " + orderNo + " 对上 " + names.size() + " 张待复验单：" + String.join("、", names) + "。逐件点全部合格后再提交，提交完才能转线边。\n" + answer.get("answer"));
             return answer;
         } catch (com.neuedu.ems.exception.BusinessException e) {
-            return commandFailureAnswer("订单 " + orderNo + " 的领用复验对应这些单：" + String.join("、", names)
-                    + "。请在左边「领用复验」里打开并全部合格后提交。",
-                    names, "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
+            return commandFailureAnswer("订单 " + orderNo + " 的领用复验对应这些单：" + String.join("、", names) + "。请在左边「领用复验」里打开并全部合格后提交。", names, "DOMAIN_PRECHECK", 0, "DOMAIN_PRECHECK", startedAt);
         }
     }
 
     /** 只对数据库现查出的组件工单生成逐单预览；执行仍由原业务服务逐单校验。 */
-    private Map<String, Object> previewContextualComponentRelease(String question, AiChatRequest request,
-                                                                  Map<String, Object> context,
-                                                                  com.neuedu.ems.common.AuthorizationContext authorization,
-                                                                  long startedAt, AiIntentRouter.RouteResult route,
-                                                                  AiQueryResult current) {
+    private Map<String, Object> previewContextualComponentRelease(String question, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt, AiIntentRouter.RouteResult route, AiQueryResult current) {
         if (aiCommandService == null || current.getBlocks() == null) {
             return null;
         }
-        List<com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput> steps = new ArrayList<>();
-        int componentCount = 0;
-        for (AiBlock block : current.getBlocks()) {
-            if (!"组件工单".equals(block.getTitle()) || block.getRows() == null) {
-                continue;
-            }
-            for (Map<String, Object> row : block.getRows()) {
-                componentCount++;
-                String state = textOf(row.get("status"));
-                String no = textOf(row.get("workOrderNo"));
-                if (StringUtils.hasText(no) && ("新建".equals(state) || "已审核".equals(state)
-                        || "DRAFT".equals(state) || "APPROVED".equals(state))) {
-                    steps.add(new com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput(
-                            "RELEASE_WORK_ORDER", no, Map.of()));
-                }
-            }
+        List<Map<String, Object>> rows = componentWorkOrderRows(current);
+        if (rows.isEmpty()) {
+            return null;
         }
-        if (steps.isEmpty()) {
-            if (componentCount == 0) {
-                return null;
-            }
-            Map<String, Object> answer = buildRuleAnswer(question, route, current, startedAt, authorization);
-            answer.put("answer", "这 " + componentCount + " 张组件工单目前均无待下达项。" + current.getSummary());
+        List<com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput> steps = new ArrayList<>(rows.stream().filter(this::componentNeedsRelease).map(row -> new com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput("RELEASE_WORK_ORDER", textOf(row.get("workOrderNo")), Map.of())).toList());
+        ComponentRelease release = new ComponentRelease(route, current, steps, rows.size());
+        return componentReleaseAnswer(question, request, context, authorization, startedAt, release);
+    }
+
+    private record ComponentRelease(AiIntentRouter.RouteResult route, AiQueryResult current,
+            List<com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput> steps, int count) { }
+
+    private boolean componentNeedsRelease(Map<String, Object> row) {
+        return StringUtils.hasText(textOf(row.get("workOrderNo"))) && java.util.Set.of("新建", "已审核", "DRAFT", "APPROVED").contains(textOf(row.get("status")));
+    }
+
+    private Map<String, Object> componentReleaseAnswer(String question, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt, ComponentRelease release) {
+        if (release.steps().isEmpty()) {
+            Map<String, Object> answer = buildRuleAnswer(question, release.route(), release.current(), startedAt, authorization);
+            answer.put("answer", "这 " + release.count() + " 张组件工单目前均无待下达项。" + release.current().getSummary());
             return answer;
         }
         com.neuedu.ems.service.ai.AiQueryAccessPolicy.requireIntent(authorization, "command_preview");
+        return previewComponentReleaseSequence(question, request, context, authorization, startedAt, release);
+    }
+
+    private Map<String, Object> previewComponentReleaseSequence(String question, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt, ComponentRelease release) {
         try {
-            Map<String, Object> sequence = aiCommandService.previewSequenceExplicit(steps, question,
-                    conversationIdOf(request, context), sourceOf(context), authorization);
+            Map<String, Object> sequence = aiCommandService.previewSequenceExplicit(release.steps(), question, conversationIdOf(request, context), sourceOf(context), authorization);
             Map<String, Object> answer = buildSequenceAnswer(sequence, startedAt);
-            int alreadyStarted = componentCount - steps.size();
-            answer.put("answer", "这张订单有 " + componentCount + " 张组件工单，其中 " + alreadyStarted
-                    + " 张已不在待下达状态；本次只办理其余 " + steps.size() + " 张。" + answer.get("answer"));
+            int alreadyStarted = release.count() - release.steps().size();
+            answer.put("answer", "这张订单有 " + release.count() + " 张组件工单，其中 " + alreadyStarted + " 张已不在待下达状态；本次只办理其余 " + release.steps().size() + " 张。" + answer.get("answer"));
             return answer;
         } catch (com.neuedu.ems.exception.BusinessException e) {
-            return commandFailureAnswer(e.getMessage(), List.of("查看订单当前进度"),
-                    "COMMAND_AGENT", 0, "AGENT", startedAt);
+            return commandFailureAnswer(e.getMessage(), List.of("查看订单当前进度"), "COMMAND_AGENT", 0, "AGENT", startedAt);
         }
     }
 
@@ -2660,24 +2550,18 @@ public class AiServiceImpl implements AiService {
     }
 
     /** 生成动作建议；失败时只记日志并返回 null，保证回答本身不受影响。 */
-    private List<com.neuedu.ems.service.ai.AiActionSuggestionService.ActionSuggestion> suggestActions(
-            String intent, Map<String, Object> params, AiQueryResult result,
-            com.neuedu.ems.common.AuthorizationContext authorization) {
+    private List<com.neuedu.ems.service.ai.AiActionSuggestionService.ActionSuggestion> suggestActions(String intent, Map<String, Object> params, AiQueryResult result, com.neuedu.ems.common.AuthorizationContext authorization) {
         try {
             List<Map<String, Object>> rows = new ArrayList<>(result.getRows() == null ? List.of() : result.getRows());
-            if ("order_progress".equalsIgnoreCase(intent) && authorization != null
-                    && (authorization.isSuperAdmin() || "ALL".equals(authorization.dataScope()))
-                    && authorization.hasPermission("mfg:work-order:view") && result.getBlocks() != null) {
-                result.getBlocks().stream().filter(block -> "组件工单".equals(block.getTitle()) && block.getRows() != null)
-                        .forEach(block -> rows.addAll(block.getRows()));
+            if (maySuggestComponentActions(intent, authorization, result)) {
+                result.getBlocks().stream().filter(block -> "组件工单".equals(block.getTitle()) && block.getRows() != null).forEach(block -> rows.addAll(block.getRows()));
             }
             return aiActionSuggestionService.suggest(intent, params, rows, authorization);
         } catch (RuntimeException e) {
             // 这里吞掉异常是为了「没按钮也不能让整段回答失败」，但不能连原因都不留：
             // 曾经因为运行库少了 mfg_work_order.planned_start_time 一列，所有按钮静默消失，
             // 页面上看不出任何异常，只能靠这条日志定位。
-            LOG.warn("动作建议生成失败，本次不展示操作按钮 intent={} type={} message={}",
-                    intent, e.getClass().getName(), e.getMessage(), e);
+            LOG.warn("动作建议生成失败，本次不展示操作按钮 intent={} type={} message={}", intent, e.getClass().getName(), e.getMessage(), e);
             return null;
         }
     }
@@ -3577,5 +3461,142 @@ public class AiServiceImpl implements AiService {
     }
 
     private record DateRange(LocalDate beginDate, LocalDate endDate) {
+    }
+
+    private static boolean hasWorkflowKeyword(String text, String... keywords) {
+        return java.util.Arrays.stream(keywords).anyMatch(text::contains);
+    }
+
+    private static boolean hasSuperAdminAuthorization(com.neuedu.ems.common.AuthorizationContext authorization) {
+        return authorization != null && authorization.isSuperAdmin();
+    }
+
+    private void collectDocumentNumbers(Map<String, Object> row, java.util.Set<String> numbers) {
+        for (String key : List.of("productionOrderNo", "workOrderNo", "planNo", "docNo")) {
+            String value = textOf(row.get(key));
+            if (StringUtils.hasText(value)) {
+                numbers.add(value.toUpperCase(Locale.ROOT));
+            }
+        }
+    }
+
+    private List<Map<String, Object>> componentWorkOrderRows(AiQueryResult current) {
+        return orEmptyList(current.getBlocks()).stream().filter(block -> "组件工单".equals(block.getTitle()) && block.getRows() != null).flatMap(block -> block.getRows().stream()).toList();
+    }
+
+    private LinkedHashSet<String> pendingContextualWorkOrders(AiQueryResult current) {
+        LinkedHashSet<String> targets = new LinkedHashSet<>();
+        for (Map<String, Object> row : componentWorkOrderRows(current)) {
+            String no = textOf(row.get("workOrderNo"));
+            if (StringUtils.hasText(no) && !FINISHED_WORK_ORDER_STATES.contains(textOf(row.get("status")))) {
+                targets.add(no);
+            }
+        }
+        if (targets.isEmpty()) {
+            orEmptyList(current.getBlocks()).stream().filter(block -> block.getRows() != null).flatMap(block -> block.getRows().stream()).filter(row -> row.containsKey("workOrderStatus") && PENDING_WORK_ORDER_STATES.contains(textOf(row.get("workOrderStatus")))).map(row -> textOf(row.get("workOrderNo"))).filter(StringUtils::hasText).forEach(targets::add);
+        }
+        return targets;
+    }
+
+    private void observeDispatchPreflight(String question, String no, com.neuedu.ems.common.AuthorizationContext authorization, List<Map<String, Object>> observations, List<String> details) {
+        if (!question.contains("派") || aiCommandService == null) {
+            return;
+        }
+        try {
+            var preview = aiCommandService.previewExplicit("GENERATE_DISPATCH_ORDER", no, Map.of(), new AiCommandService.AiCommandPreviewRequest(question, null, "WORKBENCH", Map.of()), authorization);
+            if (preview == null) {
+                return;
+            }
+            Map<String, Object> check = new LinkedHashMap<>();
+            check.put("resource", "dispatch_preflight");
+            check.put("workOrderNo", no);
+            check.put("canExecute", preview.get("canExecute"));
+            check.put("checks", preview.get("preconditions"));
+            observations.add(check);
+            if (!Boolean.TRUE.equals(preview.get("canExecute"))) {
+                addDispatchFailureDetails(no, preview, details);
+            }
+        } catch (RuntimeException e) {
+            observations.add(Map.of("resource", "dispatch_preflight", "workOrderNo", no, "error", "本轮派工预览未能完成，不能确定派工失败的具体原因"));
+        }
+    }
+
+    private void addDispatchFailureDetails(String no, Map<String, Object> preview, List<String> details) {
+        List<String> reasons = new ArrayList<>();
+        for (Object item : previewPreconditions(preview)) {
+            if (item instanceof Map<?, ?> condition && Boolean.FALSE.equals(condition.get("passed"))) {
+                reasons.add(textOf(condition.get("label")) + "：" + textOf(condition.get("detail")));
+            }
+        }
+        if (!reasons.isEmpty()) {
+            details.add(no + " 派工预检：" + String.join("；", reasons));
+        }
+    }
+
+    private void refineContextualNextAnswer(String question, AiQueryResult current, Map<String, Object> answer, List<Map<String, Object>> observations) {
+        boolean keepDomainAnswer = hasWorkflowKeyword(question, "完成", "到哪", "进行下一步", "下一步");
+        var refined = keepDomainAnswer ? null : revisePlan("用户在跟进当前订单：" + question + "。请直接回答这次问题，先说具体下一步及原因，再给出可办理的建议。" + "只依据本轮观测下结论；观测里没有的环节就直说本轮没查到，不要臆测用户说过什么，" + "不要重述整份订单概况，不要声称已执行或编造质检结果。", observations);
+        java.util.Set<String> allowedNumbers = documentNumbers(current);
+        if (refined != null && refinesChatAnswer(refined) && !mentionsOtherDocument(refined.answer(), allowedNumbers)) {
+            answer.put("answer", refined.answer());
+            answer.put("model", "PLANNER+DATABASE+TOOL");
+        }
+        if (refined != null && refined.suggestions() != null) {
+            List<String> kept = refined.suggestions().stream().filter(item -> !mentionsOtherDocument(item, allowedNumbers)).toList();
+            if (!kept.isEmpty()) {
+                answer.put("suggestions", kept);
+            }
+        }
+    }
+
+    private record OrderSequencePresentation(String orderNo, List<String> names,
+            List<com.neuedu.ems.service.ai.AiCommandService.SequenceStepInput> steps) { }
+
+    private boolean maySuggestComponentActions(String intent, com.neuedu.ems.common.AuthorizationContext authorization, AiQueryResult result) {
+        if (!"order_progress".equalsIgnoreCase(intent) || authorization == null) {
+            return false;
+        }
+        boolean fullScope = authorization.isSuperAdmin() || "ALL".equals(authorization.dataScope());
+        return fullScope && authorization.hasPermission("mfg:work-order:view") && result.getBlocks() != null;
+    }
+
+    private boolean needsWorkOrderClarification(String question, List<AiChatMessage> history, Map<String, Object> context) {
+        boolean noHistory = history.stream().noneMatch(message -> WORK_ORDER_REFERENCE.matcher(message.getContent()).find());
+        boolean refersToWorkOrder = hasWorkflowKeyword(question, "这个工单", "这张工单", "该工单", "这笔工单");
+        return noHistory && refersToWorkOrder && !WORK_ORDER_REFERENCE.matcher(question).find() && !WORK_ORDER_REFERENCE.matcher(String.valueOf(context)).find();
+    }
+    private java.util.Comparator<Map<String, Object>> workOrderPriority(String numberKey) {
+        return java.util.Comparator.comparing((Map<String, Object> row) -> !"ROOT".equals(textOf(row.get("workOrderType")))).thenComparing(row -> textOf(row.get(numberKey)));
+    }
+
+    private Map<String, Object> tryContextualTasks(String question, List<AiChatMessage> history, AiChatRequest request, Map<String, Object> context, com.neuedu.ems.common.AuthorizationContext authorization, long startedAt) {
+        if (!canQueryContextualTasks(question, authorization)) {
+            return null;
+        }
+        String no = recentWorkOrderReference(question, history);
+        if (no == null)
+            return null;
+        AiQueryResult tasks = queryResource("mfg_task", Map.of("workOrderNo", no), authorization);
+        var route = new AiIntentRouter.RouteResult("work_order_tasks", Map.of("workOrderNo", no), true);
+        Map<String, Object> answer = buildRuleAnswer(question, route, tasks, startedAt, authorization);
+        List<Map<String, Object>> observations = new ArrayList<>();
+        observations.add(observationOf("mfg_task", route.params(), tasks));
+        String advice = "工单 " + no + " 当前查到 " + orEmptyList(tasks.getRows()).size() + " 道工序任务。";
+        List<Map<String, Object>> actions = new ArrayList<>();
+        advice += startableTaskAdvice(tasks, question, request, context, authorization, observations, actions);
+        boolean allFinished = !orEmptyList(tasks.getRows()).isEmpty() && tasks.getRows().stream().allMatch(task -> "FINISHED".equals(textOf(task.get("status"))));
+        if (allFinished)
+            advice += "所有已查询工序均已完成，无需再次开工。可继续核对当前订单进度和待检验单。";
+        else if (actions.isEmpty())
+            advice += "本次没有确认可直接开工的任务；请核对任务状态、前序和工位，勿重复或越序开工。";
+        answer.put("answer", advice);
+        answer.put("actions", actions);
+        answer.put("suggestions", List.of("查询 " + no + " 关联的待检验单", "查看 " + no + " 的当前进度"));
+        var refined = allFinished ? null : revisePlan(question + "。仅依据任务与开工预检回答，单号写全；可办理能力限于本轮actions，不得声称可以办理未提供的动作。", observations);
+        if (refined != null && refinesChatAnswer(refined))
+            answer.put("answer", refined.answer());
+        answer.put("toolRounds", observations.size());
+        answer.put("elapsedMs", System.currentTimeMillis() - startedAt);
+        return answer;
     }
 }

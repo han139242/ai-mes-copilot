@@ -1713,9 +1713,7 @@ public class AiDataQueryServiceImpl implements AiDataQueryService {
      * 不等于货已经进仓和发出。因此先看成品入库量，再看发货量，都齐了才算闭环。
      * 否则「订单已完成」会盖掉「成品入库 0、已发货 0」这个真实缺口。</p>
      */
-    private String orderNextStep(Map<String, Object> header, List<Map<String, Object>> plans,
-                                 List<Map<String, Object>> workOrders, BigDecimal orderQuantity,
-                                 BigDecimal inboundQuantity, BigDecimal shippedQuantity) {
+    private String orderNextStep(Map<String, Object> header, List<Map<String, Object>> plans, List<Map<String, Object>> workOrders, BigDecimal orderQuantity, BigDecimal inboundQuantity, BigDecimal shippedQuantity) {
         String status = text(header.get("status"));
         String orderNo = text(header.get("productionOrderNo"));
         if ("CANCELLED".equals(status) || "CLOSED".equals(status)) {
@@ -1724,74 +1722,68 @@ public class AiDataQueryServiceImpl implements AiDataQueryService {
         BigDecimal target = orderQuantity == null || orderQuantity.signum() <= 0 ? BigDecimal.ONE : orderQuantity;
         BigDecimal inbound = inboundQuantity == null ? BigDecimal.ZERO : inboundQuantity;
         BigDecimal shipped = shippedQuantity == null ? BigDecimal.ZERO : shippedQuantity;
-        // 工单全部完工之后，剩下的只有成品入库和发货两步：按剩余量给出可直接办理的动作。
-        List<Map<String, Object>> rootWorkOrders = workOrders.stream()
-                .filter(row -> "ROOT".equals(text(row.get("workOrderType"))))
-                .toList();
-        boolean produced = "FINISHED".equals(status) || !rootWorkOrders.isEmpty()
-                && sumColumn(rootWorkOrders, "completedQuantity").compareTo(target) >= 0;
+        // 先核对真实产出与交付数量，再处理计划和工单。
+        List<Map<String, Object>> rootWorkOrders = workOrders.stream().filter(row -> "ROOT".equals(text(row.get("workOrderType")))).toList();
+        boolean produced = "FINISHED".equals(status) || !rootWorkOrders.isEmpty() && sumColumn(rootWorkOrders, "completedQuantity").compareTo(target) >= 0;
+        String delivery = deliveryNextStep(status, target, inbound, shipped, produced);
+        return delivery != null ? delivery : planningNextStep(plans, workOrders);
+    }
+
+    private String deliveryNextStep(String status, BigDecimal target, BigDecimal inbound, BigDecimal shipped, boolean produced) {
+        String result = null;
         if (produced && inbound.compareTo(target) < 0) {
             String gap = plainQuantity(target.subtract(inbound));
-            return "下一步：成品还差 " + gap + " 台没有入库。请把终检合格的产品批次生成生产入库单并确认入库"
-                    + "（成品仓入库，第 7 阶段），入库后再走发货。";
-        }
-        if (produced && inbound.compareTo(target) >= 0 && shipped.compareTo(target) < 0) {
+            result = "下一步：成品还差 " + gap + " 台没有入库。请把终检合格的产品批次生成生产入库单并确认入库" + "（成品仓入库，第 7 阶段），入库后再走发货。";
+        } else if (produced && inbound.compareTo(target) >= 0 && shipped.compareTo(target) < 0) {
             String gap = plainQuantity(target.subtract(shipped));
-            return "下一步：成品已入库但还差 " + gap + " 台没有发出。请按顺序办理："
-                    + "①为订单生成销售出库（发货）单；②生成出货检验单并录入合格结论；③确认发货。"
-                    + "三步都办完这张订单才算交付完成。";
+            result = "下一步：成品已入库但还差 " + gap + " 台没有发出。请按顺序办理：" + "①为订单生成销售出库（发货）单；②生成出货检验单并录入合格结论；③确认发货。" + "三步都办完这张订单才算交付完成。";
+        } else if (produced && shipped.compareTo(target) >= 0) {
+            result = "下一步：这张订单已完工、已入库、已发货，整条流程闭环，无需再办理。";
+        } else if ("FINISHED".equals(status)) {
+            result = "下一步：订单头已是已完成，但入库与发货数量还没核对齐，请核对成品入库单与发货记录。";
         }
-        if (produced && shipped.compareTo(target) >= 0) {
-            return "下一步：这张订单已完工、已入库、已发货，整条流程闭环，无需再办理。";
-        }
-        if ("FINISHED".equals(status)) {
-            return "下一步：订单头已是已完成，但入库与发货数量还没核对齐，请核对成品入库单与发货记录。";
-        }
+        return result;
+    }
+
+    private String planningNextStep(List<Map<String, Object>> plans, List<Map<String, Object>> workOrders) {
         if (plans.isEmpty()) {
             return "下一步：目前没有查到关联生产计划，请先为这张订单安排生产并确认计划。";
         }
-        boolean confirmedPlan = plans.stream().anyMatch(row -> List.of("RELEASED", "RUNNING", "FINISHED")
-                .contains(text(row.get("planStatus"))));
+        boolean confirmedPlan = plans.stream().anyMatch(row -> List.of("RELEASED", "RUNNING", "FINISHED").contains(text(row.get("planStatus"))));
         if (!confirmedPlan) {
             return "下一步：已查到生产计划，但没有查到已生效的计划，请先核对计划状态并确认。";
         }
-        List<Map<String, Object>> active = workOrders.stream()
-                .filter(row -> !"CLOSED".equals(text(row.get("status"))))
-                .toList();
+        return workOrdersNextStep(workOrders);
+    }
+
+    private String workOrdersNextStep(List<Map<String, Object>> workOrders) {
+        List<Map<String, Object>> active = workOrders.stream().filter(row -> !"CLOSED".equals(text(row.get("status")))).toList();
         if (active.isEmpty()) {
             return "下一步：已查到关联生产计划，但没有查到有效工单。请核对计划状态，并按计划生成工单。";
         }
-        List<Map<String, Object>> components = active.stream()
-                .filter(row -> "COMPONENT".equals(text(row.get("workOrderType"))))
-                .filter(row -> !"CANCELLED".equals(text(row.get("status"))))
-                .toList();
-        List<String> pendingComponents = components.stream()
-                .filter(row -> "DRAFT".equals(text(row.get("status"))) || "APPROVED".equals(text(row.get("status"))))
-                .map(row -> (StringUtils.hasText(text(row.get("productName"))) ? text(row.get("productName")) + "（" : "组件（")
-                        + text(row.get("workOrderNo")) + "，计划 " + text(row.get("plannedQuantity")) + "）")
-                .toList();
+        String components = componentNextStep(active);
+        return components != null ? components : activeWorkOrdersNextStep(active);
+    }
+
+    private String componentNextStep(List<Map<String, Object>> active) {
+        List<Map<String, Object>> components = active.stream().filter(row -> "COMPONENT".equals(text(row.get("workOrderType")))).filter(row -> !"CANCELLED".equals(text(row.get("status")))).toList();
+        List<String> pendingComponents = components.stream().filter(row -> "DRAFT".equals(text(row.get("status"))) || "APPROVED".equals(text(row.get("status")))).map(row -> (StringUtils.hasText(text(row.get("productName"))) ? text(row.get("productName")) + "（" : "组件（") + text(row.get("workOrderNo")) + "，计划 " + text(row.get("plannedQuantity")) + "）").toList();
         if (!pendingComponents.isEmpty()) {
-            return "下一步：先生产组件：" + String.join("、", pendingComponents)
-                    + "。这些组件工单尚未下达；请先核对并下达，再按实际情况领料、派工、生产和检验。组件放行后才能按规则交接给整机工单。";
+            return "下一步：先生产组件：" + String.join("、", pendingComponents) + "。这些组件工单尚未下达；请先核对并下达，再按实际情况领料、派工、生产和检验。组件放行后才能按规则交接给整机工单。";
         }
-        List<String> unfinishedComponents = components.stream()
-                .filter(row -> !"FINISHED".equals(text(row.get("status"))))
-                .map(row -> text(row.get("productName")) + "（" + text(row.get("workOrderNo")) + "）")
-                .toList();
+        List<String> unfinishedComponents = components.stream().filter(row -> !"FINISHED".equals(text(row.get("status")))).map(row -> text(row.get("productName")) + "（" + text(row.get("workOrderNo")) + "）").toList();
         if (!unfinishedComponents.isEmpty()) {
-            return "下一步：先完成组件工单：" + String.join("、", unfinishedComponents)
-                    + "。请检查领料和派工，逐项开工工序任务并按实际情况报工、检验和交接，再继续整机生产。";
+            return "下一步：先完成组件工单：" + String.join("、", unfinishedComponents) + "。请检查领料和派工，逐项开工工序任务并按实际情况报工、检验和交接，再继续整机生产。";
         }
-        List<String> pending = active.stream()
-                .filter(row -> "DRAFT".equals(text(row.get("status"))) || "APPROVED".equals(text(row.get("status"))))
-                .map(row -> text(row.get("workOrderNo")))
-                .filter(StringUtils::hasText).limit(3).toList();
+        return null;
+    }
+
+    private String activeWorkOrdersNextStep(List<Map<String, Object>> active) {
+        List<String> pending = active.stream().filter(row -> "DRAFT".equals(text(row.get("status"))) || "APPROVED".equals(text(row.get("status")))).map(row -> text(row.get("workOrderNo"))).filter(StringUtils::hasText).limit(3).toList();
         if (!pending.isEmpty()) {
-            return "下一步：关联工单 " + String.join("、", pending)
-                    + " 尚未下达，请先核对工单及组件依赖，再预览下达；能否下达以实际校验为准。";
+            return "下一步：关联工单 " + String.join("、", pending) + " 尚未下达，请先核对工单及组件依赖，再预览下达；能否下达以实际校验为准。";
         }
-        boolean running = active.stream().anyMatch(row -> "RELEASED".equals(text(row.get("status")))
-                || "RUNNING".equals(text(row.get("status"))));
+        boolean running = active.stream().anyMatch(row -> "RELEASED".equals(text(row.get("status"))) || "RUNNING".equals(text(row.get("status"))));
         if (running) {
             return "下一步：关联工单已下达或正在生产，请检查组件依赖、领料和开工条件，再继续生产；缺料或未检验的情况需要先处理。";
         }

@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 出库单列表页：仓库人员查看生产领料、销售或其他出库记录。
 const guard = require('../../../utils/guard')
 const auth = require('../../../utils/auth')

@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 工单列表页：查看生产工单，并进入工单详情或执行开工。
 const guard = require('../../../utils/guard')
 const workOrderApi = require('../../../api/work-order')

@@ -8,6 +8,7 @@ import re
 import shutil
 import subprocess
 from pathlib import Path
+from cli_output import write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -35,7 +36,7 @@ def main():
     executable = Path(mysql_bin) / "mysql.exe" if mysql_bin else Path(shutil.which("mysql") or "")
     if not executable.is_file():
         parser.error("请配置MYSQL_BIN")
-    spec = importlib.util.spec_from_file_location("lamp_clean_initializer", ROOT / "scripts/initialize-lamp-clean.py")
+    spec = importlib.util.spec_from_file_location("lamp_clean_initializer", ROOT / "scripts/initialize_lamp_clean.py")
     initializer = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(initializer)
 
@@ -192,7 +193,7 @@ def main():
     )
     output = ROOT / "tmp" / (args.database + "-audit.json")
     output.write_text(json.dumps(result, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps(result, ensure_ascii=False, indent=2))
+    write_json(result, ensure_ascii=False, indent=2)
     if not result["passed"]:
         raise SystemExit(1)
 

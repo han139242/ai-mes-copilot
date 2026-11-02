@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 不良品登记页：录入不良原因、处理方式，并支持拍照上传。
 const guard = require('../../../utils/guard')
 const auth = require('../../../utils/auth')

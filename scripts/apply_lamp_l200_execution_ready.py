@@ -15,7 +15,7 @@
 方案明细要与标准的产品/项目/工序一致），直接改库会绕过这些校验。
 
 用法：
-    python scripts/apply-lamp-l200-execution-ready.py [--base http://127.0.0.1:8089]
+    python scripts/apply_lamp_l200_execution_ready.py [--base http://127.0.0.1:8089]
                                                        [--db-host 127.0.0.1] [--db-port 3307]
 """
 
@@ -94,7 +94,10 @@ def main():
     parser.add_argument("--db-host", default="127.0.0.1")
     parser.add_argument("--db-port", type=int, default=3307)
     parser.add_argument("--db-user", default="mes_lamp_app")
-    parser.add_argument("--db-password", default=os.environ.get("DB_PASSWORD"), required="DB_PASSWORD" not in os.environ)
+    parser.add_argument(
+        "--db-password", default=os.environ.get("DB_PASSWORD"),
+        required="DB_PASSWORD" not in os.environ,
+    )
     parser.add_argument("--db-name", default="mes_lamp_rehearsal")
     parser.add_argument("--username", default="admin")
     parser.add_argument("--password", default="Admin@12345")

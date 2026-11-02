@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 设备列表页：设备管理员查看设备台账和设备状态。
 const guard = require('../../../utils/guard')
 const equipmentApi = require('../../../api/equipment')

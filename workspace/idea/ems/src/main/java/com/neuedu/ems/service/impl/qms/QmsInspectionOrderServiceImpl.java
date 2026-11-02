@@ -351,24 +351,26 @@ public class QmsInspectionOrderServiceImpl extends ServiceImpl<QmsInspectionOrde
 
     @Override
     @Transactional(rollbackFor = Exception.class)
-    public QmsInspectionOrder createStockReleaseInspection(Long outboundId,Long detailId,Long schemeId,Long operatorId) {
-        var order=stockIssueOrders.selectById(outboundId);
-        var detail=stockIssueDetails.selectById(detailId);
-        if(operatorId==null || schemeId==null || order==null || detail==null
-                || !Integer.valueOf(0).equals(order.getDeletedFlag()) || !Integer.valueOf(0).equals(detail.getDeletedFlag())
-                || !"MATERIAL_ISSUE".equals(order.getOutboundType()) || !"SUBMITTED".equals(order.getAuditStatus())
-                || !Objects.equals(order.getOutboundId(),detail.getOutboundId()) || detail.getInspectionId()!=null
-                || order.getWorkOrderId()==null || detail.getBatchId()==null || valueOrZero(detail.getOutboundQuantity()).signum()<=0)
-            throw business(ResultCode.BUSINESS_ERROR,"领用检验必须从有效待确认领料明细发起，不能空白新建或重复签发");
-        var inspection=new QmsInspectionOrder();
-        inspection.setInspectionType("PROCESS");inspection.setWorkOrderId(order.getWorkOrderId());
-        inspection.setBatchId(detail.getBatchId());inspection.setSchemeId(schemeId);
-        inspection.setSampleQuantity(detail.getOutboundQuantity());inspection.setCreatedBy(operatorId);inspection.setUpdatedBy(operatorId);
-        inspection.setCreatedTime(LocalDateTime.now());inspection.setUpdatedTime(LocalDateTime.now());
-        inspection.setRemark("库存半成品领用复验；来源 "+order.getOutboundNo()+" 明细 "+detailId+"；按组件终检标准检查库存实物，不生成生产任务");
+    public QmsInspectionOrder createStockReleaseInspection(Long outboundId, Long detailId, Long schemeId, Long operatorId) {
+        var order = stockIssueOrders.selectById(outboundId);
+        var detail = stockIssueDetails.selectById(detailId);
+        if (!validStockReleaseContext(order, detail, schemeId, operatorId))
+            throw business(ResultCode.BUSINESS_ERROR, "领用检验必须从有效待确认领料明细发起，不能空白新建或重复签发");
+        var inspection = new QmsInspectionOrder();
+        inspection.setInspectionType("PROCESS");
+        inspection.setWorkOrderId(order.getWorkOrderId());
+        inspection.setBatchId(detail.getBatchId());
+        inspection.setSchemeId(schemeId);
+        inspection.setSampleQuantity(detail.getOutboundQuantity());
+        inspection.setCreatedBy(operatorId);
+        inspection.setUpdatedBy(operatorId);
+        inspection.setCreatedTime(LocalDateTime.now());
+        inspection.setUpdatedTime(LocalDateTime.now());
+        inspection.setRemark("库存半成品领用复验；来源 " + order.getOutboundNo() + " 明细 " + detailId + "；按组件终检标准检查库存实物，不生成生产任务");
         prepareInspectionOrder(inspection);
-        if(baseMapper.insert(inspection)!=1) throw business(ResultCode.FAILED,"领用复验建单失败");
-        responsibilityNotificationService.publishOpenInspection(inspection,operatorId);
+        if (baseMapper.insert(inspection) != 1)
+            throw business(ResultCode.FAILED, "领用复验建单失败");
+        responsibilityNotificationService.publishOpenInspection(inspection, operatorId);
         return inspection;
     }
 
@@ -700,19 +702,13 @@ public class QmsInspectionOrderServiceImpl extends ServiceImpl<QmsInspectionOrde
     }
 
     /** 终检单必须与产品批次一致，且耗尽或报废批次不能通过检验重新放行。 */
-    private void requireTargetMatches(QmsInspectionOrder existing, String normalizedInspectionResult,
-                                      WmsMaterialBatch batch, TraceProductLot productLot) {
-        if(batch != null && "PASS".equals(normalizedInspectionResult) && stockIssueDetails != null
-                && stockIssueDetails.selectCount(new LambdaQueryWrapper<com.neuedu.ems.entity.wms.WmsOutboundDetail>()
-                .eq(com.neuedu.ems.entity.wms.WmsOutboundDetail::getInspectionId,existing.getInspectionId())
-                .eq(com.neuedu.ems.entity.wms.WmsOutboundDetail::getDeletedFlag,0))>0
-                && (!"PASS".equals(batch.getQualityStatus()) || !"AVAILABLE".equals(batch.getStatus())))
-            throw business(ResultCode.BUSINESS_ERROR,"库存批次已冻结或不合格，请先完成批次质量处置；领用复验不能解冻整批库存");
+    private void requireTargetMatches(QmsInspectionOrder existing, String normalizedInspectionResult, WmsMaterialBatch batch, TraceProductLot productLot) {
+        if (blocksStockRelease(existing, normalizedInspectionResult, batch))
+            throw business(ResultCode.BUSINESS_ERROR, "库存批次已冻结或不合格，请先完成批次质量处置；领用复验不能解冻整批库存");
         if (productLot != null && !matchesFinalInspection(existing, productLot)) {
             throw business(ResultCode.BUSINESS_ERROR, "终检单与待检产品批次、工单或来源报工不一致");
         }
-        if (batch != null && !BusinessStatus.Quality.FAIL.equals(normalizedInspectionResult)
-                && isTerminalBatch(batch)) {
+        if (batch != null && !BusinessStatus.Quality.FAIL.equals(normalizedInspectionResult) && isTerminalBatch(batch)) {
             throw business(ResultCode.BUSINESS_ERROR, "耗尽或报废批次不能通过检验重新放行");
         }
     }
@@ -1332,5 +1328,28 @@ public class QmsInspectionOrderServiceImpl extends ServiceImpl<QmsInspectionOrde
 
     private BusinessException business(ResultCode code, String message) {
         return new BusinessException(code.getCode(), message);
+    }
+
+    private boolean validStockReleaseContext(com.neuedu.ems.entity.wms.WmsOutboundOrder order, com.neuedu.ems.entity.wms.WmsOutboundDetail detail, Long schemeId, Long operatorId) {
+        if (operatorId == null || schemeId == null || order == null || detail == null) {
+            return false;
+        }
+        return validStockReleaseOrder(order) && validStockReleaseDetail(detail) && Objects.equals(order.getOutboundId(), detail.getOutboundId());
+    }
+
+    private boolean validStockReleaseOrder(com.neuedu.ems.entity.wms.WmsOutboundOrder order) {
+        return Integer.valueOf(0).equals(order.getDeletedFlag()) && "MATERIAL_ISSUE".equals(order.getOutboundType()) && "SUBMITTED".equals(order.getAuditStatus()) && order.getWorkOrderId() != null;
+    }
+
+    private boolean validStockReleaseDetail(com.neuedu.ems.entity.wms.WmsOutboundDetail detail) {
+        return Integer.valueOf(0).equals(detail.getDeletedFlag()) && detail.getInspectionId() == null && detail.getBatchId() != null && valueOrZero(detail.getOutboundQuantity()).signum() > 0;
+    }
+
+    private boolean blocksStockRelease(QmsInspectionOrder existing, String result, WmsMaterialBatch batch) {
+        if (batch == null || !"PASS".equals(result) || stockIssueDetails == null) {
+            return false;
+        }
+        boolean stockRelease = stockIssueDetails.selectCount(new LambdaQueryWrapper<com.neuedu.ems.entity.wms.WmsOutboundDetail>().eq(com.neuedu.ems.entity.wms.WmsOutboundDetail::getInspectionId, existing.getInspectionId()).eq(com.neuedu.ems.entity.wms.WmsOutboundDetail::getDeletedFlag, 0)) > 0;
+        return stockRelease && (!"PASS".equals(batch.getQualityStatus()) || !"AVAILABLE".equals(batch.getStatus()));
     }
 }

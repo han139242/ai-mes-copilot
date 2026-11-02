@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 库存列表页：查看产品、批次或仓库维度的库存余额。
 const guard = require('../../../utils/guard')
 const warehouseApi = require('../../../api/warehouse')

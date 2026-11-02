@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 我的页面：展示当前用户、权限调试信息、后端地址和退出登录。
 const guard = require('../../../utils/guard')
 const authApi = require('../../../api/auth')

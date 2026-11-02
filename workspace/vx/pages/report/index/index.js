@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 报工列表页：按任务、工单或关键字查询报工记录。
 const guard = require('../../../utils/guard')
 const auth = require('../../../utils/auth')

@@ -820,21 +820,12 @@ public class AiCommandServiceImpl implements AiCommandService {
     }
 
     /** 调用真实领域服务，失败时把原因落到步骤、命令状态与操作日志。 */
-    private BizResult invokeDomain(AiCommandExecution record, ActionSpec spec, Target target,
-                                   Map<String, Object> params, AuthorizationContext authorization,
-                                   AiCommandExecuteRequest request, String idempotencyKey, long startedAt) {
-        AiCommandStep callStep = startStep(record.getCommandId(), 2, "DOMAIN_CALL",
-                spec.action() + ":" + record.getTargetNo(), spec.targetType(),
-                record.getTargetNo(), record.getTargetId());
+    private BizResult invokeDomain(AiCommandExecution record, ActionSpec spec, Target target, Map<String, Object> params, AuthorizationContext authorization, AiCommandExecuteRequest request, String idempotencyKey, long startedAt) {
+        AiCommandStep callStep = startStep(record.getCommandId(), 2, "DOMAIN_CALL", spec.action() + ":" + record.getTargetNo(), spec.targetType(), record.getTargetNo(), record.getTargetId());
         BizResult biz;
         try {
-            String domainKey = (ACTION_CREATE_PRODUCTION_ORDER.equals(spec.action())
-                    || ACTION_GENERATE_WORK_ORDER.equals(spec.action())
-                    || ACTION_GENERATE_DISPATCH.equals(spec.action())
-                    || ACTION_SCHEDULE_PRODUCTION_ORDER.equals(spec.action())) && idempotencyKey == null
-                    ? record.getConfirmationId() : idempotencyKey;
-            biz = inTransaction(() -> callDomain(spec, target, params, authorization.userId(),
-                    trimToNull(request.remark()), domainKey));
+            String domainKey = needsCreationIdempotencyKey(spec.action()) && idempotencyKey == null ? record.getConfirmationId() : idempotencyKey;
+            biz = inTransaction(() -> callDomain(spec, target, params, authorization.userId(), trimToNull(request.remark()), domainKey));
         } catch (BusinessException e) {
             finishStep(callStep, STEP_FAILED, e.getMessage());
             markFailed(record, e.getMessage(), startedAt);
@@ -988,10 +979,7 @@ public class AiCommandServiceImpl implements AiCommandService {
             return "派工单状态是 " + statusText(dispatch.getStatus()) + "，不是已下达";
         }
         long tasks = countWorkOrderTasks(dispatch);
-        if (tasks <= 0) {
-            return "派工单已下达，但没有生成任何工序任务";
-        }
-        return null;
+        return tasks <= 0 ? "派工单已下达，但没有生成任何工序任务" : null;
     }
 
     /** 生成领料单：单据存在、类型是生产领料、状态待确认、且有明细。 */
@@ -1158,21 +1146,31 @@ public class AiCommandServiceImpl implements AiCommandService {
         if (order == null) {
             return "销售出库单 " + outboundId + " 读不到";
         }
+        String headerProblem = salesOutboundHeaderProblem(order, outboundId);
+        return headerProblem != null ? headerProblem : salesOutboundStatusProblem(order, outboundId, expectConfirmed);
+    }
+
+    private String salesOutboundHeaderProblem(WmsOutboundOrder order, Long outboundId) {
         if (!Integer.valueOf(0).equals(order.getDeletedFlag())) {
             return "销售出库单 " + outboundId + " 已被删除";
         }
         if (!"SALE".equals(order.getOutboundType())) {
             return "出库单 " + outboundId + " 类型是 " + order.getOutboundType() + "，不是销售出库";
         }
+        return null;
+    }
+
+    private String salesOutboundStatusProblem(WmsOutboundOrder order, Long outboundId, boolean expectConfirmed) {
         if (!expectConfirmed) {
-            return BusinessStatus.Document.SUBMITTED.equals(order.getAuditStatus()) ? null
-                    : "销售出库单 " + outboundId + " 状态是 " + statusText(order.getAuditStatus())
-                            + "，不是待确认";
+            return BusinessStatus.Document.SUBMITTED.equals(order.getAuditStatus()) ? null : "销售出库单 " + outboundId + " 状态是 " + statusText(order.getAuditStatus()) + "，不是待确认";
         }
         if (!BusinessStatus.Document.APPROVED.equals(order.getAuditStatus())) {
-            return "销售出库单 " + outboundId + " 状态是 " + statusText(order.getAuditStatus())
-                    + "，不是已确认";
+            return "销售出库单 " + outboundId + " 状态是 " + statusText(order.getAuditStatus()) + "，不是已确认";
         }
+        return salesOutboundMovementProblem(outboundId);
+    }
+
+    private String salesOutboundMovementProblem(Long outboundId) {
         // 销售出库的库存流水类型是 SALES_OUT（领料出库才是 OUTBOUND），不能混用。
         Long movements = movementCount(outboundId, "SALES_OUT");
         if (movements == null || movements <= 0) {
@@ -3591,14 +3589,13 @@ public class AiCommandServiceImpl implements AiCommandService {
         try {
             lines = aiProductionSchedule.preview(target.id());
         } catch (BusinessException ex) {
-            return options;
+            lines = List.of();
         }
         if (lines == null) {
             return options;
         }
         for (com.neuedu.ems.vo.mfg.ManualScheduleCandidateLine line : lines) {
-            if (line == null || line.getLineId() == null || line.getEarliestStartTime() == null
-                    || line.getEarliestEndTime() == null) {
+            if (line == null || line.getLineId() == null || line.getEarliestStartTime() == null || line.getEarliestEndTime() == null) {
                 continue;
             }
             Map<String, Object> option = new LinkedHashMap<>();
@@ -3607,7 +3604,8 @@ public class AiCommandServiceImpl implements AiCommandService {
             option.put("lineName", line.getLineName());
             LocalDateTime start = line.getEarliestStartTime().withNano(0);
             LocalDateTime end = line.getEarliestEndTime();
-            if (end.getNano() != 0) end = end.withNano(0).plusSeconds(1);
+            if (end.getNano() != 0)
+                end = end.withNano(0).plusSeconds(1);
             option.put("plannedStartTime", start.toString());
             option.put("plannedEndTime", end.toString());
             options.add(option);
@@ -3902,32 +3900,65 @@ public class AiCommandServiceImpl implements AiCommandService {
     }
 
     /** 明确仓库优先；歧义或无匹配不能静默退回原料仓。 */
-    private void fillIssueWarehouse(String text,Map<String, Object> params) {
-        String type=textOf(params.get("warehouseType")),words=text==null?"":text;
-        if(words.contains("半成品")) type="SEMI_FINISHED";
-        else if(words.contains("原料")||words.contains("原材料")) type="RAW";
-        if(longOf(params.get("warehouseId"))!=null) {
-            if(StringUtils.hasText(type)) params.put("warehouseType",type);
-            WmsWarehouse selected=loadWarehouse(longOf(params.get("warehouseId")));
-            if(selected!=null) params.put("warehouseName",selected.getWarehouseName());
+    private void fillIssueWarehouse(String text, Map<String, Object> params) {
+        String words = text == null ? "" : text;
+        String type = requestedIssueWarehouseType(words, params);
+        if (fillSelectedIssueWarehouse(params, type)) {
             return;
         }
-        String code=textOf(params.get("warehouseCode"));
-        Matcher mentioned=Pattern.compile("[A-Za-z0-9]+-WH-[A-Za-z0-9-]+",Pattern.CASE_INSENSITIVE).matcher(words);
-        if(mentioned.find()) code=mentioned.group();
-        if(!StringUtils.hasText(type)&&!StringUtils.hasText(code)) {
-            Long id=firstIssueableWarehouseId();if(id!=null)params.put("warehouseId",id);return;
+        String code = textOf(params.get("warehouseCode"));
+        Matcher mentioned = Pattern.compile("[A-Za-z0-9]+-WH-[A-Za-z0-9-]+", Pattern.CASE_INSENSITIVE).matcher(words);
+        if (mentioned.find()) {
+            code = mentioned.group();
         }
-        if(warehouseMapper==null) {params.put("warehouseProblem","仓库数据暂不可用，请重试，未改用其他仓库");return;}
-        String wantedType=type,wantedCode=code;
-        var found=warehouseMapper.selectList(new LambdaQueryWrapper<WmsWarehouse>()
-                .eq(WmsWarehouse::getDeletedFlag,0).eq(WmsWarehouse::getStatus,BusinessStatus.Common.ENABLE))
-                .stream().filter(w->!StringUtils.hasText(wantedType)||wantedType.equalsIgnoreCase(w.getWarehouseType()))
-                .filter(w->!StringUtils.hasText(wantedCode)||wantedCode.equalsIgnoreCase(w.getWarehouseCode())).toList();
-        if(found.size()!=1) {params.put("warehouseProblem",found.isEmpty()?"没有找到指定的启用仓库，请核对类型或编码；未改用原料仓":"该类型有多个仓库，请明确仓库编码后再预览");return;}
-        params.put("warehouseId",found.getFirst().getWarehouseId());
-        params.put("warehouseName",found.getFirst().getWarehouseName());
-        params.put("warehouseType",found.getFirst().getWarehouseType());
+        if (!StringUtils.hasText(type) && !StringUtils.hasText(code)) {
+            Long id = firstIssueableWarehouseId();
+            if (id != null) {
+                params.put("warehouseId", id);
+            }
+            return;
+        }
+        findRequestedIssueWarehouse(type, code, params);
+    }
+
+    private String requestedIssueWarehouseType(String words, Map<String, Object> params) {
+        String type = textOf(params.get("warehouseType"));
+        if (words.contains("半成品")) {
+            type = "SEMI_FINISHED";
+        } else if (words.contains("原料") || words.contains("原材料")) {
+            type = "RAW";
+        }
+        return type;
+    }
+
+    private boolean fillSelectedIssueWarehouse(Map<String, Object> params, String type) {
+        Long warehouseId = longOf(params.get("warehouseId"));
+        if (warehouseId == null) {
+            return false;
+        }
+        if (StringUtils.hasText(type)) {
+            params.put("warehouseType", type);
+        }
+        WmsWarehouse selected = loadWarehouse(warehouseId);
+        if (selected != null) {
+            params.put("warehouseName", selected.getWarehouseName());
+        }
+        return true;
+    }
+
+    private void findRequestedIssueWarehouse(String type, String code, Map<String, Object> params) {
+        if (warehouseMapper == null) {
+            params.put("warehouseProblem", "仓库数据暂不可用，请重试，未改用其他仓库");
+            return;
+        }
+        var found = warehouseMapper.selectList(new LambdaQueryWrapper<WmsWarehouse>().eq(WmsWarehouse::getDeletedFlag, 0).eq(WmsWarehouse::getStatus, BusinessStatus.Common.ENABLE)).stream().filter(w -> !StringUtils.hasText(type) || type.equalsIgnoreCase(w.getWarehouseType())).filter(w -> !StringUtils.hasText(code) || code.equalsIgnoreCase(w.getWarehouseCode())).toList();
+        if (found.size() != 1) {
+            params.put("warehouseProblem", found.isEmpty() ? "没有找到指定的启用仓库，请核对类型或编码；未改用原料仓" : "该类型有多个仓库，请明确仓库编码后再预览");
+            return;
+        }
+        params.put("warehouseId", found.getFirst().getWarehouseId());
+        params.put("warehouseName", found.getFirst().getWarehouseName());
+        params.put("warehouseType", found.getFirst().getWarehouseType());
     }
 
     /** 转线边使用实际消耗工单的产线推荐库位，明确选择的库位仍由领域服务核查。 */
@@ -4228,94 +4259,32 @@ public class AiCommandServiceImpl implements AiCommandService {
                 .eq(MfgTask::getDeletedFlag, 0));
     }
 
-    private void evaluateStartTask(Target target, List<Map<String, Object>> preconditions,
-                                   List<Map<String, Object>> impacts, List<String> warnings) {
+    private void evaluateStartTask(Target target, List<Map<String, Object>> preconditions, List<Map<String, Object>> impacts, List<String> warnings) {
         MfgTask task = target != null && target.entity() instanceof MfgTask entity ? entity : null;
-        addPrecondition(preconditions, "TASK_EXISTS", "工序任务存在", task != null,
-                task == null ? "未找到工序任务" : "任务 " + task.getTaskNo());
-        addPrecondition(preconditions, "TASK_WAIT_START", "任务处于待开工状态",
-                task != null && BusinessStatus.Production.WAIT_START.equals(task.getStatus()),
-                task == null ? "无任务状态" : "当前状态：" + statusText(task.getStatus()));
-        if (task != null && task.getStationId() != null && taskMapper != null) {
-            long running = taskMapper.selectCount(new LambdaQueryWrapper<MfgTask>()
-                    .eq(MfgTask::getStationId, task.getStationId())
-                    .eq(MfgTask::getStatus, BusinessStatus.Production.RUNNING)
-                    .eq(MfgTask::getDeletedFlag, 0).ne(MfgTask::getTaskId, task.getTaskId()));
-            addPrecondition(preconditions, "TASK_STATION_FREE", "工位当前没有其他生产中的任务", running == 0,
-                    running == 0 ? "工位空闲" : "工位被其他生产任务占用，请先处理占用任务或更换合适工位");
-        } else {
-            addPrecondition(preconditions, "TASK_STATION_FREE", "已分配可核查工位", false,
-                    "任务没有可核查的工位，请先核对派工");
-        }
+        addPrecondition(preconditions, "TASK_EXISTS", "工序任务存在", task != null, task == null ? "未找到工序任务" : "任务 " + task.getTaskNo());
+        addPrecondition(preconditions, "TASK_WAIT_START", "任务处于待开工状态", task != null && BusinessStatus.Production.WAIT_START.equals(task.getStatus()), task == null ? "无任务状态" : "当前状态：" + statusText(task.getStatus()));
+        evaluateTaskStation(task, preconditions);
         addImpact(impacts, "HIGH", "开工后任务进入生产中，可按真实完成情况报工。");
-        if (task != null) {
-            boolean ready = false;
-            String detail = "前序核查服务不可用，请稍后重新检查";
-            if (aiTaskService != null) {
-                try {
-                    aiTaskService.checkTaskPredecessors(task.getTaskId());
-                    ready = true;
-                    detail = "冻结路线前序已完成且合格数量满足";
-                } catch (BusinessException e) {
-                    detail = e.getMessage();
-                }
-            }
-            addPrecondition(preconditions, "TASK_PREDECESSORS", "冻结路线前序与合格数量满足开工条件", ready, detail);
-        }
+        evaluateTaskPredecessors(task, preconditions);
         warnings.add("执行时还会检查操作人员、工位、物料和前序工序；未通过时不会开工。");
     }
 
     /** 提交报工：任务必须在生产中、还有剩余可报数量，且本次数量大于 0。 */
-    private void evaluateSubmitWorkReport(Target target, Map<String, Object> params,
-                                          List<Map<String, Object>> preconditions,
-                                          List<Map<String, Object>> impacts, List<String> warnings) {
+    private void evaluateSubmitWorkReport(Target target, Map<String, Object> params, List<Map<String, Object>> preconditions, List<Map<String, Object>> impacts, List<String> warnings) {
         MfgTask task = target != null && target.entity() instanceof MfgTask entity ? entity : null;
-        addPrecondition(preconditions, "TASK_EXISTS", "工序任务存在且未删除", task != null,
-                task == null ? "未找到工序任务" : "工序任务 " + task.getTaskNo());
+        addPrecondition(preconditions, "TASK_EXISTS", "工序任务存在且未删除", task != null, task == null ? "未找到工序任务" : "工序任务 " + task.getTaskNo());
         boolean running = task != null && "RUNNING".equals(task.getStatus());
-        addPrecondition(preconditions, "TASK_RUNNING", "工序任务处于生产中", running,
-                task == null ? "无任务状态" : "当前状态：" + statusText(task.getStatus()));
-        BigDecimal planned = task == null ? BigDecimal.ZERO : zeroOf(task.getPlannedQuantity());
-        BigDecimal done = task == null ? BigDecimal.ZERO : zeroOf(task.getCompletedQuantity());
-        BigDecimal remaining = planned.subtract(done);
-        boolean hasRemaining = remaining.signum() > 0;
-        addPrecondition(preconditions, "TASK_REMAINING", "还有剩余可报数量", hasRemaining,
-                "计划 " + plainQuantity(planned) + "，已报 " + plainQuantity(done)
-                        + "，剩余 " + plainQuantity(remaining));
+        addPrecondition(preconditions, "TASK_RUNNING", "工序任务处于生产中", running, task == null ? "无任务状态" : "当前状态：" + statusText(task.getStatus()));
+        BigDecimal remaining = reportTaskRemaining(task, preconditions);
         BigDecimal qualified = decimalOf(params.get("qualifiedQuantity"));
         BigDecimal defect = decimalOf(params.get("defectQuantity"));
-        addPrecondition(preconditions, "REPORT_ACTUAL_QUANTITY", "已明确本次实际合格数量",
-                qualified != null, qualified == null ? "请提供本次实际合格数量和不良数量" : "已提供合格数量");
+        addPrecondition(preconditions, "REPORT_ACTUAL_QUANTITY", "已明确本次实际合格数量", qualified != null, qualified == null ? "请提供本次实际合格数量和不良数量" : "已提供合格数量");
         BigDecimal total = zeroOf(qualified).add(zeroOf(defect));
-        addPrecondition(preconditions, "REPORT_QUANTITY", "本次合格和不良数量不能为负且合计大于 0",
-                qualified != null && qualified.signum() >= 0 && zeroOf(defect).signum() >= 0 && total.signum() > 0,
-                "本次合格 " + plainQuantity(zeroOf(qualified)) + "，不良 " + plainQuantity(zeroOf(defect)));
+        addPrecondition(preconditions, "REPORT_QUANTITY", "本次合格和不良数量不能为负且合计大于 0", qualified != null && qualified.signum() >= 0 && zeroOf(defect).signum() >= 0 && total.signum() > 0, "本次合格 " + plainQuantity(zeroOf(qualified)) + "，不良 " + plainQuantity(zeroOf(defect)));
         boolean withinRemaining = total.signum() > 0 && total.compareTo(remaining) <= 0;
-        addPrecondition(preconditions, "REPORT_WITHIN_REMAINING", "本次数量不超过剩余可报数量", withinRemaining,
-                withinRemaining ? "可提交" : total.signum() <= 0 ? "请先填写大于零的实际报工数量"
-                        : "本次 " + plainQuantity(total) + " 超过剩余 " + plainQuantity(remaining));
+        addPrecondition(preconditions, "REPORT_WITHIN_REMAINING", "本次数量不超过剩余可报数量", withinRemaining, reportQuantityDetail(withinRemaining, total, remaining));
         if (task != null && withinRemaining) {
-            try {
-                var materials = reportMaterials(task.getTaskId(), total);
-                String materialSnapshot = materials.stream()
-                        .map(material -> material.getMaterialId() + ":" + material.getBatchId() + ":"
-                                + plainQuantity(material.getUsedQuantity()))
-                        .sorted().collect(java.util.stream.Collectors.joining("|"));
-                Object previousSnapshot = params.putIfAbsent("reportMaterialSnapshot", materialSnapshot);
-                boolean unchanged = previousSnapshot == null || materialSnapshot.equals(previousSnapshot.toString());
-                addPrecondition(preconditions, "REPORT_MATERIAL_PREPARATION", "用料批次准备成功", true,
-                        materials.isEmpty() ? "本工序无直接投料明细" : "请核对以下建议用料");
-                addPrecondition(preconditions, "REPORT_MATERIAL_UNCHANGED", "用料批次与预览一致", unchanged,
-                        unchanged ? "用料未变化" : "用料已变化，请重新预览并确认");
-                for (var material : materials) {
-                    addImpact(impacts, "MEDIUM", "建议用料：物料 " + material.getMaterialId()
-                            + "，批次 " + material.getBatchId() + "，数量 " + plainQuantity(material.getUsedQuantity()));
-                }
-                warnings.add("建议用料按合格与不良总数计算，确认前请核对实际批次和数量；执行时会重新检查。");
-            } catch (RuntimeException error) {
-                addPrecondition(preconditions, "REPORT_MATERIAL_PREPARATION", "用料批次准备成功", false,
-                        "用料准备失败：" + error.getMessage());
-            }
+            evaluateReportMaterials(task, total, params, preconditions, impacts, warnings);
         }
         addImpact(impacts, "HIGH", "提交后生成待审核报工单，并联动工单完工进度。");
         addImpact(impacts, "LOW", "审核通过后才会进入工单合格数量。");
@@ -4397,32 +4366,22 @@ public class AiCommandServiceImpl implements AiCommandService {
             return "检验单查询不可用";
         }
         QmsInspectionOrder inspection = inspectionOrderMapper.selectById(outbound.getInspectionId());
-        if (inspection == null) {
-            return "检验单不存在或已删除";
-        }
-        return "检验单 " + inspection.getInspectionNo() + " 状态："
-                + statusText(inspection.getStatus()) + "，结论：" + statusText(inspection.getInspectionResult());
+        return inspection == null ? "检验单不存在或已删除" : "检验单 " + inspection.getInspectionNo() + " 状态：" + statusText(inspection.getStatus()) + "，结论：" + statusText(inspection.getInspectionResult());
     }
 
-    private void evaluateGenerateWorkOrder(Target target, Map<String, Object> params,
-                                           List<Map<String, Object>> preconditions, List<Map<String, Object>> impacts) {
+    private void evaluateGenerateWorkOrder(Target target, Map<String, Object> params, List<Map<String, Object>> preconditions, List<Map<String, Object>> impacts) {
         boolean orderExists = target != null && target.id() != null;
         addPrecondition(preconditions, "ORDER", "生产订单存在", orderExists, orderExists ? target.no() : "未找到生产订单");
         Long selectedPlan = longOf(params.get("generationPlanId"));
         boolean planMatches = false;
         if (orderExists && selectedPlan != null && productionPlanMapper != null && workOrderMapper != null) {
             var plan = productionPlanMapper.selectById(selectedPlan);
-            if (plan != null && java.util.Objects.equals(plan.getProductionOrderId(), target.id())
-                    && Integer.valueOf(0).equals(plan.getDeletedFlag())
-                    && !"COMPONENT".equals(plan.getPlanType())
-                    && BusinessStatus.Document.RELEASED.equals(plan.getStatus())) {
-                Long count = workOrderMapper.selectCount(new LambdaQueryWrapper<MfgWorkOrder>()
-                        .eq(MfgWorkOrder::getPlanId, selectedPlan).eq(MfgWorkOrder::getDeletedFlag, 0));
+            if (matchesGenerationPlan(plan, target.id())) {
+                Long count = workOrderMapper.selectCount(new LambdaQueryWrapper<MfgWorkOrder>().eq(MfgWorkOrder::getPlanId, selectedPlan).eq(MfgWorkOrder::getDeletedFlag, 0));
                 planMatches = count != null && count == 0;
             }
         }
-        addPrecondition(preconditions, "PLAN", "唯一已生效计划尚未生成工单", planMatches,
-                planMatches ? "计划已核对；执行时再次校验物料、工艺和资源。" : "未找到唯一可生成工单的计划，或计划已生成工单。");
+        addPrecondition(preconditions, "PLAN", "唯一已生效计划尚未生成工单", planMatches, planMatches ? "计划已核对；执行时再次校验物料、工艺和资源。" : "未找到唯一可生成工单的计划，或计划已生成工单。");
         addImpact(impacts, "HIGH", "确认后生成根工单及所需组件工单，并可能预留物料；不会自动报工或填写检验结果。");
         addImpact(impacts, "MEDIUM", "生成组件工单时会按当前资源重新落实排产时段，可能调整关联计划；生成后以最新计划和工单时段为准。");
     }
@@ -4491,35 +4450,18 @@ public class AiCommandServiceImpl implements AiCommandService {
         }
     }
 
-    private void evaluateGenerateDispatch(Target target, Map<String, Object> params,
-                                          List<Map<String, Object>> preconditions, List<Map<String, Object>> impacts) {
+    private void evaluateGenerateDispatch(Target target, Map<String, Object> params, List<Map<String, Object>> preconditions, List<Map<String, Object>> impacts) {
         MfgWorkOrder order = target != null && target.entity() instanceof MfgWorkOrder wo ? wo : null;
         boolean released = order != null && BusinessStatus.Document.RELEASED.equals(order.getStatus());
-        addPrecondition(preconditions, "WORK_ORDER", "工单已下达", released,
-                order == null ? "工单不存在" : "当前状态：" + statusText(order.getStatus()));
+        addPrecondition(preconditions, "WORK_ORDER", "工单已下达", released, order == null ? "工单不存在" : "当前状态：" + statusText(order.getStatus()));
         Long teamId = longOf(params.get("dispatchTeamId"));
-        String problem = stringParam(params, "dispatchProblem");
-        if (released && teamId != null && aiDispatchService != null) {
-            try {
-                var current = aiDispatchService.previewDispatch(order.getWorkOrderId());
-                aiDispatchService.validateDispatchMaterials(order.getWorkOrderId());
-                if (!current.blockers().isEmpty()) problem = String.join("；", current.blockers());
-                else if (current.teams().stream().noneMatch(team -> java.util.Objects.equals(team.teamId(), teamId)))
-                    problem = "所选班组当前不可用，请重新预览";
-            } catch (BusinessException ex) { problem = ex.getMessage(); }
-        } else if (!StringUtils.hasText(problem)) problem = "未选定有效班组或派工服务不可用";
-        addPrecondition(preconditions, "PREPARATION", "班组、产能及本级用料满足派工条件",
-                !StringUtils.hasText(problem), StringUtils.hasText(problem) ? problem : "条件已检查，执行时再次核对");
+        String problem = dispatchPreparationProblem(order, released, teamId, stringParam(params, "dispatchProblem"));
+        addPrecondition(preconditions, "PREPARATION", "班组、产能及本级用料满足派工条件", !StringUtils.hasText(problem), StringUtils.hasText(problem) ? problem : "条件已检查，执行时再次核对");
         Long count = null;
         if (order != null && aiDispatchMapper != null) {
-            count = aiDispatchMapper.selectCount(new LambdaQueryWrapper<com.neuedu.ems.entity.mfg.MfgDispatchOrder>()
-                    .eq(com.neuedu.ems.entity.mfg.MfgDispatchOrder::getWorkOrderId, order.getWorkOrderId())
-                    .eq(com.neuedu.ems.entity.mfg.MfgDispatchOrder::getDeletedFlag, 0)
-                    .notIn(com.neuedu.ems.entity.mfg.MfgDispatchOrder::getStatus,
-                            BusinessStatus.Document.REJECTED, BusinessStatus.Document.CLOSED));
+            count = aiDispatchMapper.selectCount(new LambdaQueryWrapper<com.neuedu.ems.entity.mfg.MfgDispatchOrder>().eq(com.neuedu.ems.entity.mfg.MfgDispatchOrder::getWorkOrderId, order.getWorkOrderId()).eq(com.neuedu.ems.entity.mfg.MfgDispatchOrder::getDeletedFlag, 0).notIn(com.neuedu.ems.entity.mfg.MfgDispatchOrder::getStatus, BusinessStatus.Document.REJECTED, BusinessStatus.Document.CLOSED));
         }
-        addPrecondition(preconditions, "DUPLICATE", "工单没有有效派工单", count != null && count == 0,
-                count == null ? "无法检查派工单" : count > 0 ? "工单已有有效派工单" : "未发现有效派工单");
+        addPrecondition(preconditions, "DUPLICATE", "工单没有有效派工单", count != null && count == 0, describeDispatchCount(count));
         addImpact(impacts, "HIGH", "确认后为工单和所选班组生成待派发的派工单；不会自动报工或填写检验结果。");
     }
 
@@ -4779,30 +4721,20 @@ public class AiCommandServiceImpl implements AiCommandService {
                 .allMatch(task -> BusinessStatus.Production.WAIT_START.equals(task.getStatus()));
     }
 
-    private void evaluateMaterialIssue(Target target, Map<String, Object> params,
-                                       List<Map<String, Object>> preconditions,
-                                       List<Map<String, Object>> impacts, List<String> warnings) {
+    private void evaluateMaterialIssue(Target target, Map<String, Object> params, List<Map<String, Object>> preconditions, List<Map<String, Object>> impacts, List<String> warnings) {
         MfgWorkOrder order = target.entity() instanceof MfgWorkOrder wo ? wo : null;
-        addPrecondition(preconditions, "WORK_ORDER_EXISTS", "工单存在且未删除", order != null,
-                describeWorkOrderFound(order, target));
+        addPrecondition(preconditions, "WORK_ORDER_EXISTS", "工单存在且未删除", order != null, describeWorkOrderFound(order, target));
         String status = order == null ? null : order.getStatus();
-        addPrecondition(preconditions, "WORK_ORDER_STATUS", "工单状态为 RELEASED 或 RUNNING",
-                isReleasedOrRunning(status), "当前状态：" + statusText(status));
+        addPrecondition(preconditions, "WORK_ORDER_STATUS", "工单状态为 RELEASED 或 RUNNING", isReleasedOrRunning(status), "当前状态：" + statusText(status));
         WmsWarehouse warehouse = loadWarehouse(longOf(params.get("warehouseId")));
-        boolean warehouseOk = isIssueableWarehouse(warehouse) && !StringUtils.hasText(textOf(params.get("warehouseProblem")))
-                && (!StringUtils.hasText(textOf(params.get("warehouseType")))
-                    || textOf(params.get("warehouseType")).equalsIgnoreCase(warehouse.getWarehouseType()));
-        addPrecondition(preconditions, "WAREHOUSE_VALID", "领料仓库为启用中的原料仓或半成品仓", warehouseOk,
-                StringUtils.hasText(textOf(params.get("warehouseProblem")))?textOf(params.get("warehouseProblem")):
-                    warehouseOk?describeWarehouse(warehouse):"仓库与指定供给方式不一致或未启用，请重新选择；未改用其他仓库");
+        boolean warehouseOk = isIssueableWarehouse(warehouse) && !StringUtils.hasText(textOf(params.get("warehouseProblem"))) && (!StringUtils.hasText(textOf(params.get("warehouseType"))) || textOf(params.get("warehouseType")).equalsIgnoreCase(warehouse.getWarehouseType()));
+        addPrecondition(preconditions, "WAREHOUSE_VALID", "领料仓库为启用中的原料仓或半成品仓", warehouseOk, describeIssueWarehouse(params, warehouse, warehouseOk));
         long shortage = countMaterialShortage(order);
-        addPrecondition(preconditions, "MATERIAL_SHORTAGE", "存在未领足的用料需求", shortage > 0,
-                "未领足用料 " + shortage + " 项");
+        addPrecondition(preconditions, "MATERIAL_SHORTAGE", "存在未领足的用料需求", shortage > 0, "未领足用料 " + shortage + " 项");
         // 「还有东西要领」不等于「库存够领」。原来只判前者，导致卡片四项全绿、点确认却必然
         // 被领料单的齐套校验拦下。这里按工单与仓库真实算一遍可分配量，缺多少直接说清。
         String stockGap = validateDomainMaterialAvailability(order, warehouse);
-        addPrecondition(preconditions, "MATERIAL_AVAILABLE", "仓库供给份额可按实际领料规则分配",
-                stockGap == null, describeStockAvailability(stockGap));
+        addPrecondition(preconditions, "MATERIAL_AVAILABLE", "仓库供给份额可按实际领料规则分配", stockGap == null, describeStockAvailability(stockGap));
         long submitted = countSubmittedMaterialIssue(order);
         addImpact(impacts, "HIGH", "按工单用料缺口生成一张领料出库单，状态为 SUBMITTED，等待转线边与出库确认。");
         addImpact(impacts, "LOW", "领料单生成时不扣库存；库存组件先完成领用复验，再执行「领料转线边」，扣减所选仓库并形成线边占用。");
@@ -5070,34 +5002,17 @@ public class AiCommandServiceImpl implements AiCommandService {
                 .eq(WmsOutboundOrder::getDeletedFlag, 0));
     }
 
-    private void evaluateTransfer(Target target, Map<String, Object> params,
-                                  List<Map<String, Object>> preconditions,
-                                  List<Map<String, Object>> impacts, List<String> warnings) {
+    private void evaluateTransfer(Target target, Map<String, Object> params, List<Map<String, Object>> preconditions, List<Map<String, Object>> impacts, List<String> warnings) {
         WmsOutboundOrder outbound = target.entity() instanceof WmsOutboundOrder order ? order : null;
-        addPrecondition(preconditions, "OUTBOUND_EXISTS", "领料单存在且未删除", outbound != null,
-                describeOutboundFound(outbound, target));
-        addPrecondition(preconditions, "OUTBOUND_TYPE", "单据类型为领料出库（MATERIAL_ISSUE）",
-                isMaterialIssue(outbound), describeOutboundType(outbound));
-        addPrecondition(preconditions, "OUTBOUND_AUDIT", "领料单状态为 SUBMITTED（待确认）",
-                isSubmitted(outbound), describeAuditStatus(outbound));
+        addPrecondition(preconditions, "OUTBOUND_EXISTS", "领料单存在且未删除", outbound != null, describeOutboundFound(outbound, target));
+        addPrecondition(preconditions, "OUTBOUND_TYPE", "单据类型为领料出库（MATERIAL_ISSUE）", isMaterialIssue(outbound), describeOutboundType(outbound));
+        addPrecondition(preconditions, "OUTBOUND_AUDIT", "领料单状态为 SUBMITTED（待确认）", isSubmitted(outbound), describeAuditStatus(outbound));
         MfgWorkOrder order = loadRelatedWorkOrder(outbound);
-        addPrecondition(preconditions, "WORK_ORDER_STATUS", "关联工单处于 RELEASED 或 RUNNING",
-                order != null && isReleasedOrRunning(order.getStatus()), describeRelatedWorkOrder(order));
+        addPrecondition(preconditions, "WORK_ORDER_STATUS", "关联工单处于 RELEASED 或 RUNNING", order != null && isReleasedOrRunning(order.getStatus()), describeRelatedWorkOrder(order));
         WmsLocation location = loadLocation(longOf(params.get("targetLocationId")));
         WmsWarehouse locationWarehouse = loadWarehouse(location == null ? null : location.getWarehouseId());
-        addPrecondition(preconditions, "TARGET_LOCATION", "目标库位为线边仓下的正常库位",
-                isLineSideLocation(location, locationWarehouse),
-                describeTransferTarget(location, locationWarehouse, params));
-        if(outbound!=null && location!=null && outboundOrderService!=null) {
-            try {
-                outboundOrderService.validateLineSideTransfer(outbound.getOutboundId(),location.getLocationId());
-                addPrecondition(preconditions,"TRANSFER_ELIGIBILITY","领用检验、上级工单和实际转线边条件通过",true,"按正式业务规则核对，执行时再次校验");
-            } catch(RuntimeException error) {
-                String reason=error instanceof BusinessException?error.getMessage():"暂时无法检查转线边条件，请稍后重新检查；未执行移库。持续失败时请联系管理员。";
-                if(!(error instanceof BusinessException)) LOGGER.warn("Line-side preflight failed for outbound {}",outbound.getOutboundNo(),error);
-                addPrecondition(preconditions,"TRANSFER_ELIGIBILITY","领用检验、上级工单和实际转线边条件通过",false,reason);
-            }
-        } else addPrecondition(preconditions,"TRANSFER_ELIGIBILITY","正式转线边条件可核对",false,"本轮无法核对转线边业务条件，请恢复服务后重新检查，未执行移库");
+        addPrecondition(preconditions, "TARGET_LOCATION", "目标库位为线边仓下的正常库位", isLineSideLocation(location, locationWarehouse), describeTransferTarget(location, locationWarehouse, params));
+        evaluateLineSideEligibility(outbound, location, preconditions);
         addImpact(impacts, "HIGH", "领料单从所选供给仓移库到线边仓，库存地点发生变化，总量不变。");
         addImpact(impacts, "MEDIUM", "移库完成即扣减供给仓可用量、按实际归属工单增加线边占用，并把领料单置为已确认。");
         if (outbound != null && BusinessStatus.Document.APPROVED.equals(outbound.getAuditStatus())) {
@@ -5631,11 +5546,9 @@ public class AiCommandServiceImpl implements AiCommandService {
         if (inspectionId == null) {
             throw new BusinessException(ResultCode.BUSINESS_ERROR.getCode(), "出货检验单生成未生效");
         }
-        String inspectionNo = inspectionOrderMapper == null ? null
-                : inspectionOrderMapper.selectById(inspectionId) == null ? null
-                : inspectionOrderMapper.selectById(inspectionId).getInspectionNo();
-        return new BizResult(inspectionNo == null ? "#" + inspectionId : inspectionNo, inspectionId,
-                "已生成出货检验单，录入检验结果合格后才能确认发货");
+        QmsInspectionOrder inspection = inspectionOrderMapper == null ? null : inspectionOrderMapper.selectById(inspectionId);
+        String inspectionNo = inspection == null ? null : inspection.getInspectionNo();
+        return new BizResult(inspectionNo == null ? "#" + inspectionId : inspectionNo, inspectionId, "已生成出货检验单，录入检验结果合格后才能确认发货");
     }
 
     /** 确认发货：扣减成品库存并回写销售订单已发数量。 */
@@ -5647,11 +5560,9 @@ public class AiCommandServiceImpl implements AiCommandService {
         if (!ok) {
             throw new BusinessException(ResultCode.BUSINESS_ERROR.getCode(), "确认发货未生效");
         }
-        String outboundNo = outboundOrderMapper == null ? null
-                : outboundOrderMapper.selectById(targetId) == null ? null
-                : outboundOrderMapper.selectById(targetId).getOutboundNo();
-        return new BizResult(outboundNo == null ? "#" + targetId : outboundNo, targetId,
-                "已确认发货，成品库存与销售订单已发数量已更新");
+        WmsOutboundOrder outbound = outboundOrderMapper == null ? null : outboundOrderMapper.selectById(targetId);
+        String outboundNo = outbound == null ? null : outbound.getOutboundNo();
+        return new BizResult(outboundNo == null ? "#" + targetId : outboundNo, targetId, "已确认发货，成品库存与销售订单已发数量已更新");
     }
 
     /**
@@ -6276,5 +6187,128 @@ public class AiCommandServiceImpl implements AiCommandService {
     }
 
     private record BizResult(String bizNo, Long bizId, String summary) {
+    }
+
+    private void evaluateTaskStation(MfgTask task, List<Map<String, Object>> preconditions) {
+        if (task != null && task.getStationId() != null && taskMapper != null) {
+            long running = taskMapper.selectCount(new LambdaQueryWrapper<MfgTask>().eq(MfgTask::getStationId, task.getStationId()).eq(MfgTask::getStatus, BusinessStatus.Production.RUNNING).eq(MfgTask::getDeletedFlag, 0).ne(MfgTask::getTaskId, task.getTaskId()));
+            addPrecondition(preconditions, "TASK_STATION_FREE", "工位当前没有其他生产中的任务", running == 0, running == 0 ? "工位空闲" : "工位被其他生产任务占用，请先处理占用任务或更换合适工位");
+        } else {
+            addPrecondition(preconditions, "TASK_STATION_FREE", "已分配可核查工位", false, "任务没有可核查的工位，请先核对派工");
+        }
+    }
+
+    private void evaluateTaskPredecessors(MfgTask task, List<Map<String, Object>> preconditions) {
+        if (task != null) {
+            boolean ready = false;
+            String detail = "前序核查服务不可用，请稍后重新检查";
+            if (aiTaskService != null) {
+                try {
+                    aiTaskService.checkTaskPredecessors(task.getTaskId());
+                    ready = true;
+                    detail = "冻结路线前序已完成且合格数量满足";
+                } catch (BusinessException e) {
+                    detail = e.getMessage();
+                }
+            }
+            addPrecondition(preconditions, "TASK_PREDECESSORS", "冻结路线前序与合格数量满足开工条件", ready, detail);
+        }
+    }
+
+    private BigDecimal reportTaskRemaining(MfgTask task, List<Map<String, Object>> preconditions) {
+        BigDecimal planned = task == null ? BigDecimal.ZERO : zeroOf(task.getPlannedQuantity());
+        BigDecimal done = task == null ? BigDecimal.ZERO : zeroOf(task.getCompletedQuantity());
+        BigDecimal remaining = planned.subtract(done);
+        boolean hasRemaining = remaining.signum() > 0;
+        addPrecondition(preconditions, "TASK_REMAINING", "还有剩余可报数量", hasRemaining, "计划 " + plainQuantity(planned) + "，已报 " + plainQuantity(done) + "，剩余 " + plainQuantity(remaining));
+        return remaining;
+    }
+
+    private void evaluateReportMaterials(MfgTask task, BigDecimal total, Map<String, Object> params, List<Map<String, Object>> preconditions, List<Map<String, Object>> impacts, List<String> warnings) {
+        try {
+            var materials = reportMaterials(task.getTaskId(), total);
+            String materialSnapshot = materials.stream().map(material -> material.getMaterialId() + ":" + material.getBatchId() + ":" + plainQuantity(material.getUsedQuantity())).sorted().collect(java.util.stream.Collectors.joining("|"));
+            Object previousSnapshot = params.putIfAbsent("reportMaterialSnapshot", materialSnapshot);
+            boolean unchanged = previousSnapshot == null || materialSnapshot.equals(previousSnapshot.toString());
+            addPrecondition(preconditions, "REPORT_MATERIAL_PREPARATION", "用料批次准备成功", true, materials.isEmpty() ? "本工序无直接投料明细" : "请核对以下建议用料");
+            addPrecondition(preconditions, "REPORT_MATERIAL_UNCHANGED", "用料批次与预览一致", unchanged, unchanged ? "用料未变化" : "用料已变化，请重新预览并确认");
+            for (var material : materials) {
+                addImpact(impacts, "MEDIUM", "建议用料：物料 " + material.getMaterialId() + "，批次 " + material.getBatchId() + "，数量 " + plainQuantity(material.getUsedQuantity()));
+            }
+            warnings.add("建议用料按合格与不良总数计算，确认前请核对实际批次和数量；执行时会重新检查。");
+        } catch (RuntimeException error) {
+            addPrecondition(preconditions, "REPORT_MATERIAL_PREPARATION", "用料批次准备成功", false, "用料准备失败：" + error.getMessage());
+        }
+    }
+
+    private String reportQuantityDetail(boolean withinRemaining, BigDecimal total, BigDecimal remaining) {
+        if (withinRemaining) {
+            return "可提交";
+        }
+        if (total.signum() <= 0) {
+            return "请先填写大于零的实际报工数量";
+        }
+        return "本次 " + plainQuantity(total) + " 超过剩余 " + plainQuantity(remaining);
+    }
+
+    private String dispatchPreparationProblem(MfgWorkOrder order, boolean released, Long teamId, String problem) {
+        if (released && teamId != null && aiDispatchService != null) {
+            return recheckDispatchPreparation(order, teamId, problem);
+        }
+        return StringUtils.hasText(problem) ? problem : "未选定有效班组或派工服务不可用";
+    }
+
+    private String recheckDispatchPreparation(MfgWorkOrder order, Long teamId, String problem) {
+        try {
+            var current = aiDispatchService.previewDispatch(order.getWorkOrderId());
+            aiDispatchService.validateDispatchMaterials(order.getWorkOrderId());
+            if (!current.blockers().isEmpty()) {
+                problem = String.join("；", current.blockers());
+            } else if (current.teams().stream().noneMatch(team -> java.util.Objects.equals(team.teamId(), teamId))) {
+                problem = "所选班组当前不可用，请重新预览";
+            }
+        } catch (BusinessException ex) {
+            problem = ex.getMessage();
+        }
+        return problem;
+    }
+
+    private String describeDispatchCount(Long count) {
+        if (count == null) {
+            return "无法检查派工单";
+        }
+        return count > 0 ? "工单已有有效派工单" : "未发现有效派工单";
+    }
+
+    private void evaluateLineSideEligibility(WmsOutboundOrder outbound, WmsLocation location, List<Map<String, Object>> preconditions) {
+        if (outbound != null && location != null && outboundOrderService != null) {
+            try {
+                outboundOrderService.validateLineSideTransfer(outbound.getOutboundId(), location.getLocationId());
+                addPrecondition(preconditions, "TRANSFER_ELIGIBILITY", "领用检验、上级工单和实际转线边条件通过", true, "按正式业务规则核对，执行时再次校验");
+            } catch (RuntimeException error) {
+                String reason = error instanceof BusinessException ? error.getMessage() : "暂时无法检查转线边条件，请稍后重新检查；未执行移库。持续失败时请联系管理员。";
+                if (!(error instanceof BusinessException))
+                    LOGGER.warn("Line-side preflight failed for outbound {}", outbound.getOutboundNo(), error);
+                addPrecondition(preconditions, "TRANSFER_ELIGIBILITY", "领用检验、上级工单和实际转线边条件通过", false, reason);
+            }
+        } else
+            addPrecondition(preconditions, "TRANSFER_ELIGIBILITY", "正式转线边条件可核对", false, "本轮无法核对转线边业务条件，请恢复服务后重新检查，未执行移库");
+    }
+
+    private boolean needsCreationIdempotencyKey(String action) {
+        return java.util.Set.of(ACTION_CREATE_PRODUCTION_ORDER, ACTION_GENERATE_WORK_ORDER, ACTION_GENERATE_DISPATCH, ACTION_SCHEDULE_PRODUCTION_ORDER).contains(action);
+    }
+
+    private boolean matchesGenerationPlan(com.neuedu.ems.entity.mfg.MfgProductionPlan plan, Long orderId) {
+        boolean active = plan != null && Integer.valueOf(0).equals(plan.getDeletedFlag()) && !"COMPONENT".equals(plan.getPlanType());
+        return active && java.util.Objects.equals(plan.getProductionOrderId(), orderId) && BusinessStatus.Document.RELEASED.equals(plan.getStatus());
+    }
+
+    private String describeIssueWarehouse(Map<String, Object> params, WmsWarehouse warehouse, boolean warehouseOk) {
+        String problem = textOf(params.get("warehouseProblem"));
+        if (StringUtils.hasText(problem)) {
+            return problem;
+        }
+        return warehouseOk ? describeWarehouse(warehouse) : "仓库与指定供给方式不一致或未启用，请重新选择；未改用其他仓库";
     }
 }

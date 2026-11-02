@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 入库单列表页：仓库人员查看待处理和历史入库单。
 const guard = require('../../../utils/guard')
 const auth = require('../../../utils/auth')

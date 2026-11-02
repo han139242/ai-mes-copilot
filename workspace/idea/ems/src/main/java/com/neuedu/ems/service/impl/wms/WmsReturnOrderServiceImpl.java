@@ -667,18 +667,12 @@ public class WmsReturnOrderServiceImpl extends ServiceImpl<WmsReturnOrderMapper,
      * @param operatorId 操作人ID
      * @param now 操作时间
      */
-    private void restoreIssuedQuantities(WmsReturnOrder returnOrder, List<ReturnLine> lines,
-                                         Long operatorId, LocalDateTime now) {
+    private void restoreIssuedQuantities(WmsReturnOrder returnOrder, List<ReturnLine> lines, Long operatorId, LocalDateTime now) {
         Long workOrderId = returnOrder.getWorkOrderId();
         if (workOrderId == null || lines.isEmpty()) {
             return;
         }
-        List<MfgWorkOrderMaterial> requirements = mfgWorkOrderMaterialMapper.selectList(
-                new LambdaQueryWrapper<MfgWorkOrderMaterial>()
-                        .eq(MfgWorkOrderMaterial::getWorkOrderId, workOrderId)
-                        .eq(MfgWorkOrderMaterial::getDeletedFlag, 0)
-                        .orderByAsc(MfgWorkOrderMaterial::getRequirementId)
-                        .last("FOR UPDATE"));
+        List<MfgWorkOrderMaterial> requirements = mfgWorkOrderMaterialMapper.selectList(new LambdaQueryWrapper<MfgWorkOrderMaterial>().eq(MfgWorkOrderMaterial::getWorkOrderId, workOrderId).eq(MfgWorkOrderMaterial::getDeletedFlag, 0).orderByAsc(MfgWorkOrderMaterial::getRequirementId).last("FOR UPDATE"));
         if (requirements.isEmpty()) {
             return;
         }
@@ -693,37 +687,42 @@ public class WmsReturnOrderServiceImpl extends ServiceImpl<WmsReturnOrderMapper,
         }
         boolean touched = false;
         for (MfgWorkOrderMaterial requirement : requirements) {
-            BigDecimal pending = returnedByMaterial.get(requirement.getMaterialId());
-            if (pending == null || pending.signum() <= 0) {
-                continue;
+            if (restoreIssuedQuantity(requirement, returnedByMaterial, operatorId, now)) {
+                touched = true;
             }
-            BigDecimal issued = zero(requirement.getIssuedQuantity());
-            if (issued.signum() <= 0) {
-                continue;
-            }
-            BigDecimal applied = pending.min(issued);
-            BigDecimal newIssued = issued.subtract(applied);
-            BigDecimal required = zero(requirement.getRequiredQuantity());
-            BigDecimal shortage = required.subtract(newIssued).max(BigDecimal.ZERO);
-            MfgWorkOrderMaterial update = new MfgWorkOrderMaterial();
-            update.setRequirementId(requirement.getRequirementId());
-            update.setVersion(requirement.getVersion());
-            update.setIssuedQuantity(newIssued);
-            update.setShortageQuantity(shortage);
-            update.setStatus(readinessStatus(shortage, newIssued));
-            update.setUpdatedBy(operatorId);
-            update.setUpdatedTime(now);
-            if (mfgWorkOrderMaterialMapper.updateById(update) == 0) {
-                throw business(ResultCode.DATA_CONFLICT, "工单用料齐套状态已变化，请刷新后重试");
-            }
-            returnedByMaterial.put(requirement.getMaterialId(), pending.subtract(applied));
-            touched = true;
         }
         closeFullyReturnedOutboundOrders(lines, operatorId, now);
         if (touched) {
-            mfgDispatchOrders.ifAvailable(dispatch ->
-                    dispatch.refreshMaterialReadiness(workOrderId, operatorId));
+            mfgDispatchOrders.ifAvailable(dispatch -> dispatch.refreshMaterialReadiness(workOrderId, operatorId));
         }
+    }
+
+    private boolean restoreIssuedQuantity(MfgWorkOrderMaterial requirement, Map<Long, BigDecimal> returnedByMaterial, Long operatorId, LocalDateTime now) {
+        BigDecimal pending = returnedByMaterial.get(requirement.getMaterialId());
+        if (pending == null || pending.signum() <= 0) {
+            return false;
+        }
+        BigDecimal issued = zero(requirement.getIssuedQuantity());
+        if (issued.signum() <= 0) {
+            return false;
+        }
+        BigDecimal applied = pending.min(issued);
+        BigDecimal newIssued = issued.subtract(applied);
+        BigDecimal required = zero(requirement.getRequiredQuantity());
+        BigDecimal shortage = required.subtract(newIssued).max(BigDecimal.ZERO);
+        MfgWorkOrderMaterial update = new MfgWorkOrderMaterial();
+        update.setRequirementId(requirement.getRequirementId());
+        update.setVersion(requirement.getVersion());
+        update.setIssuedQuantity(newIssued);
+        update.setShortageQuantity(shortage);
+        update.setStatus(readinessStatus(shortage, newIssued));
+        update.setUpdatedBy(operatorId);
+        update.setUpdatedTime(now);
+        if (mfgWorkOrderMaterialMapper.updateById(update) == 0) {
+            throw business(ResultCode.DATA_CONFLICT, "工单用料齐套状态已变化，请刷新后重试");
+        }
+        returnedByMaterial.put(requirement.getMaterialId(), pending.subtract(applied));
+        return true;
     }
 
     /** 领料单所有明细都已被有效退料覆盖时，把出库单置为 CLOSED，解除「已领料」判定。 */
@@ -735,40 +734,42 @@ public class WmsReturnOrderServiceImpl extends ServiceImpl<WmsReturnOrderMapper,
             }
         }
         for (Long outboundId : outboundIds) {
-            WmsOutboundOrder order = wmsOutboundOrderMapper.selectById(outboundId);
-            if (order == null || CLOSED_STATUS.equals(order.getAuditStatus())) {
-                continue;
-            }
-            List<WmsOutboundDetail> details = wmsOutboundDetailMapper.selectList(
-                    new LambdaQueryWrapper<WmsOutboundDetail>()
-                            .eq(WmsOutboundDetail::getOutboundId, outboundId)
-                            .eq(WmsOutboundDetail::getDeletedFlag, 0));
-            if (details.isEmpty()) {
-                continue;
-            }
-            boolean fullyReturned = true;
-            for (WmsOutboundDetail detail : details) {
-                BigDecimal returned = zero(wmsReturnDetailMapper.sumActiveReturnedQuantity(detail.getDetailId(), null));
-                if (returned.compareTo(zero(detail.getOutboundQuantity())) < 0) {
-                    fullyReturned = false;
-                    break;
-                }
-            }
-            if (!fullyReturned) {
-                continue;
-            }
-            WmsOutboundOrder update = new WmsOutboundOrder();
-            update.setOutboundId(outboundId);
-            update.setVersion(order.getVersion());
-            update.setAuditStatus(CLOSED_STATUS);
-            update.setUpdatedBy(operatorId);
-            update.setUpdatedTime(now);
-            if (wmsOutboundOrderMapper.updateById(update) == 0) {
-                throw business(ResultCode.DATA_CONFLICT, "来源领料单状态已变化，请刷新后重试");
-            }
-            insertStatusChangeLog(outboundId, order.getAuditStatus(), CLOSED_STATUS,
-                    "WMS_OUTBOUND_ORDER", "RETURN_ALL_ISSUED", operatorId, "领料数量已全部退回", now);
+            closeReturnedOutboundOrder(outboundId, operatorId, now);
         }
+    }
+
+    private void closeReturnedOutboundOrder(Long outboundId, Long operatorId, LocalDateTime now) {
+        WmsOutboundOrder order = wmsOutboundOrderMapper.selectById(outboundId);
+        if (order == null || CLOSED_STATUS.equals(order.getAuditStatus())) {
+            return;
+        }
+        List<WmsOutboundDetail> details = wmsOutboundDetailMapper.selectList(new LambdaQueryWrapper<WmsOutboundDetail>().eq(WmsOutboundDetail::getOutboundId, outboundId).eq(WmsOutboundDetail::getDeletedFlag, 0));
+        if (details.isEmpty()) {
+            return;
+        }
+        if (!fullyReturned(details)) {
+            return;
+        }
+        WmsOutboundOrder update = new WmsOutboundOrder();
+        update.setOutboundId(outboundId);
+        update.setVersion(order.getVersion());
+        update.setAuditStatus(CLOSED_STATUS);
+        update.setUpdatedBy(operatorId);
+        update.setUpdatedTime(now);
+        if (wmsOutboundOrderMapper.updateById(update) == 0) {
+            throw business(ResultCode.DATA_CONFLICT, "来源领料单状态已变化，请刷新后重试");
+        }
+        insertStatusChangeLog(outboundId, order.getAuditStatus(), CLOSED_STATUS, "WMS_OUTBOUND_ORDER", "RETURN_ALL_ISSUED", operatorId, "领料数量已全部退回", now);
+    }
+
+    private boolean fullyReturned(List<WmsOutboundDetail> details) {
+        for (WmsOutboundDetail detail : details) {
+            BigDecimal returned = zero(wmsReturnDetailMapper.sumActiveReturnedQuantity(detail.getDetailId(), null));
+            if (returned.compareTo(zero(detail.getOutboundQuantity())) < 0) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** 按缺口与已领数量推导用料需求就绪状态，口径与领料确认保持一致。 */

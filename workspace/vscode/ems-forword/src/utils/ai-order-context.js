@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 只把用户明确提及的单号或成功创建的订单作为会话上下文。
 const ORDER_PATTERN = /\b[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*-PO-\d{8}-\d+\b/gi;
 
@@ -89,8 +92,8 @@ export function businessResultHistory(message) {
       const values = Object.entries(row).filter(
         ([key, value]) =>
           ['productionOrderNo', 'workOrderNo', 'dispatchOrderNo', 'taskNo', 'outboundNo', 'inboundNo',
-            'inspectionNo', 'lotNo', 'status', 'workOrderType', 'productName', 'action', 'actionLabel'].includes(key)
-          && ['string', 'number'].includes(typeof value),
+            'inspectionNo', 'lotNo', 'status', 'workOrderType', 'productName', 'action', 'actionLabel'].includes(key) &&
+          ['string', 'number'].includes(typeof value),
       );
       if (values.length) {
         rows.push(Object.fromEntries(values));

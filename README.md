@@ -84,5 +84,6 @@ node --test scripts/local-runtime.test.mjs scripts/ai-decision-preflight.test.mj
 - [环境配置、数据库初始化与启动](docs/SETUP.md)
 - [AI 能力、任务办理与业务边界](docs/FEATURES.md)
 - [测试范围与验证记录](docs/VERIFICATION.md)
+- [CodeArts 整改记录](docs/CODE_QUALITY.md)
 
 公开仓库保留源码、数据库结构迁移和示例数据，不包含个人报告、学号、答辩材料、共享数据库凭据、本机运行状态或私有历史记录。

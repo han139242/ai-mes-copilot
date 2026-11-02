@@ -10,9 +10,9 @@
 都由领域服务校验，和页面手工操作完全一致。
 
 用法：
-    python scripts/apply-lamp-team-schedule.py                # 默认补 30 天
-    python scripts/apply-lamp-team-schedule.py --days 60
-    python scripts/apply-lamp-team-schedule.py --dry-run
+    python scripts/apply_lamp_team_schedule.py                # 默认补 30 天
+    python scripts/apply_lamp_team_schedule.py --days 60
+    python scripts/apply_lamp_team_schedule.py --dry-run
 """
 
 import argparse

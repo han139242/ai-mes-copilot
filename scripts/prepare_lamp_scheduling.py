@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 import re
 import subprocess
+from cli_output import write_json
 
 
 def local_now():
@@ -102,7 +103,7 @@ def main():
         "basis": "现有早/午班总时长÷路线人工工时；非实测产能，批次由引擎另外占用连续时段",
     }
     if not args.apply:
-        print(json.dumps(report, ensure_ascii=False, indent=2))
+        write_json(report, ensure_ascii=False, indent=2)
         return
     backup_dir = ROOT / "tmp/backups" / ("lamp-scheduling-" + local_now().strftime("%Y%m%d-%H%M%S-%f"))
     backup_dir.mkdir(parents=True, exist_ok=False)
@@ -159,7 +160,7 @@ def main():
         "SELECT line_code,status,daily_capacity FROM factory_line " "WHERE deleted_flag=0 AND line_code LIKE 'LAMP-%'"
     ).splitlines()
     (backup_dir / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    write_json(report, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

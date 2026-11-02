@@ -1442,22 +1442,23 @@ public class WmsInboundOrderServiceImpl extends ServiceImpl<WmsInboundOrderMappe
         while (!level.isEmpty()) {
             List<Long> next = new java.util.ArrayList<>();
             for (Long current : level) {
-                if (!visited.add(current)) continue;
-                Long matched = mdmBomItemMapper.selectCount(new LambdaQueryWrapper<com.neuedu.ems.entity.mdm.MdmBomItem>()
-                        .eq(com.neuedu.ems.entity.mdm.MdmBomItem::getBomId, current)
-                        .eq(com.neuedu.ems.entity.mdm.MdmBomItem::getMaterialId, materialId)
-                        .eq(com.neuedu.ems.entity.mdm.MdmBomItem::getDeletedFlag, 0));
-                if (matched != null && matched > 0) return depth;
-                for (var item : mdmBomItemMapper.selectList(new LambdaQueryWrapper<com.neuedu.ems.entity.mdm.MdmBomItem>()
-                        .eq(com.neuedu.ems.entity.mdm.MdmBomItem::getBomId, current)
-                        .eq(com.neuedu.ems.entity.mdm.MdmBomItem::getDeletedFlag, 0))) {
-                    if (item.getChildBomId() != null) next.add(item.getChildBomId());
+                if (!visited.add(current)) {
+                    continue;
                 }
+                Long matched = mdmBomItemMapper.selectCount(new LambdaQueryWrapper<com.neuedu.ems.entity.mdm.MdmBomItem>().eq(com.neuedu.ems.entity.mdm.MdmBomItem::getBomId, current).eq(com.neuedu.ems.entity.mdm.MdmBomItem::getMaterialId, materialId).eq(com.neuedu.ems.entity.mdm.MdmBomItem::getDeletedFlag, 0));
+                if (matched != null && matched > 0) {
+                    return depth;
+                }
+                next.addAll(childBomIds(current));
             }
             level = next;
             depth++;
         }
         return -1;
+    }
+
+    private List<Long> childBomIds(Long bomId) {
+        return mdmBomItemMapper.selectList(new LambdaQueryWrapper<com.neuedu.ems.entity.mdm.MdmBomItem>().eq(com.neuedu.ems.entity.mdm.MdmBomItem::getBomId, bomId).eq(com.neuedu.ems.entity.mdm.MdmBomItem::getDeletedFlag, 0)).stream().map(com.neuedu.ems.entity.mdm.MdmBomItem::getChildBomId).filter(java.util.Objects::nonNull).toList();
     }
 
     private Long releasedBomId(Long productId) {

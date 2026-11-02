@@ -11,12 +11,12 @@
 
 用法
 ----
-    python scripts/run-lamp-alert-demo.py --clean      # 清掉上一轮演示数据
-    python scripts/run-lamp-alert-demo.py --prepare    # 造出阶段 0 的异常态
-    python scripts/run-lamp-alert-demo.py --scan       # 扫一轮，生成预警与自动动作
-    python scripts/run-lamp-alert-demo.py --stage 1    # 推进一个阶段（1..12）
-    python scripts/run-lamp-alert-demo.py --verify     # 打印 19 个指标的当前命中/关闭情况
-    python scripts/run-lamp-alert-demo.py --all        # clean→prepare→scan→12 阶段→verify
+    python scripts/run_lamp_alert_demo.py --clean      # 清掉上一轮演示数据
+    python scripts/run_lamp_alert_demo.py --prepare    # 造出阶段 0 的异常态
+    python scripts/run_lamp_alert_demo.py --scan       # 扫一轮，生成预警与自动动作
+    python scripts/run_lamp_alert_demo.py --stage 1    # 推进一个阶段（1..12）
+    python scripts/run_lamp_alert_demo.py --verify     # 打印 19 个指标的当前命中/关闭情况
+    python scripts/run_lamp_alert_demo.py --all        # clean→prepare→scan→12 阶段→verify
 
 连接口令来自环境变量 MYSQL_PWD（tmp/lamp-rehearsal-state.clixml 里是 DPAPI 密文，Python 解不开），
 只允许 3310 端口的台灯演练库；后端默认 8089。
@@ -32,6 +32,10 @@ import urllib.error
 import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+LOGGER = logging.getLogger(__name__)
 
 
 def local_now():
@@ -75,7 +79,7 @@ def load_state():
         return password
     if os.environ.get("MYSQL_EMPTY_PASSWORD") == "1":
         return ""
-    raise SystemExit(
+    raise RuntimeError(
         "请先设置 MYSQL_PWD："
         "pwsh 里 $s=Import-Clixml tmp/lamp-rehearsal-state.clixml; "
         "$env:MYSQL_PWD=$s.DbCredential.GetNetworkCredential().Password"
@@ -169,7 +173,7 @@ class Api:
 
 def clean():
     """清掉上一轮演示数据与全部预警运行痕迹，让演示从干净状态开始。"""
-    print("清理预警运行痕迹与上一轮演示数据 ...")
+    LOGGER.info("%s", "清理预警运行痕迹与上一轮演示数据 ...")
     mysql(f"""
 DELETE FROM ai_alert_action;
 DELETE FROM ai_alert_event;
@@ -249,7 +253,7 @@ DELETE FROM ai_alert_rule WHERE rule_no LIKE 'AR-MATERIAL_AVAILABLE-202610251557
 -- 演示就凑不齐 19 个指标全覆盖。重跑演示前统一恢复成启用，间隔与冷却也给成标准值。
 UPDATE ai_alert_rule SET status='ENABLED', interval_minutes=10, cooldown_minutes=10 WHERE 1=1;
 """)
-    print("清理完成。")
+    LOGGER.info("%s", "清理完成。")
 
 
 # --------------------------------------------------------------------------- 阶段 0
@@ -257,7 +261,7 @@ UPDATE ai_alert_rule SET status='ENABLED', interval_minutes=10, cooldown_minutes
 
 def prepare():
     """造出"异常已发生但还没处理"的初始态，时间戳全部回溯，保证一扫描就命中。"""
-    print("构造阶段 0 异常态 ...")
+    LOGGER.info("%s", "构造阶段 0 异常态 ...")
     now = local_now()
 
     def ts(hours=0, days=0):
@@ -589,7 +593,7 @@ VALUES ('{MARK}-RS-01', {M_M04}, 60, 0, 60, 'INVENTORY_WARNING', 'SUBMITTED',
         '{NOTE}', '{ts(hours=30)}', '{ts(hours=30)}', 0);
 """)
 
-    print("阶段 0 已就绪：19 个指标都有可命中的真实业务数据。")
+    LOGGER.info("%s", "阶段 0 已就绪：19 个指标都有可命中的真实业务数据。")
 
 
 # --------------------------------------------------------------------------- 扫描
@@ -597,13 +601,11 @@ VALUES ('{MARK}-RS-01', {M_M04}, 60, 0, 60, 'INVENTORY_WARNING', 'SUBMITTED',
 
 def scan(api, title="扫描"):
     result = api.call("POST", "/api/ai/alert/scan", {})["data"]
-    print(
-        f'[{title}] scanId={result.get("scanId")} status={result.get("status")} '
+    LOGGER.info("%s", f'[{title}] scanId={result.get("scanId")} status={result.get("status")} '
         f'规则={result.get("ruleCount")} 评估={result.get("evaluatedCount")} '
         f'新预警={result.get("openedCount")} 升级={result.get("escalatedCount")} '
         f'持续={result.get("repeatedCount")} 自动动作={result.get("autoActionCount")} '
-        f'通知={result.get("notifiedCount")} 复核关闭={result.get("closedCount")}'
-    )
+        f'通知={result.get("notifiedCount")} 复核关闭={result.get("closedCount")}')
     return result
 
 
@@ -612,26 +614,26 @@ def scan(api, title="扫描"):
 
 def stage1(api):
     """到货登记：入库单还是待确认，待办里出现"待入库确认"。"""
-    print("阶段 1 到货登记：采购入库单 DEMO-ALERT-IN-01 待确认，批次待检")
+    LOGGER.info("%s", "阶段 1 到货登记：采购入库单 DEMO-ALERT-IN-01 待确认，批次待检")
     todo = api.call("GET", "/api/ai/todo/my")["data"]
     kinds = sorted({item["type"] for item in todo.get("items", [])})
-    print(f"  当前待办类型：{kinds}")
+    LOGGER.info("%s", f"  当前待办类型：{kinds}")
     scan(api, "阶段1")
 
 
 def stage2(api):
     """来料检验：三张待检单逐件全检提交合格 → 批次放行 → 待检积压/检验超期自动复核关闭。"""
-    print("阶段 2 来料检验：三张待检单逐件全检提交 PASS，批次放行")
+    LOGGER.info("%s", "阶段 2 来料检验：三张待检单逐件全检提交 PASS，批次放行")
     count = _submit_incoming(api)
     released = rows(f"""SELECT batch_no, quality_status, status FROM wms_material_batch
                          WHERE batch_no LIKE '{MARK}-B%' AND material_id IN ({M_M15},{M16},{M_M04})""")
-    print(f"  已提交 {count} 张检验单；批次状态：{[(b, q, s) for b, q, s in released]}")
+    LOGGER.info("%s", f"  已提交 {count} 张检验单；批次状态：{[(b, q, s) for b, q, s in released]}")
     scan(api, "阶段2")
 
 
 def stage3(api):
     """确认入库：库存增加 + 对已放行但无检验单的批次自动签发来料检验单。"""
-    print("阶段 3 确认入库：采购入库单确认，系统自动签发来料检验任务")
+    LOGGER.info("%s", "阶段 3 确认入库：采购入库单确认，系统自动签发来料检验任务")
     inbound = one(f"SELECT inbound_id FROM wms_inbound_order WHERE inbound_no='{MARK}-IN-01'")[0]
     before = one("SELECT COUNT(*) FROM qms_inspection_order WHERE inspection_type='INCOMING' AND deleted_flag=0")[0]
     api.call("PUT", f"/api/wms/inbound-order/{inbound}/confirm", {"remark": NOTE})
@@ -641,10 +643,10 @@ def stage3(api):
                       WHERE i.material_id IN ({M_M01},{M_M04},{M_M15},{M16})
                         AND i.deleted_flag=0 GROUP BY m.material_code
                       ORDER BY m.material_code""")
-    print(f"  确认入库成功；来料检验单 {before} → {after} 张（自动签发）")
-    print(f"  演示批次可用库存：{[(code, str(qty)) for code, qty in stock]}")
+    LOGGER.info("%s", f"  确认入库成功；来料检验单 {before} → {after} 张（自动签发）")
+    LOGGER.info("%s", f"  演示批次可用库存：{[(code, str(qty)) for code, qty in stock]}")
     todo = api.call("GET", "/api/ai/todo/my")["data"]
-    print(f'  待办：{[(item["type"], item["title"]) for item in todo.get("items", [])][:6]}')
+    LOGGER.info("%s", f'  待办：{[(item["type"], item["title"]) for item in todo.get("items", [])][:6]}')
     scan(api, "阶段3")
 
 
@@ -675,26 +677,26 @@ def _submit_incoming(api):
             f"/api/qms/inspection-order/{inspection_id}/submit-piece",
             {"results": results, "remark": "来料检验合格，批次放行"},
         )
-        print(f"  检验单 {inspection_id} 已逐件提交 PASS（{len(results)} 条检验结果）")
+        LOGGER.info("%s", f"  检验单 {inspection_id} 已逐件提交 PASS（{len(results)} 条检验结果）")
     return len(orders)
 
 
 def stage4(api):
     """补货建议处理：仓管确认补货建议 → 补货未处理预警关闭。"""
-    print("阶段 4 补货建议处理：仓管把演示补货建议置为已处理")
+    LOGGER.info("%s", "阶段 4 补货建议处理：仓管把演示补货建议置为已处理")
     suggestion = one(f"SELECT suggestion_id FROM wms_replenishment_suggestion WHERE suggestion_no='{MARK}-RS-01'")[0]
     api.call(
         "PUT",
         "/api/wms/replenishment-suggestion",
         {"suggestionId": int(suggestion), "status": "HANDLED", "remark": "仓管已安排补货并确认"},
     )
-    print(f"  补货建议 {suggestion} → HANDLED")
+    LOGGER.info("%s", f"  补货建议 {suggestion} → HANDLED")
     scan(api, "阶段4")
 
 
 def stage5(api):
     """生产开工：工单下达未开工/超期与停滞任务随开工报工恢复。"""
-    print("阶段 5 生产开工：工单开工、任务完成、安灯响应")
+    LOGGER.info("%s", "阶段 5 生产开工：工单开工、任务完成、安灯响应")
     work_order = one(f"SELECT work_order_id FROM mfg_work_order WHERE work_order_no='{MARK}-WO-01'")[0]
     mysql(f"""
 UPDATE mfg_work_order SET status='RUNNING', planned_start_time=NOW(), updated_time=NOW()
@@ -704,13 +706,13 @@ UPDATE mfg_task SET status='FINISHED', completed_quantity=10, updated_time=NOW()
 UPDATE mfg_andon_alert SET status='RESPONDED', response_time=NOW(), updated_time=NOW()
  WHERE alert_no='{MARK}-AN-01';
 """)
-    print(f"  工单 {work_order} → RUNNING；任务 DEMO-ALERT-TK-01 → FINISHED；安灯 → RESPONDED")
+    LOGGER.info("%s", f"  工单 {work_order} → RUNNING；任务 DEMO-ALERT-TK-01 → FINISHED；安灯 → RESPONDED")
     scan(api, "阶段5")
 
 
 def stage6(api):
     """缺料补料：补货入库后缺口补齐，工单缺料与可用库存预警一起关闭。"""
-    print("阶段 6 缺料补齐：工单缺料行缺口归零")
+    LOGGER.info("%s", "阶段 6 缺料补齐：工单缺料行缺口归零")
     mysql(f"""
 UPDATE mfg_work_order_material SET shortage_quantity=0, issued_quantity=5, status='READY', updated_time=NOW()
  WHERE work_order_id=(SELECT work_order_id FROM mfg_work_order WHERE work_order_no='{MARK}-WO-01')
@@ -721,7 +723,7 @@ UPDATE mfg_work_order_material SET shortage_quantity=0, issued_quantity=5, statu
 
 def stage7(api):
     """设备维修：故障维修完成、待验收单验收、老维修单接单关闭。"""
-    print("阶段 7 设备维修：三张维修单闭环，设备恢复运行")
+    LOGGER.info("%s", "阶段 7 设备维修：三张维修单闭环，设备恢复运行")
     # 自动开出来的维修单先接单再关闭，走真实接口
     for repair_id, status in rows(f"""SELECT repair_id, status FROM eam_repair_order
                                        WHERE (repair_no LIKE 'RP-ALERT-%' OR repair_no LIKE '{MARK}-RP-%')
@@ -733,7 +735,7 @@ def stage7(api):
             f"/api/eam/repair-order/{repair_id}/close",
             {"repairResult": "已排除故障并试运行正常", "repairCost": 0},
         )
-        print(f"  维修单 {repair_id} 已关闭")
+        LOGGER.info("%s", f"  维修单 {repair_id} 已关闭")
     mysql(
         f"UPDATE eam_equipment SET status='RUNNING', updated_time=NOW() "
         f"WHERE equipment_id IN ({EQ_FAULT},{EQ_REPAIR_OLD},{EQ_WAIT})"
@@ -743,7 +745,7 @@ def stage7(api):
 
 def stage8(api):
     """保养点检：补一次保养与点检记录，超期预警关闭。"""
-    print("阶段 8 保养点检：补录保养与点检记录")
+    LOGGER.info("%s", "阶段 8 保养点检：补录保养与点检记录")
     plan = one(f"SELECT plan_id FROM eam_maintenance_plan WHERE remark='{NOTE}' AND equipment_id={EQ_MAINT}")[0]
     spot = one(f"SELECT plan_id FROM eam_spot_check_plan WHERE remark='{NOTE}' AND equipment_id={EQ_SPOT}")[0]
     api.call(
@@ -771,32 +773,32 @@ def stage8(api):
             "remark": NOTE,
         },
     )
-    print("  保养记录与点检记录已补录")
+    LOGGER.info("%s", "  保养记录与点检记录已补录")
     scan(api, "阶段8")
 
 
 def stage9(api):
     """不合格处置：审批通过 → 让步接收完成处置 → 单关闭，未处置预警复核关闭。"""
-    print("阶段 9 不合格品处置：审批通过 → 完成处置 → NC 单关闭")
+    LOGGER.info("%s", "阶段 9 不合格品处置：审批通过 → 完成处置 → NC 单关闭")
     ncr = one(f"SELECT ncr_id FROM qms_nonconforming_order WHERE ncr_no='{MARK}-NC-01'")[0]
     api.call(
         "PUT",
         f"/api/qms/nonconforming-order/{ncr}/approve",
         {"approvalResult": "APPROVED", "approvalComment": "评审同意让步接收，供应商已确认整改"},
     )
-    print(f"  处理单 {ncr} 审批通过 → PROCESSING")
+    LOGGER.info("%s", f"  处理单 {ncr} 审批通过 → PROCESSING")
     api.call(
         "PUT",
         f"/api/qms/nonconforming-order/{ncr}/complete-disposition",
         {"dispositionType": "CONCESSION", "remark": "让步接收，加严下道工序检验"},
     )
-    print(f"  处理单 {ncr} 完成处置 → CLOSED")
+    LOGGER.info("%s", f"  处理单 {ncr} 完成处置 → CLOSED")
     scan(api, "阶段9")
 
 
 def stage10(api):
     """排程与负荷：冲突项落位、负荷计划下调。"""
-    print("阶段 10 排程与负荷：冲突项重新落位、负荷计划下调")
+    LOGGER.info("%s", "阶段 10 排程与负荷：冲突项重新落位、负荷计划下调")
     scenario = one(f"SELECT scenario_id FROM mfg_schedule_scenario WHERE scenario_no='{MARK}-SC-01'")[0]
     # 排程项的状态只有 SCHEDULED / CONFLICT / CONFIRMED 三种（MfgScheduleScenarioServiceImpl
     # 的 ITEM_STATUS_* 常量），冲突解决后就回到 SCHEDULED，仍留在工作台时间轴上可查看。
@@ -813,7 +815,7 @@ UPDATE mfg_production_plan SET planned_quantity=1000, updated_time=NOW() WHERE p
 
 def stage11(api):
     """计划完工：计划与工单完工，超期预警关闭。"""
-    print("阶段 11 计划完工：生产计划与工单完工")
+    LOGGER.info("%s", "阶段 11 计划完工：生产计划与工单完工")
     mysql(f"""
 UPDATE mfg_work_order SET status='FINISHED', completed_quantity=10, updated_time=NOW()
  WHERE work_order_no='{MARK}-WO-01';
@@ -829,7 +831,7 @@ UPDATE mfg_production_order SET status='FINISHED', updated_time=NOW() WHERE prod
 
 def stage12(api):
     """呆滞消耗：把 120 天的呆滞批次用完，同时补一批新料，呆滞预警关闭而库存仍然健康。"""
-    print("阶段 12 呆滞消耗：DEMO-ALERT-B34 用尽，同时补入新批次")
+    LOGGER.info("%s", "阶段 12 呆滞消耗：DEMO-ALERT-B34 用尽，同时补入新批次")
     mysql(f"""
 UPDATE wms_inventory SET available_quantity=0, updated_time=NOW()
  WHERE batch_id=(SELECT batch_id FROM wms_material_batch WHERE batch_no='{MARK}-B{M_M03}');
@@ -867,7 +869,7 @@ STAGES = {
 
 
 def verify():
-    print("\n=== 19 个指标的预警运行情况 ===")
+    LOGGER.info("%s", "\n=== 19 个指标的预警运行情况 ===")
     data = rows("""
 SELECT r.metric_code,
        (SELECT COUNT(*) FROM ai_alert_event e WHERE e.rule_id=r.rule_id AND e.status='OPEN'),
@@ -888,29 +890,29 @@ SELECT r.metric_code,
  ORDER BY r.rule_id
 """)
     header = f'{"指标":<28}{"进行中":>7}{"已关闭":>7}{"事件":>6}{"通知":>6}{"补货":>6}{"异常":>6}{"维修":>6}{"复核":>6}'
-    print(header)
-    print("-" * 96)
+    LOGGER.info("%s", header)
+    LOGGER.info("%s", "-" * 96)
     for row in data:
-        print(f"{row[0]:<28}{row[1]:>7}{row[2]:>7}{row[3]:>6}{row[4]:>6}{row[5]:>6}{row[6]:>6}{row[7]:>6}{row[8]:>6}")
-    print("\n=== 自动动作产出 ===")
+        LOGGER.info("%s", f"{row[0]:<28}{row[1]:>7}{row[2]:>7}{row[3]:>6}{row[4]:>6}{row[5]:>6}{row[6]:>6}{row[7]:>6}{row[8]:>6}")
+    LOGGER.info("%s", "\n=== 自动动作产出 ===")
     for row in rows("""SELECT action_type, action_status, COUNT(*) FROM ai_alert_action
                         GROUP BY action_type, action_status ORDER BY action_type, action_status"""):
-        print(f"  {row[0]:<10}{row[1]:<10}{row[2]}")
-    print("\n=== 异常台账（预警自动登记）===")
+        LOGGER.info("%s", f"  {row[0]:<10}{row[1]:<10}{row[2]}")
+    LOGGER.info("%s", "\n=== 异常台账（预警自动登记）===")
     for row in rows(
         """SELECT status, COUNT(*) FROM mfg_exception WHERE exception_no LIKE 'EXC-ALERT-%' GROUP BY status"""
     ):
-        print(f"  {row[0]:<10}{row[1]}")
-    print("\n=== 补货建议 ===")
+        LOGGER.info("%s", f"  {row[0]:<10}{row[1]}")
+    LOGGER.info("%s", "\n=== 补货建议 ===")
     for row in rows("""SELECT status, source_type, COUNT(*) FROM wms_replenishment_suggestion
                         WHERE deleted_flag=0 GROUP BY status, source_type ORDER BY status"""):
-        print(f"  {row[0]:<12}{row[1]:<20}{row[2]}")
-    print("\n=== 待办入口 ===")
+        LOGGER.info("%s", f"  {row[0]:<12}{row[1]:<20}{row[2]}")
+    LOGGER.info("%s", "\n=== 待办入口 ===")
     api = Api().login()
     todo = api.call("GET", "/api/ai/todo/my")["data"]
     for item in todo.get("items", [])[:12]:
-        print(f'  {item["type"]:<22}{item["typeLabel"]:<14}{item["title"]}')
-    print(f'  合计 {todo.get("total")} 条')
+        LOGGER.info("%s", f'  {item["type"]:<22}{item["typeLabel"]:<14}{item["title"]}')
+    LOGGER.info("%s", f'  合计 {todo.get("total")} 条')
 
 
 def main():
@@ -940,7 +942,7 @@ def main():
     if args.password is not None:
         DB_PASSWORD = args.password
     API_PORT = args.api_port
-    print(f"目标库：{DB_USER}@{PORT}/{DATABASE}，后端 http://127.0.0.1:{args.api_port}")
+    LOGGER.info("%s", f"目标库：{DB_USER}@{PORT}/{DATABASE}，后端 http://127.0.0.1:{args.api_port}")
     if args.all:
         clean()
         prepare()
@@ -965,4 +967,8 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    try:
+        sys.exit(main())
+    except RuntimeError as error:
+        LOGGER.error("%s", error)
+        raise SystemExit(1)

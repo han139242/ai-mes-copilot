@@ -10,6 +10,7 @@ import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
 from lamp_migrations import EXECUTION_MIGRATIONS
+from cli_output import write_json
 
 
 def local_now():
@@ -99,7 +100,7 @@ def main():
             for filename in EXECUTION_MIGRATIONS:
                 sql((ROOT / "workspace/idea/ems/src/main/resources/db" / filename).read_text(encoding="utf-8"))
     report["tables"] = int(sql("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE();"))
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    write_json(report, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

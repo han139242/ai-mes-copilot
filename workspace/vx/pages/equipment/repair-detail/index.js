@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 维修详情页：查看单条设备维修记录的状态和处理过程。
 const guard = require('../../../utils/guard')
 const auth = require('../../../utils/auth')

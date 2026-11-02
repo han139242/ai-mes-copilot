@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // router/index.js 负责三件事：声明页面路径、控制页面跳转、执行登录与权限检查。
 import { createRouter, createWebHashHistory } from 'vue-router';
 

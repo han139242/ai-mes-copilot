@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 质检记录页：查看历史检验单和检验结果。
 const guard = require('../../../utils/guard')
 const qualityApi = require('../../../api/quality')

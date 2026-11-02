@@ -8,10 +8,11 @@ import subprocess
 import json
 from pathlib import Path
 from lamp_migrations import FRESH_SCHEMA_MIGRATIONS
+from cli_output import write_json
 
 root = Path(__file__).resolve().parents[1]
 mysql = Path(os.environ.get("MYSQL_BIN", r"C:\Program Files\MySQL\MySQL Server 8.0\bin")) / "mysql.exe"
-target = "mes_lamp_schema_check_r1"
+TARGET = "mes_lamp_schema_check_r1"
 
 
 def require(condition, message):
@@ -33,7 +34,7 @@ def sql(statement, database=None):
         "--skip-column-names",
     ]
     if database:
-        require(database == target, "校验库名必须是 " + target)
+        require(database == TARGET, "校验库名必须是 " + TARGET)
         args.append("--database=" + database)
     res = subprocess.run(args, input=statement, text=True, encoding="utf-8", capture_output=True, timeout=120)
     if res.returncode:
@@ -41,19 +42,19 @@ def sql(statement, database=None):
     return res.stdout.strip()
 
 
-exists = sql("SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='" + target + "';")
+exists = sql("SELECT COUNT(*) FROM information_schema.schemata WHERE schema_name='" + TARGET + "';")
 if exists == "0":
-    sql("CREATE DATABASE `" + target + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;")
+    sql("CREATE DATABASE `" + TARGET + "` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;")
     schema = (root / "workspace/idea/ems/src/main/resources/db/schema.sql").read_text(encoding="utf-8-sig")
     schema, n = re.subn(r"^CREATE DATABASE[^\n]*\n", "", schema, flags=re.M)
     require(n == 1, "schema.sql 应恰好包含一条 CREATE DATABASE 语句")
-    sql(schema, target)
+    sql(schema, TARGET)
 for filename in FRESH_SCHEMA_MIGRATIONS * 2:
-    sql((root / "workspace/idea/ems/src/main/resources/db" / filename).read_text(encoding="utf-8"), target)
+    sql((root / "workspace/idea/ems/src/main/resources/db" / filename).read_text(encoding="utf-8"), TARGET)
 entities = set()
 for file in (root / "workspace/idea/ems/src/main/java/com/neuedu/ems/entity").rglob("*.java"):
     entities.update(re.findall(r'@TableName\("([^"]+)"\)', file.read_text(encoding="utf-8-sig")))
-tables = set(sql("SHOW TABLES;", target).splitlines())
+tables = set(sql("SHOW TABLES;", TARGET).splitlines())
 require(entities == tables, "实体与表不一致：%s" % ((entities - tables, tables - entities),))
 for table, package, entity in [
     ("mdm_material", "mdm", "MdmMaterial"),
@@ -74,7 +75,7 @@ for table, package, entity in [
     actual = set(
         sql(
             "SELECT column_name FROM information_schema.columns WHERE table_schema='"
-            + target
+            + TARGET
             + "' AND table_name='"
             + table
             + "';"
@@ -86,11 +87,11 @@ for table, package, entity in [
         "FROM information_schema.columns WHERE table_schema='{}' AND table_name='" + table + "' ORDER BY column_name;"
     )
     require(
-        sql(definition.format(target)) == sql(definition.format("mes_lamp_rehearsal")),
+        sql(definition.format(TARGET)) == sql(definition.format("mes_lamp_rehearsal")),
         table + " 与 mes_lamp_rehearsal 的列定义不一致",
     )
 require(
-    sql("SELECT COUNT(*) FROM mdm_material WHERE material_code LIKE 'LAMP-%' AND deleted_flag=0;", target) == "24",
+    sql("SELECT COUNT(*) FROM mdm_material WHERE material_code LIKE 'LAMP-%' AND deleted_flag=0;", TARGET) == "24",
     "LAMP 物料应为 24 条",
 )
 require(
@@ -107,8 +108,7 @@ require(
     sql("SELECT COUNT(*) FROM mes_local.mdm_material WHERE material_code LIKE 'LAMP-%';") == "0",
     "历史 mes_local 库不应出现台灯物料",
 )
-print(
-    json.dumps(
+write_json(
         {
             "tables": len(tables),
             "entityTables": len(entities),
@@ -118,4 +118,3 @@ print(
             "legacySchemaAndLampRecordsUntouched": True,
         }
     )
-)

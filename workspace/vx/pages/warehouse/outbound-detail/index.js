@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 出库单详情页：展示出库主单、明细和状态信息。
 const guard = require('../../../utils/guard')
 const auth = require('../../../utils/auth')

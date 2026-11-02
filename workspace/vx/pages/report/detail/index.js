@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 报工详情页：展示单条报工记录、数量、人员、工时和用料。
 const guard = require('../../../utils/guard')
 const reportApi = require('../../../api/work-report')

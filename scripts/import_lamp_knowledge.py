@@ -9,6 +9,7 @@ import subprocess
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
+from cli_output import write_json, write_text
 
 ROOT = Path(__file__).resolve().parents[1]
 NS = {'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main'}
@@ -79,14 +80,19 @@ def main():
             # 版本出处属于正文，提醒知识问答区分设计说明与已运行事实。
             body = f'{content}\n\n来源：{name}；文件SHA256：{digest}。本文为说明书内容，实际状态和办理条件须查询业务数据。'
             statements.append('UPDATE ai_knowledge_section SET '
-                              f'content={sql_text(body)},seq_no={seq},level_no={level},updated_time=NOW() WHERE {where};')
+                              f'content={sql_text(body)},seq_no={seq},level_no={level},'
+                              f'updated_time=NOW() WHERE {where};')
             statements.append('INSERT INTO ai_knowledge_section '
                               '(doc_code,doc_name,seq_no,level_no,title,content,created_time,deleted_flag) '
-                              f'SELECT {sql_text(code)},{sql_text(name)},{seq},{level},{sql_text(title)},{sql_text(body)},NOW(),0 '
+                              f'SELECT {sql_text(code)},{sql_text(name)},{seq},{level},'
+                              f'{sql_text(title)},{sql_text(body)},NOW(),0 '
                               f'WHERE NOT EXISTS(SELECT 1 FROM ai_knowledge_section WHERE {where});')
     statements.append('COMMIT;')
-    statements.append('SELECT doc_code,COUNT(*),SUM(CHAR_LENGTH(content)>0) FROM ai_knowledge_section WHERE deleted_flag=0 GROUP BY doc_code;')
-    print(json.dumps({'apply': args.apply, 'database': args.database, 'sources': report}, ensure_ascii=False))
+    statements.append(
+        'SELECT doc_code,COUNT(*),SUM(CHAR_LENGTH(content)>0) '
+        'FROM ai_knowledge_section WHERE deleted_flag=0 GROUP BY doc_code;'
+    )
+    write_json({'apply': args.apply, 'database': args.database, 'sources': report}, ensure_ascii=False)
     if not args.apply:
         return
     env = dict(os.environ)
@@ -94,10 +100,13 @@ def main():
         env['MYSQL_PWD'] = env['DB_PASSWORD']
     command = [args.mysql, '--no-defaults', '--host=127.0.0.1', f'--port={args.port}',
                f'--user={args.user}', f'--database={args.database}', '--default-character-set=utf8mb4', '--batch']
-    result = subprocess.run(command, input='\n'.join(statements).encode('utf-8'), capture_output=True, env=env, timeout=60)
+    result = subprocess.run(
+        command, input='\n'.join(statements).encode('utf-8'),
+        capture_output=True, env=env, timeout=60,
+    )
     if result.returncode:
         raise RuntimeError(result.stderr.decode('utf-8', 'replace'))
-    print(result.stdout.decode('utf-8', 'replace'))
+    write_text(result.stdout.decode('utf-8', 'replace'))
 
 
 if __name__ == '__main__':

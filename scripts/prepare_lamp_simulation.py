@@ -18,6 +18,7 @@ import urllib.request
 from zoneinfo import ZoneInfo
 
 import pymysql
+from cli_output import write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 MARK = "SIM-20261027"
@@ -529,7 +530,7 @@ def main():
                 scheduleDays=args.days,
                 note="只读预览；执行时备份并保留现有业务，排班需加 --schedule",
             )
-            print(json.dumps(report, ensure_ascii=False, indent=2))
+            write_json(report, ensure_ascii=False, indent=2)
             return
         report.update(prepare(db, today, args))
         db.commit()
@@ -542,7 +543,7 @@ def main():
         raise
     finally:
         db.close()
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+    write_json(report, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

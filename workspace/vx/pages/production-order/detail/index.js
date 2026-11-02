@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 生产订单详情页：查看订单产品、数量、计划和关联工单信息。
 const guard = require('../../../utils/guard')
 const productionOrderApi = require('../../../api/production-order')

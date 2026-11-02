@@ -392,19 +392,16 @@ class ComponentSupplyPlanningIntegrationTest {
         assertNoGeneratedRows();
     }
     @Test void componentShortageIsSplitAcrossCapacityWindows() {
-        // 组件与父计划同线生产，所以拆单受这条线的产能约束：日产能只有 2 件、
-        // 每周只有一个班次日（周一），从 0 起算的整份缺口 10 件必须拆成五张补产单。
-        // 父计划锚定到"下一个周一 08:00"这种班次边界上，否则窗口会从当前时刻被裁掉一截，
-        // 拆单张数随执行时刻漂移（曾出现同样夹具跑出 3 张、4 张、5 张）。
-        LocalDateTime anchor=LocalDateTime.now().withNano(0)
-                .toLocalDate().with(java.time.temporal.TemporalAdjusters.next(java.time.DayOfWeek.MONDAY))
-                .atTime(8,0);
+        // 日产能2件，每周只有一个班次日，完整缺口10件必须拆成五张补产单。
+        // 组件排程每次只向后看7天；在周一取“下周一”会正好落到窗口末日，
+        // 被当前时刻截成半个班次。把首个完整班次设在明天，保持每周单班约束不变。
+        LocalDateTime anchor=java.time.LocalDate.now().plusDays(1).atTime(8,0);
         jdbc.update("UPDATE mfg_production_plan SET planned_start_time=?,planned_end_time=? WHERE plan_id=?",
                 anchor,anchor.plusHours(9),planId);
         jdbc.update("UPDATE factory_line SET daily_capacity=2 WHERE line_id=?",rootLine);
         jdbc.update("DELETE FROM mfg_line_calendar_rule WHERE line_id=?",rootLine);
-        jdbc.update("INSERT INTO mfg_line_calendar_rule(line_id,day_of_week,shift_id,effective_from,effective_to,capacity_factor,status,version,deleted_flag) VALUES (?,?,?,'2026-01-01',NULL,1.0000,'ENABLE',0,0)",
-                rootLine,anchor.getDayOfWeek().getValue(),fixtureShift);
+        jdbc.update("INSERT INTO mfg_line_calendar_rule(line_id,day_of_week,shift_id,effective_from,effective_to,capacity_factor,status,version,deleted_flag) VALUES (?,?,?,?,NULL,1.0000,'ENABLE',0,0)",
+                rootLine,anchor.getDayOfWeek().getValue(),fixtureShift,anchor.toLocalDate());
         var root=service.generateWorkOrder(planId,null,1L);
         List<Map<String,Object>> componentPlans=jdbc.queryForList(
                 "SELECT w.*,p.line_id FROM mfg_work_order w JOIN mfg_production_plan p ON p.plan_id=w.plan_id WHERE w.parent_work_order_id=? ORDER BY w.work_order_id",root.getWorkOrderId());
@@ -424,6 +421,7 @@ class ComponentSupplyPlanningIntegrationTest {
         LocalDateTime previous=null;
         for (Map<String,Object> componentPlan:componentPlans) {
             LocalDateTime start=jdbc.queryForObject("SELECT planned_start_time FROM mfg_work_order WHERE work_order_id=?",LocalDateTime.class,componentPlan.get("work_order_id"));
+            assertFalse(start.isBefore(anchor),"补产不得使用日历生效日前的零碎班次");
             if (previous!=null) {
                 assertTrue(start.isAfter(previous),"补产单窗口必须依次向后接续");
             }

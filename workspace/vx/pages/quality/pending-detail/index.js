@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 检验单详情页：展示待检或已检记录，并提供进入质检录入的入口。
 const guard = require('../../../utils/guard')
 const auth = require('../../../utils/auth')

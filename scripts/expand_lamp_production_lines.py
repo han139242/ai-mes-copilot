@@ -8,6 +8,11 @@ import os
 from pathlib import Path
 import re
 import subprocess
+from cli_output import write_json
+import logging
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+LOGGER = logging.getLogger(__name__)
 
 
 def local_now():
@@ -437,8 +442,8 @@ def main():
                 raise RuntimeError("发现既有配置并发变化，请查看备份核对：" + table)
         report["existingMastersUnchanged"] = True
         (directory / "result.json").write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
-        print("配置完成；备份与结果：" + str(directory.relative_to(ROOT)))
-    print(json.dumps(report, ensure_ascii=False, indent=2))
+        LOGGER.info("%s", "配置完成；备份与结果：" + str(directory.relative_to(ROOT)))
+    write_json(report, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

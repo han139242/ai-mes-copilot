@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
@@ -8,7 +11,7 @@ import { parsePieceInspectionText } from '../src/utils/piece-inspection-text.js'
 
 function dialog() {
   const source = fs.readFileSync(new URL('../src/components/business/PieceInspectionDialog.vue', import.meta.url), 'utf8');
-  const script = source.match(/<script setup>([\s\S]*?)<\/script>/)[1].replace(/^import .*;\r?$/gm, '');
+  const script = source.match(/<script setup>(?<script>[\s\S]*?)<\/script>/).groups.script.replace(/^import .*;\r?$/gm, '');
   const messages = [];
   const state = vm.runInNewContext(`${script}\n;({ pieceCount, productionReport, items, rowsFor, markSelected,
     spokenRecords, applySpokenRecords });`, {

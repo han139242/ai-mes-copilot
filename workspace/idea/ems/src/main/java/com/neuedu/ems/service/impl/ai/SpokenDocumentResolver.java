@@ -43,25 +43,33 @@ public final class SpokenDocumentResolver {
         String corpus = question + "\n" + String.join("\n", history == null ? List.of() : history);
         List<String> orders = endingWith(FULL_ORDER, corpus, digits);
         List<String> workOrders = endingWith(FULL_WORK_ORDER, corpus, digits);
+        return chooseReference(question, digits, orders, workOrders);
+    }
+
+    private static Expansion chooseReference(String question, String digits, List<String> orders, List<String> workOrders) {
         boolean orderWord = question.contains("订单");
         boolean workWord = question.contains("工单");
+        Expansion result;
         if (orderWord && !workWord) {
-            return choose(question, digits, orders, workOrders, true);
+            result = choose(question, digits, orders, workOrders, true);
+        } else if (workWord && !orderWord) {
+            result = choose(question, digits, workOrders, orders, false);
+        } else {
+            result = chooseUntypedReference(question, digits, orders, workOrders);
         }
-        if (workWord && !orderWord) {
-            return choose(question, digits, workOrders, orders, false);
-        }
+        return result;
+    }
+
+    private static Expansion chooseUntypedReference(String question, String digits, List<String> orders, List<String> workOrders) {
+        Expansion result = new Expansion(question, null);
         if (orders.size() == 1 && workOrders.isEmpty()) {
-            return new Expansion(replaceFirst(question, digits, orders.getFirst()), null);
+            result = new Expansion(replaceFirst(question, digits, orders.getFirst()), null);
+        } else if (workOrders.size() == 1 && orders.isEmpty()) {
+            result = new Expansion(replaceFirst(question, digits, workOrders.getFirst()), null);
+        } else if (orders.size() == 1 && workOrders.size() == 1) {
+            result = new Expansion(question, "「" + digits + "」同时对上生产订单 " + orders.getFirst() + " 和工单 " + workOrders.getFirst() + "。请说明是订单还是工单，尚未执行任何操作。");
         }
-        if (workOrders.size() == 1 && orders.isEmpty()) {
-            return new Expansion(replaceFirst(question, digits, workOrders.getFirst()), null);
-        }
-        if (orders.size() == 1 && workOrders.size() == 1) {
-            return new Expansion(question, "「" + digits + "」同时对上生产订单 " + orders.getFirst()
-                    + " 和工单 " + workOrders.getFirst() + "。请说明是订单还是工单，尚未执行任何操作。");
-        }
-        return new Expansion(question, null);
+        return result;
     }
 
     /** 多张订单同时出现时，取这句话里最后一次提到的那张，不退回更早的订单。 */
@@ -77,21 +85,16 @@ public final class SpokenDocumentResolver {
         return found;
     }
 
-    private static Expansion choose(String question, String digits, List<String> wanted, List<String> other,
-                                    boolean order) {
+    private static Expansion choose(String question, String digits, List<String> wanted, List<String> other, boolean order) {
+        Expansion result = new Expansion(question, null);
         if (wanted.size() == 1) {
-            return new Expansion(replaceFirst(question, digits, wanted.getFirst()), null);
+            result = new Expansion(replaceFirst(question, digits, wanted.getFirst()), null);
+        } else if (wanted.size() > 1) {
+            result = new Expansion(question, "「" + digits + "」对上多张" + (order ? "生产订单" : "工单") + "：" + String.join("、", wanted) + "。请说完整单号，尚未执行任何操作。");
+        } else if (other.size() == 1) {
+            result = new Expansion(question, "对话里没有以 " + digits + " 结尾的" + (order ? "生产订单" : "工单") + "，只对上" + (order ? "工单 " : "生产订单 ") + other.getFirst() + "。请改说完整单号，尚未执行任何操作。");
         }
-        if (wanted.size() > 1) {
-            return new Expansion(question, "「" + digits + "」对上多张" + (order ? "生产订单" : "工单")
-                    + "：" + String.join("、", wanted) + "。请说完整单号，尚未执行任何操作。");
-        }
-        if (other.size() == 1) {
-            return new Expansion(question, "对话里没有以 " + digits + " 结尾的" + (order ? "生产订单" : "工单")
-                    + "，只对上" + (order ? "工单 " : "生产订单 ") + other.getFirst()
-                    + "。请改说完整单号，尚未执行任何操作。");
-        }
-        return new Expansion(question, null);
+        return result;
     }
 
     private static boolean hasFullNumber(String question) {
@@ -99,9 +102,7 @@ public final class SpokenDocumentResolver {
     }
 
     private static boolean aboutDocument(String question) {
-        return question.contains("订单") || question.contains("工单") || question.contains("到哪")
-                || question.contains("下一步") || question.contains("进行到") || question.contains("做到哪")
-                || question.contains("哪一步") || question.contains("状态") || question.contains("完成");
+        return java.util.stream.Stream.of("订单", "工单", "到哪", "下一步", "进行到", "做到哪", "哪一步", "状态", "完成").anyMatch(question::contains);
     }
 
     private static List<String> endingWith(Pattern pattern, String text, String digits) {

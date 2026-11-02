@@ -364,9 +364,7 @@ public class MfgWorkOrderServiceImpl extends ServiceImpl<MfgWorkOrderMapper, Mfg
 
     /** 候选计划是否排在本计划之后；同一开始时间按计划主键定先后，保证顺序稳定。 */
     private static boolean isAfterPlan(MfgProductionPlan candidate, MfgProductionPlan plan) {
-        boolean comparable = !Objects.equals(candidate.getPlanId(), plan.getPlanId())
-                && candidate.getPlannedStartTime() != null && candidate.getPlannedEndTime() != null
-                && candidate.getParentPlanId() == null && plan.getPlannedStartTime() != null;
+        boolean comparable = !Objects.equals(candidate.getPlanId(), plan.getPlanId()) && hasIndependentPlanInterval(candidate) && plan.getPlannedStartTime() != null;
         if (comparable && candidate.getPlannedStartTime().isAfter(plan.getPlannedStartTime())) {
             return true;
         }
@@ -1965,5 +1963,9 @@ public class MfgWorkOrderServiceImpl extends ServiceImpl<MfgWorkOrderMapper, Mfg
         } catch (Exception ex) {
             throw business(ResultCode.FAILED, "生产工单快照摘要生成失败");
         }
+    }
+
+    private static boolean hasIndependentPlanInterval(MfgProductionPlan candidate) {
+        return candidate.getPlannedStartTime() != null && candidate.getPlannedEndTime() != null && candidate.getParentPlanId() == null;
     }
 }

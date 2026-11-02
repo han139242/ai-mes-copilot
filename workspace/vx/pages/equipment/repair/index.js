@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 维修填报页：提交设备维修或故障处理信息。
 const guard = require('../../../utils/guard')
 const equipmentApi = require('../../../api/equipment')

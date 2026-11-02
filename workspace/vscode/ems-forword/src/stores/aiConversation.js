@@ -449,8 +449,8 @@ export async function syncFromBackend() {
       return mapped;
     });
     // 本地尚未同步到后端的会话（接口不可用时创建的）要留着，否则内容会凭空消失。
-    const localOnly = conversations.value.filter((item) => !item.remoteId
-      && (item.messages.length || item.id === activeConversationId.value));
+    const localOnly = conversations.value.filter((item) => !item.remoteId &&
+      (item.messages.length || item.id === activeConversationId.value));
     if (remote.length || localOnly.length) {
       const previousId = activeConversationId.value;
       const previousRemote = conversations.value.find((item) => item.id === previousId)?.remoteId;

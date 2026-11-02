@@ -9,7 +9,7 @@
 用法：
   MYSQL_BIN="D:/MySQL/MySQL Server 8.0/bin" \
   RUNTIME_LOGIN_USER=admin RUNTIME_LOGIN_PASSWORD=Admin@12345 \
-  python scripts/prepare-lamp-demo.py --database mes_lamp_order_e2e --port 3311 \
+  python scripts/prepare_lamp_demo.py --database mes_lamp_order_e2e --port 3311 \
       --api-base http://127.0.0.1:8089 --run-key lamp-demo-prep --apply
 """
 
@@ -21,13 +21,14 @@ import os
 import re
 import sys
 from pathlib import Path
+from cli_output import write_json
 
 ROOT = Path(__file__).resolve().parents[1]
 NOTE = "课程演示准备，非实物测量；组件按当前配置演练"
 
 
 def load_rehearsal():
-    path = ROOT / "scripts" / "run-lamp-order-rehearsal.py"
+    path = ROOT / "scripts" / "run_lamp_order_rehearsal.py"
     spec = importlib.util.spec_from_file_location("lamp_rehearsal", path)
     module = importlib.util.module_from_spec(spec)
     sys.modules["lamp_rehearsal"] = module
@@ -246,8 +247,7 @@ class DemoPreparation:
                 f"{'NULL' if previous is None else int(previous)}"
                 f" WHERE user_id={user['user_id']}"
             )
-        print(
-            json.dumps(
+        write_json(
                 {
                     "productionOrderNo": order["production_order_no"],
                     "rootWorkOrderNo": root["work_order_no"],
@@ -258,7 +258,6 @@ class DemoPreparation:
                 ensure_ascii=False,
                 indent=2,
             )
-        )
 
 
 def open_andon_stations(run):
@@ -285,7 +284,7 @@ def main():
     if not re.fullmatch("lamp-demo-[A-Za-z0-9_-]+", args.run_key):
         parser.error("run-key 必须以 lamp-demo- 开头")
     if not args.apply:
-        print(json.dumps({"database": args.database, "preview": True, "remark": NOTE}, ensure_ascii=False))
+        write_json({"database": args.database, "preview": True, "remark": NOTE}, ensure_ascii=False)
         return
     module = load_rehearsal()
     run = module.Rehearsal(args)

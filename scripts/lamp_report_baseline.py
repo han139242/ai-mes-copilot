@@ -5,6 +5,7 @@ SQL由本模块生成并随仓库保存，便于预览及多人审查。
 """
 
 from pathlib import Path
+from cli_output import write_text
 
 ROOT = Path(__file__).resolve().parents[1]
 SQL_PATH = ROOT / "workspace/idea/ems/src/main/resources/db/lamp_report_alignment_v18.sql"
@@ -459,4 +460,4 @@ def generate_sql():
 
 if __name__ == "__main__":
     SQL_PATH.write_text(generate_sql(), encoding="utf-8")
-    print(SQL_PATH.relative_to(ROOT))
+    write_text(SQL_PATH.relative_to(ROOT))

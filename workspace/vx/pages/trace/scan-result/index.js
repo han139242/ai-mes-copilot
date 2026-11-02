@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 扫码结果页：根据条码展示追溯到的工单、批次、报工等信息。
 const guard = require('../../../utils/guard')
 const traceApi = require('../../../api/trace')

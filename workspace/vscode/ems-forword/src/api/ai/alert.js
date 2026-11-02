@@ -98,8 +98,8 @@ export function alertStreamUrl() {
     return '';
   }
   // 本机开发时直连后端，避免这条长连接占满浏览器到 Vite 的连接。
-  const backend = import.meta.env.DEV
-    && ['localhost', '127.0.0.1'].includes(window.location.hostname)
+  const backend = import.meta.env.DEV &&
+    ['localhost', '127.0.0.1'].includes(window.location.hostname)
     ? import.meta.env.VITE_API_PROXY_TARGET || ''
     : '';
   return `${backend}/api/ai/alert/stream?token=${encodeURIComponent(token)}`;

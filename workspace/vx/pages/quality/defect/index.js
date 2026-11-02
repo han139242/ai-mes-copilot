@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 // 不良品列表页：质检人员查看已生成的不合格处理记录。
 const guard = require('../../../utils/guard')
 const auth = require('../../../utils/auth')

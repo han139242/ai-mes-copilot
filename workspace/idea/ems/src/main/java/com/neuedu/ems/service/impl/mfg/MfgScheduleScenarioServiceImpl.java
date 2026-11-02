@@ -3635,7 +3635,11 @@ public class MfgScheduleScenarioServiceImpl
             if (!isWholePositive(quantity)) {
                 return null;
             }
-            // 两种约束同时满足：日产能是上限，装配和连续老化也必须真正排进班次。
+            return allocateBatch(capacity, workload, quantity);
+        }
+
+        private Allocation allocateBatch(BigDecimal capacity, RouteWorkload workload, BigDecimal quantity) {
+            // 日产能与实际班次时间仍须同时满足，原有资源占用由各分配器维护。
             Allocation capacityAllocation = copy().allocate(capacity);
             if (capacityAllocation == null) {
                 return null;

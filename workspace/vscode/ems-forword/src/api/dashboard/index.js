@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 import request from '@/api/request';
 
 // 仪表盘接口按展示区域拆分，页面可以并行请求；params通常包含日期范围等统计口径。

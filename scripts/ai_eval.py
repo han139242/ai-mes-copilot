@@ -13,9 +13,9 @@
 - 失败必须如实说失败，不能包装成 0 或空表。
 
 用法：
-    python scripts/ai-eval.py                 # 全跑
-    python scripts/ai-eval.py --only q1,a3    # 只跑指定用例
-    python scripts/ai-eval.py --json out.json # 结果另存
+    python scripts/ai_eval.py                 # 全跑
+    python scripts/ai_eval.py --only q1,a3    # 只跑指定用例
+    python scripts/ai_eval.py --json out.json # 结果另存
 """
 
 import argparse

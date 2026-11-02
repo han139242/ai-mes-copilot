@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { piecesForBatchVerdict } from '../src/utils/piece-inspection-batch.js';

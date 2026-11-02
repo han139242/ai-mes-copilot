@@ -1,3 +1,6 @@
+/*
+ * 版权所有 (c) 智能调光台灯 MES 项目组 2026
+ */
 const authApi = require('../../api/auth')
 const auth = require('../../utils/auth')
 

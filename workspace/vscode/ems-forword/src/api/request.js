@@ -150,8 +150,8 @@ function resolveResultMessage(result, config) {
 
 // 本机开发时直连后端：长连接占满浏览器到 Vite 的连接后，普通 /api 请求可能排队超时。
 // 局域网访问和正式构建仍沿用既有代理/部署地址；显式 VITE_API_BASE_URL 始终优先。
-const localBackendUrl = import.meta.env.DEV
-  && ['localhost', '127.0.0.1'].includes(window.location.hostname)
+const localBackendUrl = import.meta.env.DEV &&
+  ['localhost', '127.0.0.1'].includes(window.location.hostname)
   ? import.meta.env.VITE_API_PROXY_TARGET || ''
   : '';
 
