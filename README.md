@@ -8,6 +8,8 @@ An AI-assisted manufacturing execution system built with Spring Boot, Vue 3 and 
 
 [运行说明](docs/SETUP.md) · [AI 能力](docs/FEATURES.md) · [参与贡献](CONTRIBUTING.md) · [版本发布](https://github.com/han139242/ai-mes-copilot/releases)
 
+[English README](README.en.md)
+
 AI-MES Copilot 是一个以智能调光台灯 L100 / L200 为业务场景的 MES（制造执行系统）。基于 Spring Boot、Vue 3 和 MySQL，将采购、库存、生产、质量、设备与发货连接起来，让用户通过 AI 工作台用日常语言推进业务。
 
 ## 核心特色
