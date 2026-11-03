@@ -1,5 +1,11 @@
 blank_issues_enabled: true
 contact_links:
+  - name: Setup guide (English)
+    url: https://github.com/han139242/ai-mes-copilot/blob/main/docs/SETUP.en.md
+    about: Configure an isolated database, backend environment, and frontend proxy.
+  - name: Contributing (English)
+    url: https://github.com/han139242/ai-mes-copilot/blob/main/CONTRIBUTING.md#english
+    about: Read the contribution workflow, required checks, and privacy guidance.
   - name: 环境配置与启动
     url: https://github.com/han139242/ai-mes-copilot/blob/main/docs/SETUP.md
     about: 先检查独立数据库、环境变量和启动步骤。

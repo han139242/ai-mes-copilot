@@ -6,6 +6,10 @@ AI-MES Copilot 由以下成员共同完成，感谢每位成员在开发、联�
 - [@AnHC-00](https://github.com/AnHC-00)
 - [@zengjingye](https://github.com/zengjingye)
 
+## 社区贡献 / Community contributions
+
+- [@YuuGR1337](https://github.com/YuuGR1337)：添加英文文档入口 / Added the English documentation link ([PR #4](https://github.com/han139242/ai-mes-copilot/pull/4))。
+
 ## 后续参与
 
 欢迎通过 Issue 反馈问题，或通过 Pull Request 提交修复、文档和改进。提交代码时请使用关联到本人 GitHub 账号的邮箱；如需隐藏私人邮箱，可使用 GitHub 提供的 noreply 邮箱。

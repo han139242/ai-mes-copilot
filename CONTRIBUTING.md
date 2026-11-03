@@ -34,3 +34,26 @@
 ## English
 
 Community contributions are welcome. Open an issue with reproducible steps or submit a focused pull request. Use an isolated database, keep secrets in environment variables, update `COLLABORATION.md`, and report the checks you actually ran. Public contributor credits use GitHub usernames. Original project code is licensed under MIT; retain third-party notices.
+
+### Start here
+
+Read the [English project overview](README.en.md), [setup guide](docs/SETUP.en.md), and [AI capability catalog](docs/FEATURES.en.md). Search existing issues before opening a new one. Report the project version, environment, reproduction steps, expected behavior, and actual behavior. Remove credentials, personal information, and real business data from logs and screenshots.
+
+### Submit a change
+
+1. Fork the repository and create a focused branch.
+2. Prepare your own isolated demo or test database using the setup guide.
+3. Preserve business prerequisites, transaction boundaries, inventory conservation, and duplicate-request checks.
+4. Update relevant documentation and append a dated entry to `COLLABORATION.md` with the scope and verification result.
+5. Open a pull request describing the problem, final behavior, checks actually run, and any migration or compatibility impact.
+
+The repository's local Git hooks require each commit to update `COLLABORATION.md`. Use an email associated with your GitHub account; GitHub's noreply address can protect a private email. Use usernames for public contributor credits.
+
+### Verify the affected scope
+
+- **PC frontend:** run `npm ci`, `npm test`, and `npm run build` in `workspace/vscode/ems-forword`. Also check actual pages when changing interactions.
+- **Runtime/preflight tools:** run `node --test scripts/local-runtime.test.mjs scripts/ai-decision-preflight.test.mjs` from the repository root.
+- **Backend:** prepare an isolated test database, then run `.\mvnw.cmd -B package` in `workspace/idea/ems`; use `./mvnw -B package` on Linux/macOS.
+- **Documentation:** verify local links, commands, configuration names, and consistency with the source. Check both language versions when changing shared instructions.
+
+State which checks were not run. Keep existing test assertions and report actual failures. Submit only content you have the right to publish, and retain third-party license notices.

@@ -1,5 +1,7 @@
 # 环境配置与启动
 
+简体中文 · [English](SETUP.en.md) · [项目首页](../README.md)
+
 以下命令从仓库根目录开始，适用于 Windows PowerShell。先安装 JDK 21、Node.js 20.19.x 或 22.12+、MySQL 8.0 和 Python 3；让 `java`、`mysql`、`node`、`npm`、`python` 可以在终端调用。
 
 ## 1. 创建独立演示库
