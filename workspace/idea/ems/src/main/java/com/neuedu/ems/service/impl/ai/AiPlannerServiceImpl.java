@@ -66,6 +66,11 @@ public class AiPlannerServiceImpl implements AiPlannerService {
              "reason":"一句话说明为什么这样判断"}
 
             【判断规则】
+            - 先理解用户最终想达成的目标，再选择能力；不要只抓到前半句或一个业务词就忽略后续要求。
+            - 「先别下达，只看看」「不是上一张，换这张」等限制、更正优先于历史话题；只读、模拟、比较方案不变成办理。
+            - 用户已经给出或最近结果唯一确定的型号、数量、单号无需再问；只有歧义或业务必需信息缺失才补问，一次问清最少的信息。
+            - 页面定位线索只帮助确定当前对象，不证明状态或库存，也不授予权限；本轮用户明确指定的对象优先。
+            - 口语、简称、委婉请求按业务含义理解；要看「怎么做、先做什么」时给下一步和原因，不堆术语或重复表格。
             1. 用户想看数据、问情况、要报表 → mode=query，capability 从只读查询能力里选，能推断的参数填进 params。
             2. 用户要求办理业务（下达、开始、领料、移库、出入库确认、检验、报工审核）→ mode=command，
                capability 选业务办理能力，params.targetNo 可取用户本轮明确给出的单据号，
@@ -221,22 +226,32 @@ public class AiPlannerServiceImpl implements AiPlannerService {
         body.put("model", properties.getModel().trim());
         ArrayNode messages = body.putArray("messages");
         messages.addObject().put("role", "system").put("content", systemPrompt);
-        appendHistory(messages, history);
+        appendHistory(messages, history, question);
         messages.addObject().put("role", "user").put("content", question.trim());
         return complete(body, (long) systemPrompt.length() + question.trim().length());
     }
 
     /** 把最近几轮对话拼进请求体，空白内容和超长内容按原规则压缩。 */
-    private void appendHistory(ArrayNode messages, List<AiChatMessage> history) {
+    private void appendHistory(ArrayNode messages, List<AiChatMessage> history, String question) {
         if (history == null || history.isEmpty()) {
             return;
         }
-        int from = Math.max(0, history.size() - MAX_HISTORY_TURNS * 2);
-        for (AiChatMessage message : history.subList(from, history.size())) {
-            if (!StringUtils.hasText(message.getContent())) {
+        List<AiChatMessage> cleaned = new ArrayList<>();
+        for (AiChatMessage message : history) {
+            if (message == null || !StringUtils.hasText(message.getContent())) {
                 continue;
             }
-            String role = "assistant".equalsIgnoreCase(message.getRole()) ? "assistant" : "user";
+            String role = message.getRole() == null ? "" : message.getRole().trim().toLowerCase(java.util.Locale.ROOT);
+            if (!"user".equals(role) && !"assistant".equals(role)) continue;
+            cleaned.add(new AiChatMessage(role, message.getContent()));
+        }
+        if (!cleaned.isEmpty() && "user".equals(cleaned.getLast().getRole())
+                && question.trim().equals(cleaned.getLast().getContent().trim())) {
+            cleaned.removeLast();
+        }
+        int from = Math.max(0, cleaned.size() - MAX_HISTORY_TURNS * 2);
+        for (AiChatMessage message : cleaned.subList(from, cleaned.size())) {
+            String role = message.getRole();
             messages.addObject().put("role", role)
                     .put("content", truncate(message.getContent().trim(), 2000));
         }

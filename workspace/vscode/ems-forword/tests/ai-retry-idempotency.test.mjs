@@ -87,6 +87,23 @@ test('每次提问都带 clientMessageId，且同一次提问只带一个', asyn
   assert.ok(f.payloads[0].clientMessageId.length > 0);
 });
 
+test('页面线索随请求传递，重试不因切换页面而悄悄换成别的工单', async (t) => {
+  const f = await fixture(t);
+  f.fail();
+  await f.store.sendMessage('这张工单先做什么', { source: 'ai-dock', context: {
+    workOrderNo: 'C1-WO-20261101-008', pagePath: '/mfg/work-orders', token: 'private', source: 'override',
+  } });
+  assert.equal(f.payloads[0].context.workOrderNo, 'C1-WO-20261101-008');
+  assert.equal(f.payloads[0].context.source, 'ai-dock');
+  assert.equal('token' in f.payloads[0].context, false);
+  const failed = f.store.activeMessages.value.find((message) => message.retryQuestion);
+  f.succeed();
+  await f.store.sendMessage(failed.retryQuestion, { clientMessageId: failed.retryClientMessageId,
+    context: { workOrderNo: 'C1-WO-20261101-009' } });
+  assert.equal(f.payloads[1].context.workOrderNo, 'C1-WO-20261101-008');
+  assert.equal(f.payloads[1].context.pagePath, '/mfg/work-orders');
+});
+
 test('失败消息记下提问的 clientMessageId，重试复用它而不是新生成', async (t) => {
   const f = await fixture(t);
   f.fail();

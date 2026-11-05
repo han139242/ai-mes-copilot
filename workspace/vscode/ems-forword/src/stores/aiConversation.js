@@ -15,6 +15,7 @@ import {
 } from '@/api/ai/conversations';
 import { getCurrentUser } from '@/utils/auth';
 import { businessResultHistory, commandPreviewHistory, orderResultHistory } from '@/utils/ai-order-context';
+import { sanitizeAiPageContext } from '../utils/ai-page-context.js';
 
 /*
  * AI 会话的唯一状态源：工作台和右下角浮窗都只读写这里，切换形态只是换渲染位置，
@@ -511,7 +512,7 @@ function resolveErrorMessage(error) {
   return '本次分析未完成，请稍后重试。';
 }
 
-function appendUserMessage(conversation, text, clientMessageId) {
+function appendUserMessage(conversation, text, clientMessageId, requestContext) {
   messageRevision += 1;
   const sentAt = dayjs();
   conversation.messages.push({
@@ -520,6 +521,7 @@ function appendUserMessage(conversation, text, clientMessageId) {
     content: text,
     // 后端按这个标识判重：同一条提问重试时复用同一个值，历史里就不会出现两条一样的提问。
     clientMessageId,
+    requestContext,
     time: sentAt.format('HH:mm'),
   });
   if (conversation.title === '新对话') {
@@ -613,7 +615,11 @@ export async function sendMessage(content, options = {}) {
   const capabilityId = options.capabilityId || 'general';
   const conversation = ensureActiveConversation(capabilityId);
   const clientMessageId = options.clientMessageId || newId('client');
-  appendUserMessage(conversation, text, clientMessageId);
+  const previousRequest = options.clientMessageId
+    ? [...conversation.messages].reverse().find((item) => item.role === 'user' && item.clientMessageId === clientMessageId)
+    : null;
+  const requestContext = sanitizeAiPageContext(previousRequest?.requestContext ?? options.context);
+  appendUserMessage(conversation, text, clientMessageId, requestContext);
   sending.value = true;
   persistConversations();
 
@@ -627,7 +633,7 @@ export async function sendMessage(content, options = {}) {
         module: options.module || 'general',
         conversationId: remoteId || undefined,
         clientMessageId,
-        context: { source: options.source || 'ai-workbench', capability: capabilityId },
+        context: { ...requestContext, source: options.source || 'ai-workbench', capability: capabilityId },
       },
       abortController.signal,
     );

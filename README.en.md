@@ -60,7 +60,7 @@ The delivered application focuses on the backend and PC frontend. The historical
 
 ## Getting started
 
-Prerequisites: **JDK 21**, **Node.js 20.19.x or 22.12+**, **MySQL 8.0**, and Python 3 for selected migration and verification tools. Redis is optional.
+The complete development and verification environment uses **JDK 21**, **Node.js 24** (verified with 24.19.0), **MySQL 8.0**, and Python 3 for selected migration and verification tools. Redis is optional. Frontend build dependencies allow some older Node versions; the [setup guide](docs/SETUP.en.md) distinguishes build compatibility from the complete conversation-test requirements.
 
 ```powershell
 git clone https://github.com/han139242/ai-mes-copilot.git
@@ -99,7 +99,9 @@ Pop-Location
 
 On Linux/macOS, run `./mvnw -B package` from the backend directory. Integration tests write test data, so use a database isolated from normal demonstrations and business data.
 
-The corresponding business source completed **1,118 backend tests with zero failures, errors, or skipped tests** and packaging in an isolated verification environment after the November 2, 2026 CodeArts cleanup. The same verification round recorded 71 frontend tests and a production build, 20 runtime/preflight checks, and four Python-tool tests. These are dated execution records; each scope is recorded separately in [VERIFICATION.md](docs/VERIFICATION.md), currently in Chinese. This documentation update does not rerun that business regression.
+The corresponding business source completed **1,118 backend tests with zero failures, errors, or skipped tests** and packaging in an isolated verification environment after the November 2, 2026 CodeArts cleanup. The same verification round recorded 71 frontend tests and a production build, 20 runtime/preflight checks, and four Python-tool tests. These are dated execution records; each scope is recorded separately in [VERIFICATION.md](docs/VERIFICATION.md), currently in Chinese. The November 3 documentation-only release did not rerun that regression.
+
+The November 5, 2026 conversation-usability update passed **1,134 backend tests**, **74 frontend tests**, and **20 runtime/preflight checks**, with backend packaging and the frontend production build passing. Its real-model evaluation used the authorized limit of **20 requests**. Recorded scenarios and the equivalent-query routing difference are described in the [usability review](docs/AI_USABILITY.md).
 
 ## Documentation
 
@@ -109,6 +111,7 @@ The corresponding business source completed **1,118 backend tests with zero fail
 - [Contributors](CONTRIBUTORS.md)
 - [Validation records — Chinese](docs/VERIFICATION.md)
 - [CodeArts cleanup notes — Chinese](docs/CODE_QUALITY.md)
+- [Conversation usability review — Chinese](docs/AI_USABILITY.md)
 - [Changelog — Chinese](CHANGELOG.md)
 
 The public repository includes source code, database migrations, and example data. Personal coursework, student identifiers, presentation material, shared-database credentials, local runtime state, and private repository history are kept outside the public source.

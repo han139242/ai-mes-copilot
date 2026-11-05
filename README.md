@@ -56,7 +56,7 @@ docs/                         公开版运行说明与验证口径
 
 ## 快速开始
 
-需要 JDK 21、Node.js 20.19.x 或 22.12+、MySQL 8.0；Python 3 用于部分迁移和核验工具。Redis 为可选组件。
+完整开发与验证环境使用 JDK 21、Node.js 24（本轮为 24.19.0）、MySQL 8.0；Python 3 用于部分迁移和核验工具。Redis 为可选组件。前端构建依赖支持较早的 Node 版本，完整会话测试的要求见[运行说明](docs/SETUP.md)。
 
 ```powershell
 git clone https://github.com/han139242/ai-mes-copilot.git
@@ -87,12 +87,15 @@ node --test scripts/local-runtime.test.mjs scripts/ai-decision-preflight.test.mj
 
 当前公开源码包含 2026-11-02 的 CodeArts 整改。对应源码在独立验证环境的后端完整回归记录为 **1118 项，0 失败、0 错误、0 跳过**；各轮检查范围分别记录在[验证说明](docs/VERIFICATION.md)。
 
+2026-11-05 的 AI 使用便利性修订完成后，后端完整回归 **1134 项**、前端 **74 项**、运行监管与推演 **20 项**通过，后端打包与前端生产构建通过；本轮真实模型评估按授权共调用 **20 次**。具体场景与能力路由差异见[对话理解记录](docs/AI_USABILITY.md)。
+
 ## 项目文档
 
 - [环境配置、数据库初始化与启动](docs/SETUP.md)
 - [AI 能力、任务办理与业务边界](docs/FEATURES.md)
 - [测试范围与验证记录](docs/VERIFICATION.md)
 - [CodeArts 整改记录](docs/CODE_QUALITY.md)
+- [对话理解与使用便利性改进](docs/AI_USABILITY.md)
 - English: [Overview](README.en.md) · [Setup](docs/SETUP.en.md) · [AI capabilities](docs/FEATURES.en.md)
 
 公开仓库保留源码、数据库结构迁移和示例数据，不包含个人报告、学号、答辩材料、共享数据库凭据、本机运行状态或私有历史记录。

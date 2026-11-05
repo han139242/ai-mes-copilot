@@ -65,6 +65,10 @@ Definitions are maintained in [`AiCapabilityCatalog.java`](../workspace/idea/ems
 
 A blocked multi-step task shows completed steps and the failure reason, and can continue according to the actual business state. Automation rules run on events or schedules within their configured authorization scope.
 
+## Conversation continuity
+
+Requests with negation, corrections, or multiple goals are interpreted before narrow keyword shortcuts. Explicit read-only constraints remain in effect. The floating assistant can pass the current route and explicit business codes from its URL; retries retain the original request's reference hints. Those hints help identify an object and still require actual business validation. See the [dated usability review](AI_USABILITY.md), currently in Chinese, for the scope and recorded cases.
+
 ## Quality data and planning boundaries
 
 Quality personnel perform physical measurements and enter actual piece-level values. Inspection submission uses those existing values; AI does not generate measurement data. The model does not execute arbitrary SQL or replace actual document, inventory, and inspection states with a user's verbal assertion.

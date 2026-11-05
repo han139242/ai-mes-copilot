@@ -313,6 +313,8 @@ public class AiServiceImpl implements AiService {
         // 第一步：知识检索。问「说明书里怎么设计的」这类问题时，先用章节索引定位原文，
         // 给出文档名、章节与页码，再让模型基于原文片段解释，避免凭空作答。
         boolean modelUnavailable = false;
+        boolean queryOnly = AiConversationUnderstanding.queryOnly(question);
+        boolean semanticFirst = AiConversationUnderstanding.preferSemanticPlan(question, context);
         Map<String, Object> answer = null;
         try {
             answer = tryKnowledge(question, history, startedAt);
@@ -323,27 +325,31 @@ public class AiServiceImpl implements AiService {
             modelUnavailable = true;
             LOG.warn("知识检索的模型改写不可用，本轮继续走规则路由：{}", e.getMessage());
         }
+        // 带否定、更正或复合目标的表达先完整理解，避免某个关键词截走后半句。
+        if (answer == null && semanticFirst) {
+            answer = tryPlan(question, history, request, context, authorization, startedAt);
+        }
         // 第二步：结构化计划。大模型负责听懂「要查什么 / 要办什么」，后端负责校验与执行。
-        if (answer == null) {
+        if (answer == null && !queryOnly) {
             answer = tryContextualDispatchFailure(question, history, request, context, authorization, startedAt);
         }
         if (answer == null) {
             answer = tryContextualTasks(question, history, request, context, authorization, startedAt);
         }
-        if (answer == null) {
+        if (answer == null && !queryOnly) {
             answer = tryContextualOrderFlow(question, history, request, context, authorization, startedAt);
         }
         if (answer == null) {
             answer = tryDirectDocumentQuery(question, authorization, startedAt);
         }
-        if (answer == null) {
+        if (answer == null && !queryOnly) {
             answer = tryOrderDocumentAction(question, history, request, context, authorization, startedAt);
         }
-        if (answer == null) {
+        if (answer == null && !semanticFirst) {
             answer = tryPlan(question, history, request, context, authorization, startedAt);
         }
         // 第三步：写命令识别。计划器不可用时退回关键词识别，命中写动作同样只做预览。
-        if (answer == null) {
+        if (answer == null && !queryOnly) {
             answer = tryCommandPreview(question, request, context, authorization, startedAt);
         }
         // 第四步：规则路由优先，规则答不了才交给大模型。模型故障时降级而不是整轮报错。
@@ -1455,8 +1461,12 @@ public class AiServiceImpl implements AiService {
         if (aiPlannerService == null || !aiPlannerService.available()) {
             return null;
         }
-        com.neuedu.ems.service.ai.AiPlan plan = requestPlan(question, history);
+        com.neuedu.ems.service.ai.AiPlan plan = requestPlan(question,
+                AiConversationUnderstanding.planningHistory(history, context));
         if (plan == null || !StringUtils.hasText(plan.mode())) {
+            return null;
+        }
+        if (AiConversationUnderstanding.queryOnly(question) && plan.isCommand()) {
             return null;
         }
         return dispatchPlan(plan, question, request, context, authorization, startedAt);
@@ -1754,6 +1764,9 @@ public class AiServiceImpl implements AiService {
                                                        Map<String, Object> context,
                                                        com.neuedu.ems.common.AuthorizationContext authorization,
                                                        long startedAt) {
+        if (AiConversationUnderstanding.queryOnly(question)) {
+            return null;
+        }
         String action = deterministicAction(question);
         if (action == null) {
             return null;
@@ -3563,7 +3576,8 @@ public class AiServiceImpl implements AiService {
     private boolean needsWorkOrderClarification(String question, List<AiChatMessage> history, Map<String, Object> context) {
         boolean noHistory = history.stream().noneMatch(message -> WORK_ORDER_REFERENCE.matcher(message.getContent()).find());
         boolean refersToWorkOrder = hasWorkflowKeyword(question, "这个工单", "这张工单", "该工单", "这笔工单");
-        return noHistory && refersToWorkOrder && !WORK_ORDER_REFERENCE.matcher(question).find() && !WORK_ORDER_REFERENCE.matcher(String.valueOf(context)).find();
+        return noHistory && refersToWorkOrder && !WORK_ORDER_REFERENCE.matcher(question).find()
+                && !AiConversationUnderstanding.hasWorkOrderHint(context);
     }
     private java.util.Comparator<Map<String, Object>> workOrderPriority(String numberKey) {
         return java.util.Comparator.comparing((Map<String, Object> row) -> !"ROOT".equals(textOf(row.get("workOrderType")))).thenComparing(row -> textOf(row.get(numberKey)));

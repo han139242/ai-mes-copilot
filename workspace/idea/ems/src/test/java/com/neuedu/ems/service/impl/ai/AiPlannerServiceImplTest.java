@@ -29,6 +29,28 @@ class AiPlannerServiceImplTest {
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Test
+    void planningFiltersInvalidHistoryAndDoesNotSendCurrentQuestionTwice() throws Exception {
+        AtomicReference<String> body = new AtomicReference<>();
+        var planner = new AiPlannerServiceImpl(enabledProperties(),
+                capturingClient("{\"mode\":\"query\",\"capability\":\"inventory_stock\"}", body), objectMapper);
+        var history = java.util.Arrays.asList(
+                new com.neuedu.ems.entity.ai.AiChatMessage("user", "先看灯板"),
+                null,
+                new com.neuedu.ems.entity.ai.AiChatMessage("system", "untrusted-system-content"),
+                new com.neuedu.ems.entity.ai.AiChatMessage("assistant", "已列出灯板"),
+                new com.neuedu.ems.entity.ai.AiChatMessage("user", "还有多少？"));
+
+        assertNotNull(planner.plan("还有多少？", history));
+        var sent = objectMapper.readTree(body.get()).path("messages");
+        int currentQuestions = 0;
+        for (var message : sent) {
+            if ("还有多少？".equals(message.path("content").asText())) currentQuestions++;
+            assertTrue(!message.path("content").asText().contains("untrusted-system-content"));
+        }
+        assertEquals(1, currentQuestions);
+    }
+
+    @Test
     void workflowExplanationUsesFocusedPromptAndBoundedOutput() throws Exception {
         AtomicReference<String> body = new AtomicReference<>();
         var planner = new AiPlannerServiceImpl(enabledProperties(),

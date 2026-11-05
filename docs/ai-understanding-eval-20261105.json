@@ -1,0 +1,151 @@
+{
+  "date": "2026-11-05",
+  "model": "deepseek-flash",
+  "request_limit": 20,
+  "requests_used": 20,
+  "baseline_model_requests": 4,
+  "post_change_cases": 16,
+  "strict_catalog_matches": 15,
+  "cases": [
+    {
+      "case": "mixed",
+      "question": "下达 C1-WO-20261101-008，然后告诉我状态",
+      "mode": "command",
+      "capability": "RELEASE_WORK_ORDER",
+      "strict_match": true,
+      "elapsed_ms": 3706
+    },
+    {
+      "case": "negated",
+      "question": "这张先别下达，我只想知道现在能不能干",
+      "mode": "query",
+      "capability": "work_order_readiness",
+      "strict_match": true,
+      "elapsed_ms": 1511
+    },
+    {
+      "case": "goal",
+      "question": "来十台L200，月底之前交，先给我看看要建的订单",
+      "mode": "clarify",
+      "capability": "CREATE_PRODUCTION_ORDER",
+      "strict_match": true,
+      "elapsed_ms": 2610
+    },
+    {
+      "case": "explain",
+      "question": "别重复表格了，说一下现在最先要干什么",
+      "mode": "chat",
+      "capability": "",
+      "strict_match": true,
+      "elapsed_ms": 2067
+    },
+    {
+      "case": "stock",
+      "question": "仓库里的灯板还剩多少，给个能直接用的数",
+      "mode": "query",
+      "capability": "inventory_stock",
+      "strict_match": true,
+      "elapsed_ms": 2141
+    },
+    {
+      "case": "capacity",
+      "question": "明天还有空档吗，L200再塞50台能排进去吗",
+      "mode": "query",
+      "capability": "capacity_feasibility",
+      "strict_match": true,
+      "elapsed_ms": 2075
+    },
+    {
+      "case": "collective",
+      "question": "就把上面这三张都下达吧，不要让我挨个抄号",
+      "mode": "command",
+      "capability": "RELEASE_WORK_ORDER",
+      "strict_match": true,
+      "elapsed_ms": 2016
+    },
+    {
+      "case": "correction",
+      "question": "不是上一张，换 C1-WO-20261101-012，我只查状态",
+      "mode": "query",
+      "capability": "data_query",
+      "strict_match": false,
+      "elapsed_ms": 2983,
+      "review": "Exact query of the corrected work order through data_query instead of work_order_detail; the target is correct."
+    },
+    {
+      "case": "unsupported",
+      "question": "不用单据，直接把仓库库存改成999",
+      "mode": "chat",
+      "capability": "",
+      "strict_match": true,
+      "elapsed_ms": 3085
+    },
+    {
+      "case": "missing",
+      "question": "替我把工单下达了",
+      "mode": "clarify",
+      "capability": "RELEASE_WORK_ORDER",
+      "strict_match": true,
+      "elapsed_ms": 2007
+    },
+    {
+      "case": "twoSteps",
+      "question": "给 C1-WO-20261101-008 领点料，然后送到线边，先预览别执行",
+      "mode": "command",
+      "capability": "GENERATE_MATERIAL_ISSUE",
+      "strict_match": true,
+      "elapsed_ms": 3571
+    },
+    {
+      "case": "oralShortage",
+      "question": "要开工的话现在哪些东西不够，还差多少",
+      "mode": "query",
+      "capability": "work_order_readiness",
+      "strict_match": true,
+      "elapsed_ms": 2039
+    },
+    {
+      "case": "comparison",
+      "question": "先别改排程，看看这单怎么安排能早点做完",
+      "mode": "query",
+      "capability": "order_schedule_simulation",
+      "strict_match": true,
+      "elapsed_ms": 1929
+    },
+    {
+      "case": "roles",
+      "question": "系统都有些什么角色，先列给我看看",
+      "mode": "query",
+      "capability": "data_query",
+      "strict_match": true,
+      "elapsed_ms": 1955
+    },
+    {
+      "case": "page",
+      "question": "这张工单要先做什么？",
+      "mode": "query",
+      "capability": "work_order_start_plan",
+      "strict_match": true,
+      "elapsed_ms": 1668
+    },
+    {
+      "case": "pageHelp",
+      "question": "我在这里能让你帮忙做什么？说简单点",
+      "mode": "chat",
+      "capability": "",
+      "strict_match": true,
+      "elapsed_ms": 2850
+    }
+  ],
+  "scope": "Real model planning and answer revision with synthetic business references; not live business execution.",
+  "backend_regression": {
+    "tests": 1134,
+    "failures": 0,
+    "errors": 0,
+    "skipped": 0
+  },
+  "frontend_tests": 74,
+  "runtime_checks": 20,
+  "backend_package": "passed",
+  "frontend_build": "passed"
+}

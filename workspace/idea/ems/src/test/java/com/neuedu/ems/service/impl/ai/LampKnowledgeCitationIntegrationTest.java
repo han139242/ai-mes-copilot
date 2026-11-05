@@ -19,10 +19,11 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
- * 用仓库里的需求规格说明书原文建章节索引，回答必须带文档名和章节，不能只给一段没有出处的话。
+ * 用自带的合成需求样例建章节索引，回答必须带文档名和章节；不依赖私人课程材料。
  */
 @SpringBootTest(properties = {"mes.notification.scheduling-enabled=false", "mes.ai.enabled=false",
         PhoneCryptoTestProperties.ACTIVE_KEY, PhoneCryptoTestProperties.KEY_IDS,
@@ -39,15 +40,16 @@ class LampKnowledgeCitationIntegrationTest {
 
     @Test
     void requirementSpecCitesTheSectionThatMentionsTheSensor() throws Exception {
-        Path source = Path.of("..", "..", "..", "相关文档，图片", "md", "台灯修改计划", "台灯MES需求规格说明书.md")
-                .toAbsolutePath()
-                .normalize();
+        var resource = getClass().getResource("/knowledge/lamp-requirements-test.md");
+        assertNotNull(resource, "检索测试样例必须随源码提供");
+        Path source = Path.of(resource.toURI());
         assertTrue(Files.isRegularFile(source), "找不到需求规格说明书：" + source);
         String markdown = Files.readString(source);
         List<AiKnowledgeSection> indexed = AiKnowledgeMarkdownIndexer.index(markdown, DOC_CODE, DOC_NAME);
         assertFalse(indexed.isEmpty());
 
         new TransactionTemplate(transactionManager).executeWithoutResult(status -> {
+            status.setRollbackOnly();
             jdbc.update("DELETE FROM ai_knowledge_section WHERE doc_code=?", DOC_CODE);
             for (AiKnowledgeSection section : indexed) {
                 sections.insert(section);

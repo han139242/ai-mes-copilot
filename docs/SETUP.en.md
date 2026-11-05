@@ -2,7 +2,9 @@
 
 [简体中文](SETUP.md) · English · [Project overview](../README.en.md)
 
-Commands below start from the repository root and use Windows PowerShell. Install JDK 21, Node.js 20.19.x or 22.12+, MySQL 8.0, and Python 3. Make `java`, `mysql`, `node`, `npm`, and `python` available in your terminal. Redis is optional.
+Commands below start from the repository root and use Windows PowerShell. The complete development and verification environment uses JDK 21, Node.js 24 (verified with 24.19.0), MySQL 8.0, and Python 3. Make `java`, `mysql`, `node`, `npm`, and `python` available in your terminal. Redis is optional.
+
+Frontend build dependencies declare Node.js compatibility as `^20.19.0 || >=22.12.0`. Conversation tests also use `node:module.registerHooks`, introduced in Node.js 22.15.0 / 23.5.0; see the [official reference](https://nodejs.org/api/module.html#moduleregisterhooksoptions). Node.js 24 reproduces the complete frontend test run recorded here.
 
 ## 1. Create an isolated demo database
 

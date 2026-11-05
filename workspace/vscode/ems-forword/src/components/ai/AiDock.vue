@@ -2,6 +2,7 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppIcon from '@/components/common/AppIcon.vue';
+import { aiPageContext } from '@/utils/ai-page-context';
 import {
   activeMessages,
   cancelSend,
@@ -132,7 +133,7 @@ function submit() {
   }
   question.value = '';
   ensureActiveConversation();
-  sendMessage(content, { source: 'ai-dock' });
+  sendMessage(content, { source: 'ai-dock', context: aiPageContext(route) });
 }
 
 // 浮窗里 Enter 直接发送，Shift+Enter 换行，和独立工作台保持一致。
