@@ -947,13 +947,13 @@ onBeforeUnmount(() => {
 <style scoped>
 /* 沿用自动化规则页的视觉基调：1px 描边、小圆角、单一主色、紧凑表格。 */
 .task-page {
-  --tp-line: var(--mes-border, #e5e7eb);
+  --tp-line: var(--mes-border, var(--mes-border));
   --tp-line-soft: var(--mes-border-light, #eef1f5);
   --tp-bg: var(--mes-surface-muted, #f7f8fa);
   --tp-panel: var(--mes-surface, #fff);
-  --tp-text: var(--mes-text, #1f2329);
+  --tp-text: var(--mes-text, var(--mes-text));
   --tp-text-2: var(--mes-text-secondary, #646a73);
-  --tp-text-3: var(--mes-text-muted, #8f959e);
+  --tp-text-3: var(--mes-text-muted, var(--mes-text-muted));
   display: flex;
   min-width: 0;
   flex-direction: column;

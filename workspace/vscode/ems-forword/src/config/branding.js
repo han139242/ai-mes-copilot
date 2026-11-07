@@ -2,16 +2,13 @@
  * 版权所有 (c) 智能调光台灯 MES 项目组 2026
  * 本项目为课程实训作品，版权说明按 CodeArts 文件头注释规范补充。
  */
-// 演练入口与历史入口独立配置品牌，不改写历史业务记录。
-// 当前仓库为“智能调光台灯 MES”演练前端，产品名、副标题和特性文案集中在这里维护，
+// 产品名与存储隔离标识分别配置，避免切换环境时出现历史项目名称。
+// 当前仓库为 AI-MES Copilot，产品名、副标题和特性文案集中在这里维护，
 // 登录页、侧边栏、顶栏和大屏都从这里取值，避免品牌名散落在各个页面里。
-const scope = import.meta.env.VITE_APP_SCOPE || 'lamp-rehearsal';
-const isLampScope = scope.startsWith('lamp');
-
-export const appName = import.meta.env.VITE_APP_NAME || (isLampScope ? '智能调光台灯 MES' : '羽球智造 MES');
+export const appName = import.meta.env.VITE_APP_NAME || '智能调光台灯 MES';
 
 // 侧边栏、顶栏空间有限时使用短名称，避免中英文混排被截断。
-export const appShortName = import.meta.env.VITE_APP_SHORT_NAME || (isLampScope ? '台灯 MES' : '羽球 MES');
+export const appShortName = import.meta.env.VITE_APP_SHORT_NAME || '台灯 MES';
 
 // 登录页左侧品牌区使用的产品定位文案。
 export const appSubtitle = import.meta.env.VITE_APP_SUBTITLE || '智能调光台灯数字化制造执行系统';

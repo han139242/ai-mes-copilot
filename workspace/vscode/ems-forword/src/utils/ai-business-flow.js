@@ -75,6 +75,16 @@ export function businessActionGroups(catalog) {
     .filter((group) => group.items.length);
 }
 
+// 开发预览只展示同一套业务入口，不代表当前账号获授权，也不开放办理。
+export function businessActionPreviewGroups() {
+  const catalog = [...new Set(phases.flatMap(([, , entries]) => entries.map(([code]) => code)))].map((code) => ({
+    code,
+    kind: 'command',
+    previewOnly: true,
+  }));
+  return businessActionGroups(catalog);
+}
+
 export function filterWorkflowCandidates(candidates, progress, action) {
   if (!progress) {
     return candidates;

@@ -24,17 +24,17 @@ public class SwaggerConfig {
         return new OpenAPI()
             // API 文档基本信息
             .info(new Info()
-                .title("羽毛球 MES 系统 API 文档")  // 文档标题
+                .title("智能调光台灯 MES API 文档")  // 文档标题
                 .version("1.0.0")              // 接口版本
-                .description("基于 Spring Boot 3.x 和 Swagger 3.x 的羽毛球 MES 后端接口文档")  // 文档描述
+                .description("基于 Spring Boot 3.x 和 Swagger 3.x 的智能调光台灯 MES 后端接口文档")  // 文档描述
                 // 联系人信息
                 .contact(new Contact()
                         .name("开发团队")
-                        .url("https://example.com"))
+                        .url("https://github.com/han139242/ai-mes-copilot"))
                 // 许可证信息
                 .license(new License()
-                        .name("Apache 2.0 许可证")
-                        .url("https://www.apache.org/licenses/LICENSE-2.0")));
+                        .name("MIT License")
+                        .url("https://github.com/han139242/ai-mes-copilot/blob/main/LICENSE")));
     }
 
     @Bean

@@ -803,7 +803,7 @@
   border-left: 1px solid var(--mes-border);
 }
 .overview-window .tone-start {
-  --overview-color: #2d8cf0;
+  --overview-color: var(--mes-primary);
 }
 .overview-window .tone-end {
   --overview-color: #174a73;

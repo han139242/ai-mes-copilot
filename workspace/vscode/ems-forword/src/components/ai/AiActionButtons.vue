@@ -157,7 +157,7 @@ async function requestPreview(text, action) {
   gap: 5px;
   padding: 3px 10px;
   overflow: hidden;
-  color: var(--mes-primary, #3370ff);
+  color: var(--mes-primary, var(--mes-primary));
   font-size: 11.5px;
   line-height: 18px;
   text-overflow: ellipsis;
@@ -183,16 +183,16 @@ async function requestPreview(text, action) {
 /* 查看类用中性色，和办理类区分开，避免用户误以为都会改数据。 */
 .action-button.is-view {
   color: var(--mes-text-secondary, #646a73);
-  border-color: var(--mes-border, #e5e7eb);
+  border-color: var(--mes-border, var(--mes-border));
 }
 
 .action-button.is-view:hover:not(:disabled) {
-  color: var(--mes-primary, #3370ff);
+  color: var(--mes-primary, var(--mes-primary));
   border-color: var(--mes-primary-border, #bcd3fb);
   background: var(--mes-surface-muted, #f7f8fa);
 }
 
 .action-loading {
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
 }
 </style>

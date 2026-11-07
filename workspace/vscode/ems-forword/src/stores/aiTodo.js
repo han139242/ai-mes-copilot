@@ -4,6 +4,7 @@
  */
 import { computed, ref } from 'vue';
 import { getMyTodos } from '@/api/ai/todo';
+import { isFrameworkPreview } from '@/utils/auth';
 
 /*
  * 我的待办状态：首页待办面板和工作台共用这一份数据。
@@ -15,7 +16,8 @@ export const todoCounts = ref({});
 export const todoTotal = ref(0);
 export const todoGeneratedAt = ref('');
 export const todoLoading = ref(false);
-// 接口不可用时面板显示空态即可，错误只留在内部，不弹全局提示。
+export const todoLoaded = ref(false);
+// 接口不可用时在面板内说明原因并提供重试，不弹全局提示。
 export const todoError = ref('');
 
 // 并发去重：首页定时刷新和工作台办理回调可能同时触发，只让第一个请求真正发出。
@@ -37,10 +39,15 @@ export function applyTodoPayload(payload) {
   todoCounts.value = data.counts && typeof data.counts === 'object' ? data.counts : {};
   todoTotal.value = Number(data.total ?? todoItems.value.length) || 0;
   todoGeneratedAt.value = data.generatedAt || '';
+  todoLoaded.value = true;
 }
 
 // 拉一次待办；silent 为真时不显示加载态，用于 60 秒自动刷新。
 export async function refreshTodos(silent = false) {
+  // Framework preview has no authenticated backend data; do not turn it into an outage.
+  if (isFrameworkPreview()) {
+    return false;
+  }
   if (inflight) {
     return inflight;
   }

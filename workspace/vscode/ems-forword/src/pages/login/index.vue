@@ -252,7 +252,7 @@ onBeforeUnmount(() => {
 <style scoped>
 /* 登录页专属视觉：深海蓝、青绿与暖光；不影响任何公共组件或其他页面。 */
 .login-page {
-  --el-color-primary: #167d83;
+  --el-color-primary: var(--mes-primary);
   --el-color-primary-light-3: #5aa3a6;
   --el-color-primary-light-5: #90bfc1;
   --el-color-primary-light-7: #c3dfe0;
@@ -263,9 +263,9 @@ onBeforeUnmount(() => {
   grid-template-rows: auto 1fr auto;
   min-height: 100dvh;
   overflow: clip;
-  background: #f4f3ed;
-  color: #173640;
-  font-family: 'Inter', 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  background: var(--mes-bg);
+  color: var(--mes-text);
+  font-family: var(--mes-font);
   -webkit-font-smoothing: antialiased;
 }
 .ambient-art {
@@ -275,15 +275,15 @@ onBeforeUnmount(() => {
   pointer-events: none;
   background:
     radial-gradient(ellipse at 88% 10%, #ffffff 0%, transparent 42%),
-    radial-gradient(ellipse at 96% 98%, #e5ece6 0%, transparent 48%);
+    radial-gradient(ellipse at 96% 98%, #eef1ed 0%, transparent 48%);
 }
 .ambient-art::before {
   position: absolute;
   inset: 0 44% 0 0;
   background:
-    radial-gradient(ellipse at 68% 53%, rgb(41 124 125 / 30%), transparent 58%),
-    radial-gradient(ellipse at 3% 0%, rgb(27 75 92 / 65%), transparent 55%),
-    linear-gradient(145deg, #0b1f31 5%, #102d3a 58%, #153d43 100%);
+    radial-gradient(ellipse at 68% 53%, rgb(92 171 210 / 10%), transparent 58%),
+    radial-gradient(ellipse at 3% 0%, rgb(156 205 229 / 12%), transparent 55%),
+    linear-gradient(145deg, #f6f3e9 5%, #f8f6ef 58%, #f2f3ee 100%);
   content: '';
 }
 .ambient-art::after {
@@ -351,8 +351,8 @@ onBeforeUnmount(() => {
   place-items: center;
   border: 1px solid rgb(176 229 217 / 24%);
   border-radius: 13px;
-  background: linear-gradient(145deg, #24616a, #154451);
-  color: #d3f0e7;
+  background: var(--mes-primary-soft);
+  color: var(--mes-primary);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 10%);
 }
 .brand-icon svg {
@@ -365,13 +365,13 @@ onBeforeUnmount(() => {
   gap: 6px;
 }
 .brand-name strong {
-  color: #edf5f4;
+  color: var(--mes-text);
   font-size: 17px;
   font-weight: 600;
   letter-spacing: 1px;
 }
 .brand-name > span {
-  color: #96afb7;
+  color: var(--mes-text-secondary);
   font-size: 8px;
   letter-spacing: 1.5px;
 }
@@ -379,7 +379,7 @@ onBeforeUnmount(() => {
   display: flex;
   align-items: center;
   gap: 13px;
-  color: #71827f;
+  color: var(--mes-text-muted);
   font-size: 10px;
   letter-spacing: 2px;
 }
@@ -411,7 +411,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 10px;
   margin: 0 0 18px;
-  color: #a4c8c8;
+  color: var(--mes-text-secondary);
   font-size: 10px;
   font-weight: 500;
   letter-spacing: 3.5px;
@@ -423,7 +423,7 @@ onBeforeUnmount(() => {
 }
 .intro-copy h1 {
   margin: 0;
-  color: #f4f6f2;
+  color: var(--mes-text);
   font-size: clamp(42px, 3.8vw, 56px);
   font-weight: 600;
   line-height: 1.35;
@@ -431,11 +431,11 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .intro-copy h1 > span {
-  color: #aad7cb;
+  color: var(--mes-primary);
 }
 .intro-subtitle {
   margin: 17px 0 0;
-  color: #b1c1c6;
+  color: var(--mes-text-secondary);
   font-size: 13px;
   letter-spacing: 3px;
 }
@@ -477,12 +477,12 @@ onBeforeUnmount(() => {
   border-left: 1px solid #b4a07a;
 }
 .product-meta span {
-  color: #a5b9be;
+  color: var(--mes-text-secondary);
   font-size: 10px;
   letter-spacing: 1px;
 }
 .product-meta strong {
-  color: #e3d2af;
+  color: var(--mes-primary);
   font-size: 12px;
   font-weight: 500;
   letter-spacing: 2px;
@@ -491,7 +491,7 @@ onBeforeUnmount(() => {
   position: absolute;
   left: 12%;
   bottom: 13%;
-  color: #769999;
+  color: var(--mes-text-muted);
   font-size: 8px;
   letter-spacing: 2px;
   writing-mode: vertical-rl;
@@ -503,7 +503,7 @@ onBeforeUnmount(() => {
   gap: 12px;
   margin-top: 11px;
   padding-top: 20px;
-  border-top: 1px solid rgb(185 217 212 / 16%);
+  border-top: 1px solid var(--mes-border);
 }
 .capability-item {
   display: flex;
@@ -513,7 +513,7 @@ onBeforeUnmount(() => {
 }
 .capability-item > .app-icon {
   flex: none;
-  color: #96cabc;
+  color: var(--mes-text-secondary);
 }
 .capability-item > span {
   display: flex;
@@ -521,13 +521,13 @@ onBeforeUnmount(() => {
   gap: 7px;
 }
 .capability-item strong {
-  color: #e2ece9;
+  color: var(--mes-text);
   font-size: 12px;
   font-weight: 500;
   white-space: nowrap;
 }
 .capability-item small {
-  color: #9cb4b8;
+  color: var(--mes-text-secondary);
   font-size: 10px;
   white-space: nowrap;
 }
@@ -549,7 +549,7 @@ onBeforeUnmount(() => {
   top: -1px;
   height: 3px;
   border-radius: 0 0 5px 5px;
-  background: linear-gradient(90deg, #2b8587, #9dc6b6 62%, #dfc99f);
+  background: linear-gradient(90deg, #2582b6, #9dd1ed 62%, #dfc99f);
   content: '';
 }
 .login-heading {
@@ -560,7 +560,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 9px;
   margin-bottom: 20px;
-  color: #758b89;
+  color: var(--mes-text-muted);
   font-size: 8px;
   letter-spacing: 1.8px;
 }
@@ -569,18 +569,18 @@ onBeforeUnmount(() => {
   width: 21px;
   height: 3px;
   border-radius: 3px;
-  background: #22828a;
+  background: var(--mes-primary);
 }
 .login-heading h2 {
   margin: 0;
-  color: #173640;
+  color: var(--mes-text);
   font-size: 29px;
   font-weight: 600;
   letter-spacing: 1px;
 }
 .login-heading p {
   margin: 10px 0 0;
-  color: #738480;
+  color: var(--mes-text-muted);
   font-size: 12px;
 }
 .login-form :deep(.el-form-item) {
@@ -601,14 +601,14 @@ onBeforeUnmount(() => {
   min-height: 49px;
   padding: 1px 14px;
   border-radius: 9px;
-  background: #f5f8f7;
+  background: var(--mes-surface-muted);
   box-shadow: 0 0 0 1px #dfe8e4 inset;
   transition:
     box-shadow 0.18s,
     background 0.18s;
 }
 .login-form :deep(.el-input__wrapper:hover) {
-  box-shadow: 0 0 0 1px #adc9c4 inset;
+  box-shadow: 0 0 0 1px var(--mes-primary-border) inset;
 }
 .login-form :deep(.el-input__wrapper.is-focus) {
   background: #fff;
@@ -624,11 +624,11 @@ onBeforeUnmount(() => {
   font-size: 13px;
 }
 .login-form :deep(.el-input__inner::placeholder) {
-  color: #8b9b9a;
+  color: var(--mes-text-muted);
 }
 .login-form :deep(.el-input__prefix) {
   margin-right: 6px;
-  color: #789b98;
+  color: var(--mes-text-muted);
 }
 .login-form :deep(.el-form-item__error) {
   padding-top: 5px;
@@ -647,7 +647,7 @@ onBeforeUnmount(() => {
 }
 .login-options :deep(.el-checkbox__label) {
   padding-left: 7px;
-  color: #758883;
+  color: var(--mes-text-muted);
   font-size: 12px;
 }
 .login-options :deep(.el-checkbox__inner) {
@@ -658,7 +658,7 @@ onBeforeUnmount(() => {
   height: 49px;
   border: 1px solid rgb(9 88 96 / 12%);
   border-radius: 9px;
-  background: linear-gradient(105deg, #21868a, #126571);
+  background: linear-gradient(105deg, #237fb6, #176fa7);
   color: #fff;
   font-size: 14px;
   font-weight: 500;
@@ -701,7 +701,7 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 4px;
   padding: 4px 0;
-  color: #748985;
+  color: var(--mes-text-muted);
   font-size: 11px;
   list-style: none;
   cursor: pointer;
@@ -711,7 +711,7 @@ onBeforeUnmount(() => {
 }
 .demo-accounts summary:hover,
 .demo-accounts[open] summary {
-  color: #167d83;
+  color: var(--mes-primary);
 }
 .demo-accounts[open] summary .app-icon {
   transform: rotate(90deg);
@@ -721,7 +721,7 @@ onBeforeUnmount(() => {
 }
 .demo-hint {
   margin: 0 0 10px;
-  color: #738884;
+  color: var(--mes-text-muted);
   font-size: 11px;
 }
 .demo-list {
@@ -736,13 +736,13 @@ onBeforeUnmount(() => {
   padding: 8px 9px;
   border: 1px solid #dfe8e4;
   border-radius: 6px;
-  background: #f7faf8;
+  background: var(--mes-surface-muted);
   cursor: pointer;
 }
 .demo-list button:hover,
 .demo-list button.active {
-  border-color: #99c0b9;
-  background: #ecf6f2;
+  border-color: var(--mes-primary-border);
+  background: var(--mes-primary-soft);
 }
 .demo-list strong {
   color: #4e6b66;
@@ -750,12 +750,12 @@ onBeforeUnmount(() => {
   font-weight: 500;
 }
 .demo-list span {
-  color: #738b85;
+  color: var(--mes-text-muted);
   font-size: 10px;
 }
 .demo-password {
   margin: 9px 0 0;
-  color: #748883;
+  color: var(--mes-text-muted);
   font-size: 10px;
 }
 .demo-password code {
@@ -765,12 +765,12 @@ onBeforeUnmount(() => {
   height: 26px;
   margin: 0;
   padding: 4px 0;
-  color: #748985;
+  color: var(--mes-text-muted);
   font-size: 11px;
 }
 .preview-button.el-button:hover {
   background: transparent;
-  color: #167d83;
+  color: var(--mes-primary);
 }
 .access-note {
   display: flex;
@@ -780,12 +780,12 @@ onBeforeUnmount(() => {
   margin-top: 23px;
   padding-top: 19px;
   border-top: 1px solid #edf0ec;
-  color: #7e8e88;
+  color: var(--mes-text-muted);
   font-size: 10px;
   letter-spacing: 0.5px;
 }
 .access-note > .app-icon {
-  color: #87a99b;
+  color: var(--mes-text-muted);
 }
 .page-footer {
   gap: 16px;
@@ -794,10 +794,10 @@ onBeforeUnmount(() => {
   letter-spacing: 0.5px;
 }
 .page-footer > span:first-child {
-  color: #93adb1;
+  color: var(--mes-text-muted);
 }
 .page-footer > span:last-child {
-  color: #768982;
+  color: var(--mes-text-muted);
 }
 .login-page button:focus-visible,
 .login-page summary:focus-visible {
@@ -936,7 +936,7 @@ onBeforeUnmount(() => {
 }
 @media (max-width: 900px) {
   .ambient-art {
-    background: linear-gradient(155deg, #0e2939 0%, #17474b 43%, #f4f3ed 43.1%, #f4f3ed 100%);
+    background: linear-gradient(155deg, #f6f3e9 0%, #f2f3ee 43%, var(--mes-bg) 43.1%, var(--mes-bg) 100%);
   }
   .ambient-art::before {
     inset: 0;
@@ -973,7 +973,7 @@ onBeforeUnmount(() => {
     padding: 22px 24px;
   }
   .page-footer > span:first-child {
-    color: #768982;
+    color: var(--mes-text-muted);
   }
 }
 @media (max-width: 400px) {

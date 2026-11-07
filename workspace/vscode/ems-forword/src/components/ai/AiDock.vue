@@ -340,13 +340,13 @@ onBeforeUnmount(() => {
 <style scoped>
 /* 悬浮助手沿用系统视觉基线：单一主色、1px 描边、小圆角，不使用渐变、发光和玻璃拟态。 */
 .ai-dock-root {
-  --dock-line: var(--mes-border, #e5e7eb);
+  --dock-line: var(--mes-border, var(--mes-border));
   --dock-line-soft: var(--mes-border-light, #eef1f5);
   --dock-bg: var(--mes-surface, #fff);
   --dock-bg-soft: var(--mes-surface-muted, #f7f8fa);
-  --dock-text: var(--mes-text, #1f2329);
+  --dock-text: var(--mes-text, var(--mes-text));
   --dock-text-2: var(--mes-text-secondary, #646a73);
-  --dock-text-3: var(--mes-text-muted, #8f959e);
+  --dock-text-3: var(--mes-text-muted, var(--mes-text-muted));
   --dock-radius: 8px;
 }
 

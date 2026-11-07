@@ -38,7 +38,7 @@ async function reconnect() {
 .service-unavailable section {
   width: min(100%, 480px);
   padding: 32px;
-  border: 1px solid var(--mes-border, #e5e7eb);
+  border: 1px solid var(--mes-border, var(--mes-border));
   border-radius: 12px;
   background: var(--mes-surface, #fff);
 }

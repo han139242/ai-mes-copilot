@@ -1,88 +1,79 @@
-﻿/*
- * 鍏ㄥ眬璁捐鍙橀噺锛圖esign Tokens锛夈€傞〉闈㈠拰缁勪欢灏介噺寮曠敤--mes-*鍙橀噺锛? * 杩欐牱鍒囨崲涓婚鏃跺彧闇€瑕嗙洊鍙橀噺锛屼笉蹇呴噸鍐欐瘡涓粍浠剁殑CSS銆? *
- * 瑙嗚鍩虹嚎锛氭繁鑹茬鎶€钃濆鑸?+ 娴呰壊宸ヤ綔鍖?+ 闈掕壊楂樹寒銆? * 涓昏壊 #1f6feb锛堟搷浣溿€侀摼鎺ャ€侀€変腑锛夛紝杈呰壊 #13c2c2锛堟暟鎹€佺姸鎬併€佸己璋冿級銆? */
+/* AI-MES visual system: quiet surfaces, clear hierarchy, one action colour.
+   Theme keys remain stable so existing preferences continue to work. */
 :root {
-  /* 鍝佺墝涓昏壊鍙婂叾鎮仠銆佹祬鑹茶儗鏅€佽竟妗嗗拰RGB鎷嗗垎鍊笺€?*/
-  --mes-primary: #1f6feb;
-  --mes-primary-hover: #1859c4;
-  --mes-primary-active: #12459a;
-  --mes-primary-soft: #eaf2ff;
-  --mes-primary-border: #bcd3fb;
-  --mes-primary-rgb: 31 111 235;
-
-  /* 绉戞妧闈掕緟鑹诧細鐢ㄤ簬鏁版嵁寮鸿皟銆佸浘琛ㄥ拰鎴愬姛鎬侀珮浜€?*/
-  --mes-accent: #13c2c2;
-  --mes-accent-hover: #0aa5a5;
-  --mes-accent-soft: #e6fafa;
-  --mes-accent-border: #a9e9e9;
-  --mes-accent-rgb: 19 194 194;
-
-  /* 椤堕儴鏍忋€佸搧鐗屽尯鍜岄《閮ㄦ帶浠堕鑹诧細绾繁鑹诧紝涓嶇敤娓愬彉銆?*/
-  --mes-header-bg: #131a26;
+  --mes-primary: #176fa7;
+  --mes-primary-hover: #105b8c;
+  --mes-primary-active: #0d4b75;
+  --mes-primary-soft: #eef5f8;
+  --mes-primary-border: #cbdfe9;
+  --mes-primary-rgb: 23 111 167;
+  --mes-accent: #7196a9;
+  --mes-accent-hover: #307fab;
+  --mes-accent-soft: #eef5f8;
+  --mes-accent-border: #cbdfe9;
+  --mes-accent-rgb: 75 154 195;
+  --mes-header-bg: #fffdf8;
   --mes-header-bg-image: none;
-  --mes-header-hover: rgb(255 255 255 / 8%);
-  --mes-header-text: #f2f5f9;
-  --mes-header-muted: rgb(203 213 225 / 62%);
-  --mes-header-border: #1f2937;
-  --mes-header-control-bg: rgb(255 255 255 / 7%);
-  --mes-header-control-text: #cbd5e1;
-  --mes-header-divider: rgb(148 163 184 / 20%);
-  --mes-brand-bg: #0f1621;
-
-  /* 渚ц竟瀵艰埅锛氭繁鐏拌摑锛岄€変腑鎬佹祬鑹插潡 + 宸︿晶涓昏壊缁嗘潯銆?*/
-  --mes-sidebar: #101724;
-  --mes-sidebar-raised: #1a2333;
-  --mes-sidebar-text: #b6c2d2;
-  --mes-sidebar-muted: #6b7a8f;
-  --mes-sidebar-border: #1e2837;
-  --mes-sidebar-active: #1e2a3d;
-  --mes-sidebar-active-text: #ffffff;
-  --mes-sidebar-featured: #16202e;
-  --mes-sidebar-featured-border: #24324a;
-  --mes-sidebar-group: #5d6c81;
-
-  --mes-command-bg: #131a26;
-  --mes-command-border: #1f2937;
-  --mes-command-accent: #7dd3fc;
-
-  /* 鏁版嵁鐘舵€佽涔夎壊锛氭垚鍔熴€佽鍛娿€佸嵄闄╁拰鏅€氫俊鎭€?*/
-  --mes-data: #13c2c2;
-  --mes-data-soft: #e6fafa;
-  --mes-success: #17a673;
-  --mes-success-soft: #e7f7f0;
-  --mes-warning: #d98a00;
-  --mes-warning-soft: #fff5e0;
-  --mes-danger: #d64545;
-  --mes-danger-soft: #fdeeee;
-  --mes-info: #64748b;
-  --mes-info-soft: #eef2f7;
-
-  /* 椤甸潰琛ㄩ潰銆佹鏂囥€侀槾褰便€佸渾瑙掑拰鏁翠綋甯冨眬灏哄銆?*/
-  --mes-bg: #f2f5f9;
-  --mes-surface: #ffffff;
-  --mes-surface-muted: #f7f9fc;
-  --mes-tabs-bg: #eef2f7;
-  --mes-tab-surface: #ffffff;
-  --mes-border: #e2e8f0;
-  --mes-border-strong: #cbd6e2;
-  --mes-text: #17243a;
-  --mes-text-secondary: #5b6b82;
-  --mes-text-muted: #8a97a8;
-  --mes-shadow-sm: 0 1px 2px rgb(15 35 60 / 4%), 0 6px 16px rgb(15 35 60 / 6%);
-  --mes-shadow-md: 0 2px 6px rgb(15 35 60 / 6%), 0 16px 36px rgb(15 35 60 / 10%);
-  --mes-shadow-glow: 0 0 0 1px rgb(var(--mes-primary-rgb) / 12%), 0 10px 28px rgb(var(--mes-primary-rgb) / 12%);
-  --mes-radius-sm: 4px;
-  --mes-radius: 8px;
-  --mes-radius-lg: 12px;
-  --mes-sidebar-width: 224px;
+  --mes-header-hover: #edf5f9;
+  --mes-header-text: #343b3e;
+  --mes-header-muted: #687174;
+  --mes-header-border: #e5e3db;
+  --mes-header-control-bg: #faf8f1;
+  --mes-header-control-text: #646c6f;
+  --mes-header-divider: #e5e3db;
+  --mes-brand-bg: #fcfaf4;
+  --mes-sidebar: #fcfaf4;
+  --mes-sidebar-raised: #f2f1eb;
+  --mes-sidebar-text: #5e6669;
+  --mes-sidebar-muted: #687276;
+  --mes-sidebar-border: #e6e3db;
+  --mes-sidebar-active: #edf4f7;
+  --mes-sidebar-active-text: #236a93;
+  --mes-sidebar-featured: #f3f6f6;
+  --mes-sidebar-featured-border: #d8e2e7;
+  --mes-sidebar-group: #687276;
+  --mes-command-bg: #ffffff;
+  --mes-command-border: #e5e3db;
+  --mes-command-accent: #176fa7;
+  --mes-data: #7196a9;
+  --mes-data-soft: #eef5f8;
+  --mes-success: #23734f;
+  --mes-success-soft: #edf7f0;
+  --mes-warning: #996313;
+  --mes-warning-soft: #fff7e7;
+  --mes-danger: #bd4247;
+  --mes-danger-soft: #fceff0;
+  --mes-info: #62716a;
+  --mes-info-soft: #f0f3f1;
+  --mes-bg: #f7f5ee;
+  --mes-surface: #fffefa;
+  --mes-surface-muted: #faf9f5;
+  --mes-tabs-bg: #fffdf8;
+  --mes-tab-surface: #eef5f8;
+  --mes-border: #e6e4dd;
+  --mes-border-strong: #c8d4db;
+  --mes-text: #343b3e;
+  --mes-text-secondary: #5e6669;
+  --mes-text-muted: #687276;
+  --mes-shadow-sm: 0 2px 6px rgb(35 59 78 / 3%);
+  --mes-shadow-md: 0 16px 48px rgb(35 59 78 / 12%);
+  --mes-shadow-glow: 0 0 0 3px rgb(var(--mes-primary-rgb) / 10%);
+  --mes-radius-sm: 6px;
+  --mes-radius: 10px;
+  --mes-radius-lg: 14px;
+  --mes-sidebar-width: 232px;
   --mes-sidebar-collapsed-width: 66px;
-  --mes-header-height: 60px;
-  --mes-tabs-height: 40px;
-  --mes-gap: 16px;
-  --mes-page-padding: 18px 20px 28px;
-  --mes-font: 'HarmonyOS Sans SC', Inter, 'Segoe UI', 'Microsoft YaHei', Arial, sans-serif;
-
-  /* 灏哅ES鍙橀噺鏄犲皠缁橢lement Plus锛屼娇鎸夐挳銆佽緭鍏ユ銆佽〃鏍肩瓑绗笁鏂圭粍浠朵繚鎸佸悓涓€涓婚銆?*/
+  --mes-header-height: 64px;
+  --mes-tabs-height: 44px;
+  --mes-gap: 20px;
+  --mes-page-padding: 24px 28px 28px;
+  --mes-content-inset: 52px;
+  --mes-font: 'Microsoft YaHei', 'PingFang SC', 'Noto Sans CJK SC', Inter, 'Segoe UI', sans-serif;
+  --mes-font-small: 12px;
+  --mes-font-label: 13px;
+  --mes-font-body: 14px;
+  --mes-font-section: 16px;
+  --mes-touch-target: 44px;
   --el-color-primary: var(--mes-primary);
   --el-color-primary-light-3: color-mix(in srgb, var(--mes-primary) 70%, white);
   --el-color-primary-light-5: color-mix(in srgb, var(--mes-primary) 50%, white);
@@ -94,120 +85,58 @@
   --el-color-warning: var(--mes-warning);
   --el-color-danger: var(--mes-danger);
   --el-color-info: var(--mes-info);
-  --el-border-radius-base: 6px;
-  --el-border-radius-small: 4px;
+  --el-color-success-light-9: var(--mes-success-soft);
+  --el-color-warning-light-9: var(--mes-warning-soft);
+  --el-color-danger-light-9: var(--mes-danger-soft);
+  --el-color-info-light-9: var(--mes-info-soft);
+  --el-border-radius-base: 7px;
+  --el-border-radius-small: 5px;
   --el-border-color: var(--mes-border);
-  --el-border-color-light: #e9eef4;
+  --el-border-color-light: var(--mes-border);
   --el-fill-color-light: var(--mes-surface-muted);
   --el-text-color-primary: var(--mes-text);
   --el-text-color-regular: var(--mes-text-secondary);
+  --el-text-color-secondary: var(--mes-text-muted);
+  --el-text-color-placeholder: var(--mes-text-muted);
   --el-font-family: var(--mes-font);
+  --el-bg-color: var(--mes-surface);
+  --el-fill-color-blank: var(--mes-surface);
 }
 
-/* data-theme鐢眛heme.js鍐欏埌html鍏冪礌锛涘悇涓婚鍙鐩栭渶瑕佸彉鍖栫殑鍙橀噺銆?*/
+/* Alternate navigation retains the same content surfaces and component geometry. */
 :root[data-theme='dark'] {
-  --mes-primary: #3b8bf5;
-  --mes-primary-hover: #5c9ff7;
-  --mes-primary-soft: #16243a;
-  --mes-primary-border: #24425f;
-  --mes-primary-rgb: 59 139 245;
-
-  --mes-header-bg: #0a1520;
-  --mes-header-bg-image: none;
-  --mes-header-hover: rgb(19 194 194 / 18%);
-  --mes-header-border: #16293a;
-  --mes-brand-bg: #070f18;
-
-  --mes-sidebar: #070f18;
-  --mes-sidebar-raised: #10202e;
-  --mes-sidebar-text: #d6dadd;
-  --mes-sidebar-muted: #83898e;
-  --mes-sidebar-border: #142535;
-  --mes-sidebar-active: #122c42;
+  --mes-header-bg: #223544;
+  --mes-header-hover: #314959;
+  --mes-header-text: #f0f7fb;
+  --mes-header-muted: #bdcfda;
+  --mes-header-control-text: #deebf3;
+  --mes-header-control-bg: #2b4252;
+  --mes-header-divider: #425c6f;
+  --mes-header-border: #425c6f;
+  --mes-brand-bg: #223544;
+  --mes-sidebar: #223544;
+  --mes-sidebar-raised: #30495c;
+  --mes-sidebar-text: #cadbe6;
+  --mes-sidebar-muted: #adc5d5;
+  --mes-sidebar-border: #395368;
+  --mes-sidebar-active: #355971;
   --mes-sidebar-active-text: #ffffff;
-  --mes-sidebar-featured: #0f2739;
-  --mes-sidebar-featured-border: #1d4560;
-  --mes-sidebar-group: #6d8091;
-
-  --mes-command-bg: #0a1520;
-  --mes-command-border: #16293a;
-  --mes-command-accent: #8bc5ef;
-
-  --mes-bg: #f2f5f9;
-  --mes-text: #17243a;
+  --mes-sidebar-featured: #30495c;
+  --mes-sidebar-featured-border: #49697f;
+  --mes-sidebar-group: #adc5d5;
 }
-
-/* 鍒堕€犵豢鑹蹭富棰樸€?*/
 :root[data-theme='green'] {
-  --mes-primary: #0f8a68;
-  --mes-primary-hover: #0b6d52;
-  --mes-primary-soft: #e8f6f1;
-  --mes-primary-border: #b5ddd0;
-  --mes-primary-rgb: 15 138 104;
-  --mes-accent: #2fb3a0;
-  --mes-accent-rgb: 47 179 160;
-  --mes-header-bg: #08301f;
-  --mes-header-bg-image: none;
-  --mes-header-hover: rgb(47 179 160 / 18%);
-  --mes-header-border: #0f4a34;
-  --mes-brand-bg: #062418;
-  --mes-sidebar: #07281b;
-  --mes-sidebar-raised: #0d3a29;
-  --mes-sidebar-border: #12442f;
-  --mes-sidebar-active: #0f4a34;
-  --mes-sidebar-featured: #0c3a29;
-  --mes-sidebar-featured-border: #1a5c42;
-  --mes-command-bg: #08301f;
-  --mes-command-border: #0f4a34;
-  --mes-command-accent: #c8f0e2;
+  --mes-primary: #236b52; --mes-primary-hover: #18543e; --mes-primary-active: #10412e;
+  --mes-primary-soft: #eaf5ee; --mes-primary-border: #bdd9c9; --mes-primary-rgb: 35 107 82;
 }
-
-/* 宸ヤ笟姗欒壊涓婚銆?*/
 :root[data-theme='orange'] {
-  --mes-primary: #c2620f;
-  --mes-primary-hover: #9e4d09;
-  --mes-primary-soft: #fff3e6;
-  --mes-primary-border: #e8c39a;
-  --mes-primary-rgb: 194 98 15;
-  --mes-accent: #e08b2d;
-  --mes-accent-rgb: 224 139 45;
-  --mes-header-bg: #2b1607;
-  --mes-header-bg-image: none;
-  --mes-header-hover: rgb(224 139 45 / 18%);
-  --mes-header-border: #4a2a10;
-  --mes-brand-bg: #211006;
-  --mes-sidebar: #241307;
-  --mes-sidebar-raised: #3a1f0b;
-  --mes-sidebar-border: #45260e;
-  --mes-sidebar-active: #4a2a10;
-  --mes-sidebar-featured: #3a1f0b;
-  --mes-sidebar-featured-border: #5c3515;
-  --mes-command-bg: #2b1607;
-  --mes-command-border: #4a2a10;
-  --mes-command-accent: #ffe0c5;
+  --mes-primary: #95561e; --mes-primary-hover: #774115; --mes-primary-active: #61320d;
+  --mes-primary-soft: #fcf2e8; --mes-primary-border: #e5cdb6; --mes-primary-rgb: 149 86 30;
 }
-
-/* 浼佷笟绾㈣壊涓婚銆?*/
 :root[data-theme='red'] {
-  --mes-primary: #c33b45;
-  --mes-primary-hover: #a02c35;
-  --mes-primary-soft: #fff0f1;
-  --mes-primary-border: #e8b9bd;
-  --mes-primary-rgb: 195 59 69;
-  --mes-accent: #e0666b;
-  --mes-accent-rgb: 224 102 107;
-  --mes-header-bg: #2a0d11;
-  --mes-header-bg-image: none;
-  --mes-header-hover: rgb(224 102 107 / 18%);
-  --mes-header-border: #4a171d;
-  --mes-brand-bg: #21090c;
-  --mes-sidebar: #230a0e;
-  --mes-sidebar-raised: #3a1218;
-  --mes-sidebar-border: #45151c;
-  --mes-sidebar-active: #4a171d;
-  --mes-sidebar-featured: #3a1218;
-  --mes-sidebar-featured-border: #5c1f27;
-  --mes-command-bg: #2a0d11;
-  --mes-command-border: #4a171d;
-  --mes-command-accent: #ffd6d8;
+  --mes-primary: #a23e48; --mes-primary-hover: #82303a; --mes-primary-active: #68242d;
+  --mes-primary-soft: #fbf0f1; --mes-primary-border: #e5c5c9; --mes-primary-rgb: 162 62 72;
+}
+@media (max-width: 768px) {
+  :root { --mes-page-padding: 16px 12px 20px; --mes-content-inset: 36px; }
 }

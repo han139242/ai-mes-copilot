@@ -56,8 +56,9 @@ p {
 /* 只在键盘导航时显示焦点轮廓，兼顾可访问性和鼠标操作观感。 */
 button:focus-visible,
 a:focus-visible,
+summary:focus-visible,
 [tabindex]:focus-visible {
-  outline: 2px solid rgb(var(--mes-primary-rgb) / 38%);
+  outline: 2px solid var(--mes-primary);
   outline-offset: 2px;
 }
 
@@ -117,7 +118,7 @@ a:focus-visible,
 
 .mes-page-title {
   color: var(--mes-text);
-  font-size: 21px;
+  font-size: 24px;
   font-weight: 700;
   line-height: 1.3;
   letter-spacing: 0;
@@ -151,17 +152,8 @@ a:focus-visible,
   align-items: center;
   gap: 8px;
   color: var(--mes-text);
-  font-size: 14px;
+  font-size: var(--mes-font-body);
   font-weight: 600;
-}
-
-/* 面板标题左侧的装饰条：纯色细条，不用渐变。 */
-.mes-panel-title::before {
-  width: 2px;
-  height: 13px;
-  border-radius: 1px;
-  background: var(--mes-primary);
-  content: '';
 }
 
 .mes-icon-button.el-button {
@@ -218,7 +210,7 @@ a:focus-visible,
 
 .el-button {
   font-weight: 500;
-  border-radius: 6px;
+  border-radius: var(--mes-radius-sm);
 }
 
 /* 主按钮不做发光投影，靠颜色本身表达层级。 */
@@ -237,7 +229,7 @@ a:focus-visible,
 .el-input__wrapper,
 .el-textarea__inner,
 .el-select__wrapper {
-  border-radius: 6px;
+  border-radius: var(--mes-radius-sm);
   transition: box-shadow 0.18s ease;
 }
 
@@ -260,27 +252,29 @@ a:focus-visible,
 }
 
 .el-table {
-  --el-table-header-bg-color: #f7f9fc;
-  --el-table-header-text-color: #516070;
-  --el-table-row-hover-bg-color: #f5f8fc;
+  --el-table-bg-color: var(--mes-surface);
+  --el-table-tr-bg-color: var(--mes-surface);
+  --el-table-header-bg-color: var(--mes-surface-muted);
+  --el-table-header-text-color: var(--mes-text-secondary);
+  --el-table-row-hover-bg-color: var(--mes-primary-soft);
   --el-table-border-color: var(--mes-border);
-  --el-table-current-row-bg-color: #f0f6ff;
+  --el-table-current-row-bg-color: var(--mes-primary-soft);
   border-radius: var(--mes-radius);
 }
 
 .el-table th.el-table__cell {
-  color: #55637a;
+  color: var(--mes-text-secondary);
   font-weight: 600;
   font-size: 12px;
 }
 
 .el-table td.el-table__cell {
-  font-size: 12.5px;
+  font-size: 13px;
 }
 
 /* 收紧行高，让密集数据表在一屏内多显示几行。 */
 .el-table .el-table__cell {
-  padding: 7px 0;
+  padding: 11px 0;
 }
 
 .el-table .el-table__cell .cell {
@@ -290,11 +284,11 @@ a:focus-visible,
 
 /* 斑马纹：默认行白、偶数行极浅灰，保证长表格可读。 */
 .el-table--striped .el-table__body tr.el-table__row--striped td.el-table__cell {
-  background: #fafbfd;
+  background: var(--mes-surface-muted);
 }
 
 .el-table--striped .el-table__body tr.el-table__row--striped:hover td.el-table__cell {
-  background: #f5f8fc;
+  background: var(--mes-primary-soft);
 }
 
 /* 固定列加一道阴影，滚动时操作列和主体之间有明确边界。 */
@@ -303,12 +297,12 @@ a:focus-visible,
 }
 
 .el-pagination.is-background .el-pager li {
-  border-radius: 6px;
+  border-radius: var(--mes-radius-sm);
 }
 
 .el-pagination.is-background .btn-prev,
 .el-pagination.is-background .btn-next {
-  border-radius: 6px;
+  border-radius: var(--mes-radius-sm);
 }
 
 .el-overlay {
@@ -326,7 +320,7 @@ a:focus-visible,
 
 .el-tooltip__popper,
 .el-popper {
-  border-radius: 6px;
+  border-radius: var(--mes-radius-sm);
 }
 
 /* 小屏幕下标题区改为上下排列，避免标题和操作按钮互相挤压。 */
@@ -340,4 +334,22 @@ a:focus-visible,
   .mes-page-title {
     font-size: 19px;
   }
+}
+
+/* Shared interaction finish: visible focus, readable forms and restrained motion. */
+.el-card { --el-card-border-color: var(--mes-border); --el-card-border-radius: var(--mes-radius); }
+.el-card.is-always-shadow { box-shadow: var(--mes-shadow-sm); }
+.el-form-item__label { color: var(--mes-text-secondary); font-weight: 500; }
+.el-input__wrapper, .el-select__wrapper { min-height: 34px; }
+.el-input__wrapper.is-focus, .el-select__wrapper.is-focused { box-shadow: 0 0 0 1px var(--mes-primary) inset; }
+.el-button { transition: background-color .16s ease, border-color .16s ease, color .16s ease; }
+.el-table .cell { font-variant-numeric: tabular-nums; }
+.el-empty__description p { color: var(--mes-text-muted); }
+.el-dialog { max-width: calc(100vw - 32px); }
+input, textarea { caret-color: var(--mes-primary); }
+@media (pointer: coarse) {
+  .header-icon-button.el-button, .mes-icon-button.el-button { min-width: var(--mes-touch-target); min-height: var(--mes-touch-target); }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }

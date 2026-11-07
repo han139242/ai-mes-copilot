@@ -1,6 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import dayjs from 'dayjs';
+import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppIcon from '@/components/common/AppIcon.vue';
 import AiResultBlocks from '@/components/ai/AiResultBlocks.vue';
@@ -11,7 +12,7 @@ import AiCandidatePicker from '@/components/ai/AiCandidatePicker.vue';
 import AiCreateOrderForm from '@/components/ai/AiCreateOrderForm.vue';
 import AiProductionFlowForm from '@/components/ai/AiProductionFlowForm.vue';
 import AiBusinessActionForm from '@/components/ai/AiBusinessActionForm.vue';
-import { businessActionGroups } from '@/utils/ai-business-flow';
+import { businessActionGroups, businessActionPreviewGroups } from '@/utils/ai-business-flow';
 import PieceInspectionDialog from '@/components/business/PieceInspectionDialog.vue';
 import { formatAiAnswer } from '@/utils/ai-results';
 import { resolveOrderContext } from '@/utils/ai-order-context';
@@ -53,6 +54,7 @@ import {
 
 // 会话状态全部来自 @/stores/aiConversation，工作台和浮窗只是同一份数据的两种渲染位置。
 const previewMode = isFrameworkPreview();
+const router = useRouter();
 const conversationScroll = ref();
 const composer = ref();
 const question = ref('');
@@ -213,7 +215,9 @@ const welcomePrompts = computed(() => {
 
 // 后端统一登记的能力目录：左侧「可办理」一栏按这份清单渲染，避免前后端各写一套动作名。
 const catalog = ref([]);
-const actionGroups = computed(() => businessActionGroups(catalog.value));
+const catalogLoading = ref(false);
+const catalogError = ref(false);
+const actionGroups = computed(() => previewMode ? businessActionPreviewGroups() : businessActionGroups(catalog.value));
 const businessActionEntry = ref(null);
 const businessDialogOpen = computed({
   get: () => Boolean(businessActionEntry.value),
@@ -224,7 +228,7 @@ const businessDialogOpen = computed({
   },
 });
 
-// 目录拉取失败时保持空数组，页面仍可用本地七种工作模式，不弹错打断演示。
+// 正式会话只使用服务端目录；预览入口不可执行，不把本地样例视为权限。
 // 统一取回目录数组：既兼容 { data: [...] } 信封，也兼容直接返回数组的旧实现。
 function pickCatalogList(response) {
   const payload = response?.data;
@@ -235,18 +239,24 @@ function pickCatalogList(response) {
 }
 
 async function loadCapabilities() {
+  if (previewMode || catalogLoading.value) return;
+  catalogLoading.value = true;
+  catalogError.value = false;
   try {
     const response = await getAiCapabilities();
     catalog.value = pickCatalogList(response);
   } catch {
     catalog.value = [];
+    catalogError.value = true;
+  } finally {
+    catalogLoading.value = false;
   }
 }
 
 // 点某个办理动作时把「动作名 + 空单号」填进输入框，让用户自己补单号再发送，不代填任何业务数据。
 // 创建生产订单没有单号可填，参数是产品或客户，改成一个可选表单直接提交，省掉手打编码。
 function fillCommand(capability) {
-  if (sending.value) {
+  if (sending.value || previewMode || capability?.previewOnly) {
     return;
   }
   const code = capability?.code || capability?.action;
@@ -850,11 +860,13 @@ onMounted(() => {
   loadStatus();
   loadUsage();
   loadCapabilities();
-  syncFromBackend().then((synced) => {
-    if (synced) {
-      scrollToLatest();
-    }
-  });
+  if (!previewMode) {
+    syncFromBackend().then((synced) => {
+      if (synced) {
+        scrollToLatest();
+      }
+    });
+  }
 });
 
 // 离开页面时取消仍在进行的模型请求。
@@ -899,6 +911,34 @@ onBeforeUnmount(() => {
 
         <!-- 中部内容独立滚动：底部模型用量区常驻，不被内容挤出视口。 -->
         <div class="wb-body">
+          <div class="wb-group wb-group-catalog" :aria-busy="catalogLoading">
+            <div class="group-head">快捷办理</div>
+            <p v-if="previewMode" class="catalog-message">当前仅预览入口，登录后按账号权限办理。</p>
+            <p v-else-if="catalogLoading" class="catalog-message" role="status">正在加载快捷入口…</p>
+            <div v-else-if="catalogError" class="catalog-message" role="status">
+              <p>快捷入口未能加载，请检查后端连接。</p>
+              <button class="ghost-button" type="button" @click="loadCapabilities">重新加载入口</button>
+            </div>
+            <p v-else-if="!actionGroups.length" class="catalog-message">当前账号暂无可办理入口。</p>
+            <div v-for="group in actionGroups" :key="group.id" class="catalog-phase">
+              <div class="catalog-phase-title">{{ group.label }}</div>
+              <div class="catalog-grid">
+                <button
+                  v-for="item in group.items"
+                  :key="item.flowKey"
+                  class="command-chip"
+                  type="button"
+                  :disabled="sending || previewMode"
+                  :title="previewMode ? '界面预览：连接后端并登录后，按账号权限开放办理' : item.description"
+                  :aria-label="`办理：${item.label}`"
+                  @click="fillCommand(item)"
+                >
+                  <AppIcon name="play" :size="11" />
+                  <span>{{ item.label }}</span>
+                </button>
+              </div>
+            </div>
+          </div>
           <div class="wb-group wb-group-history">
             <div class="group-head">会话记录</div>
             <el-scrollbar class="history-scroll">
@@ -982,28 +1022,6 @@ onBeforeUnmount(() => {
             </div>
           </details>
 
-          <div v-if="actionGroups.length" class="wb-group wb-group-catalog">
-            <div class="group-head">可办理</div>
-            <div v-for="group in actionGroups" :key="group.id" class="catalog-phase">
-              <div class="catalog-phase-title">{{ group.label }}</div>
-              <div class="catalog-grid">
-              <button
-                v-for="item in group.items"
-                :key="item.flowKey"
-                class="command-chip"
-                type="button"
-                :disabled="sending"
-                :title="item.description"
-                :aria-label="`办理：${item.label}`"
-                @click="fillCommand(item)"
-              >
-                <AppIcon name="play" :size="11" />
-                <span>{{ item.label }}</span>
-              </button>
-              </div>
-            </div>
-          </div>
-
         </div>
 
         <div class="wb-foot">
@@ -1084,7 +1102,11 @@ onBeforeUnmount(() => {
             <strong>{{ statusLabel }}</strong>
             <span>{{ statusPresentation.detail }}</span>
           </div>
-          <button class="ghost-button" type="button" @click="loadStatus">重新检查</button>
+          <button
+            class="ghost-button"
+            type="button"
+            @click="previewMode ? router.push({ path: '/login', query: { redirect: '/ai/workbench' } }) : loadStatus()"
+          >{{ previewMode ? '连接并登录' : '重新检查' }}</button>
         </div>
 
         <el-scrollbar v-if="!showDockNotice" ref="conversationScroll" class="chat-scroll">
@@ -1102,7 +1124,7 @@ onBeforeUnmount(() => {
                   class="welcome-card"
                   :class="{ active: activeCapability.id === capability.id }"
                 >
-                  <button class="welcome-card-head" type="button" @click="selectCapability(capability.id)">
+                  <button class="welcome-card-head" type="button" :aria-pressed="activeCapability.id === capability.id" @click="selectCapability(capability.id)">
                     <span class="welcome-card-icon"><AppIcon :name="capability.icon" :size="15" /></span>
                     <span class="welcome-card-text">
                       <strong>{{ capability.label }}</strong>
@@ -1123,8 +1145,8 @@ onBeforeUnmount(() => {
                 </article>
               </div>
 
-              <div class="welcome-examples">
-                <span class="welcome-examples-label">你可以这样问</span>
+              <details class="welcome-examples">
+                <summary class="welcome-examples-label">更多提问示例</summary>
                 <div class="welcome-pills">
                   <button
                     v-for="example in welcomePrompts"
@@ -1135,7 +1157,7 @@ onBeforeUnmount(() => {
                     {{ example }}
                   </button>
                 </div>
-              </div>
+              </details>
 
             </section>
 

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { businessActionGroups, filterWorkflowCandidates, preferredIssueWarehouse,
+import { businessActionGroups, businessActionPreviewGroups, filterWorkflowCandidates, preferredIssueWarehouse,
   workflowTargetNumbers } from '../src/utils/ai-business-flow.js';
 import { resolveOrderContext } from '../src/utils/ai-order-context.js';
 
@@ -13,6 +13,15 @@ test('办理入口按业务顺序组织，只呈现服务端真实注册能力',
   const keys = groups.flatMap((x) => x.items.map((item) => item.flowKey));
   assert.equal(new Set(keys).size, keys.length);
   assert.equal(groups.flatMap((x) => x.items).some((x) => x.code === 'START_WORK_ORDER'), false);
+});
+
+test('预览沿用业务入口顺序且明确不可执行，正式空目录不能回退为全部权限', () => {
+  const groups = businessActionPreviewGroups();
+  assert.deepEqual(groups.map((group) => group.id), ['order', 'stock', 'production', 'inbound', 'shipment', 'other']);
+  assert.ok(groups.flatMap((group) => group.items).every((item) => item.previewOnly));
+  assert.equal(groups[0].items[0].code, 'CREATE_PRODUCTION_ORDER');
+  assert.deepEqual(businessActionGroups([]), []);
+  assert.deepEqual(businessActionGroups([{ code: 'CREATE_PRODUCTION_ORDER', kind: 'query' }]), []);
 });
 
 test('组件默认半成品仓，整机默认原料仓；多个匹配仓库不得擅自选择', () => {

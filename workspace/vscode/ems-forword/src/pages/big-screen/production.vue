@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import dayjs from 'dayjs';
 import { useRouter } from 'vue-router';
 import AppIcon from '@/components/common/AppIcon.vue';
@@ -9,6 +9,7 @@ import { getResourcePage } from '@/api/resource';
 import { createDashboardPreview } from '@/config/dashboard-preview';
 import { appShortName } from '@/config/branding';
 import { isFrameworkPreview } from '@/utils/auth';
+import { productionScreenLayout } from '@/utils/production-screen-layout';
 
 // 生产大屏面向车间看板，以固定1920x1080设计稿等比缩放，并每分钟刷新生产运营数据。
 const router = useRouter();
@@ -34,6 +35,8 @@ const productionLines = ref([]);
 const pendingProductionOrderCount = ref(0);
 const scheduleError = ref('');
 const scheduleExpanded = ref(false);
+const scheduleDialog = ref(null);
+let scheduleReturnFocus;
 const SCHEDULE_BAR_MIN_WIDTH_PERCENT = 8;
 const SCHEDULE_BAR_GAP_PERCENT = 0.45;
 
@@ -78,7 +81,7 @@ const updateText = computed(() => (lastUpdated.value ? lastUpdated.value.format(
 const syncText = computed(() => {
   // 根据成功/失败接口数量显示“已同步、部分更新或连接失败”。
   if (previewMode) {
-    return '演示数据';
+    return '界面预览';
   }
   if (loading.value && !lastUpdated.value) {
     return '正在连接数据';
@@ -219,7 +222,7 @@ function layoutLinePlans(plans) {
 }
 
 function scheduleRowStyle(line, expanded = false) {
-  return { height: expanded ? '92px' : '76px' };
+  return { height: expanded ? '92px' : '64px' };
 }
 
 // 大屏排期按产线分组，每条产线固定一行，计划框按开始时间横向排列。
@@ -336,8 +339,8 @@ const lineStatusRows = computed(() =>
 
 // 根据展开产线数动态计算弹窗高度，并限制最小和最大值。
 const scheduleModalStyle = computed(() => {
-  const expandedHeight = expandedScheduleLineRows.value.length * 86;
-  return { '--schedule-modal-height': `${Math.min(940, Math.max(560, 222 + expandedHeight))}px` };
+  const expandedHeight = expandedScheduleLineRows.value.length * 92;
+  return { '--schedule-modal-height': `${Math.min(940, Math.max(560, 242 + expandedHeight))}px` };
 });
 // 根据全部有效计划计算统一时间轴起止点、时长和刻度。
 const scheduleWindow = computed(() => {
@@ -448,12 +451,12 @@ const kpis = computed(() => [
     tone: 'steel',
   },
   {
-    label: '逾期生产计划',
-    value: '0',
-    unit: '项',
-    description: '当前没有逾期计划',
-    icon: 'alert',
-    tone: 'muted',
+    label: '待排生产订单',
+    value: formatNumber(pendingProductionOrderCount.value),
+    unit: '单',
+    description: '等待生成正式生产计划',
+    icon: 'calendar',
+    tone: 'amber',
   },
 ]);
 
@@ -513,41 +516,41 @@ const attentionItems = computed(() => [
 // 生产趋势图同时使用柱状图展示产量、折线图展示合格率，并使用双Y轴。
 const trendOption = computed(() => ({
   animationDuration: 500,
-  color: ['#559dd2', '#4bc58a'],
+  color: ['#176fa7', '#23734f'],
   tooltip: {
     trigger: 'axis',
     axisPointer: { type: 'shadow' },
-    backgroundColor: 'rgb(8 22 39 / 98%)',
-    borderColor: '#31526d',
+    backgroundColor: '#fffefa',
+    borderColor: '#e6e4dd',
     padding: [10, 12],
-    textStyle: { color: '#f2f7fb', fontSize: 16 },
+    textStyle: { color: '#343b3e', fontSize: 16 },
   },
   legend: {
     top: 4,
     right: 10,
     itemWidth: 18,
     itemHeight: 10,
-    textStyle: { color: '#a8bac9', fontSize: 16 },
+    textStyle: { color: '#5e6669', fontSize: 16 },
     data: ['报工产量', '报工合格率'],
   },
   grid: { top: 62, right: 72, bottom: 42, left: 76 },
   xAxis: {
     type: 'category',
     data: trendRows.value.map((item) => dayjs(item.date).format('MM-DD')),
-    axisLine: { lineStyle: { color: '#35516a' } },
+    axisLine: { lineStyle: { color: '#e6e4dd' } },
     axisTick: { show: false },
-    axisLabel: { color: '#9fb1c0', fontSize: 16, margin: 14 },
+    axisLabel: { color: '#5e6669', fontSize: 16, margin: 14 },
   },
   yAxis: [
     {
       type: 'value',
       name: '产量（件）',
       minInterval: 1,
-      nameTextStyle: { color: '#8fa4b5', fontSize: 15, padding: [0, 0, 4, 0] },
+      nameTextStyle: { color: '#5e6669', fontSize: 15, padding: [0, 0, 4, 0] },
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: '#8fa4b5', fontSize: 15 },
-      splitLine: { lineStyle: { color: 'rgb(99 132 158 / 18%)', type: 'dashed' } },
+      axisLabel: { color: '#5e6669', fontSize: 15 },
+      splitLine: { lineStyle: { color: '#e6e4dd', type: 'dashed' } },
     },
     {
       type: 'value',
@@ -555,10 +558,10 @@ const trendOption = computed(() => ({
       min: 0,
       max: 100,
       interval: 25,
-      nameTextStyle: { color: '#8fa4b5', fontSize: 15, padding: [0, 0, 4, 0] },
+      nameTextStyle: { color: '#5e6669', fontSize: 15, padding: [0, 0, 4, 0] },
       axisLine: { show: false },
       axisTick: { show: false },
-      axisLabel: { color: '#8fa4b5', fontSize: 15, formatter: '{value}%' },
+      axisLabel: { color: '#5e6669', fontSize: 15, formatter: '{value}%' },
       splitLine: { show: false },
     },
   ],
@@ -597,12 +600,7 @@ function formatPercent(value) {
 
 // 中央排期使用简短产品标签，完整产品名仍保留在悬停提示中。
 function formatProductLabel(value) {
-  return String(value || '未维护产品')
-    .replace('雷尼克斯', '')
-    .replace(' OEM俱乐部级羽毛球', ' ')
-    .replace('训练级羽毛球', ' ')
-    .replace('比赛级羽毛球', ' ')
-    .replace(/ (?<speed>\d{2})速$/, '·$<speed>');
+  return String(value || '未维护产品').trim();
 }
 
 // 无排期时说明产线的实际状态，避免一律显示“暂无计划”。
@@ -793,13 +791,19 @@ async function loadQualityClosure() {
 }
 
 // 打开大屏中的生产排期展开弹窗。
-function openSchedule() {
+async function openSchedule() {
+  if (scheduleExpanded.value) return;
+  scheduleReturnFocus = document.activeElement;
   scheduleExpanded.value = true;
+  await nextTick();
+  scheduleDialog.value?.querySelector('button')?.focus();
 }
 
 // 关闭生产排期展开弹窗。
-function closeSchedule() {
+async function closeSchedule() {
   scheduleExpanded.value = false;
+  await nextTick();
+  if (scheduleReturnFocus?.isConnected) scheduleReturnFocus.focus();
 }
 
 // 关闭弹窗后跳转到完整生产计划管理页面。
@@ -812,7 +816,15 @@ async function openProductionPlans() {
 function handleScreenKeydown(event) {
   // 排期弹窗打开时，Escape只关闭弹窗而不退出整个大屏。
   if (event.key === 'Escape' && scheduleExpanded.value) {
+    event.preventDefault();
     closeSchedule();
+  } else if (event.key === 'Tab' && scheduleExpanded.value) {
+    const buttons = [...(scheduleDialog.value?.querySelectorAll('button:not(:disabled)') || [])];
+    const index = buttons.indexOf(document.activeElement);
+    if (index < 0 || (event.shiftKey ? index === 0 : index === buttons.length - 1)) {
+      event.preventDefault();
+      buttons[event.shiftKey ? buttons.length - 1 : 0]?.focus();
+    }
   }
 }
 
@@ -822,12 +834,10 @@ function updateScale() {
   const viewport = window.visualViewport;
   const viewportWidth = viewport?.width || window.innerWidth;
   const viewportHeight = viewport?.height || window.innerHeight;
-  const nextScale = Math.min(viewportWidth / 1920, viewportHeight / 1080);
-  scale.value = nextScale;
-  const scaledWidth = 1920 * nextScale;
-  const scaledHeight = 1080 * nextScale;
-  offsetX.value = Math.max(0, (viewportWidth - scaledWidth) / 2);
-  offsetY.value = Math.max(0, (viewportHeight - scaledHeight) / 2);
+  const layout = productionScreenLayout(viewportWidth, viewportHeight);
+  scale.value = layout.scale;
+  offsetX.value = layout.offsetX;
+  offsetY.value = layout.offsetY;
 }
 
 // 浏览器全屏状态变化后同步按钮状态并重新计算缩放。
@@ -1000,8 +1010,12 @@ onBeforeUnmount(() => {
 <template>
   <!-- stage内部始终按1920x1080布局，外层页面只负责缩放；各数据区由computed结构循环渲染。 -->
   <div class="big-screen-page">
+    <div class="screen-mobile-toolbar" :inert="scheduleExpanded">
+      <span>生产大屏 · 横屏查看更清晰</span>
+      <button type="button" @click="exitBigScreen">返回工作台</button>
+    </div>
     <div class="big-screen-stage" :style="stageStyle">
-      <header class="screen-header">
+      <header class="screen-header" :inert="scheduleExpanded">
         <div class="header-branding">
           <button
             class="icon-button back-button"
@@ -1063,7 +1077,7 @@ onBeforeUnmount(() => {
         </div>
       </header>
 
-      <main class="screen-shell">
+      <main class="screen-shell" :inert="scheduleExpanded">
         <div v-if="loadError" class="screen-error" role="alert">
           <AppIcon name="alert" :size="18" />
           <span>{{ loadError }}</span>
@@ -1118,7 +1132,7 @@ onBeforeUnmount(() => {
               tabindex="0"
               aria-label="点击放大生产计划排期"
               @click="openSchedule"
-              @keydown.enter="openSchedule"
+              @keydown.enter.prevent="openSchedule"
               @keydown.space.prevent="openSchedule"
             >
               <div class="schedule-axis">
@@ -1351,7 +1365,8 @@ onBeforeUnmount(() => {
               </aside>
             </header>
             <div class="equipment-body">
-              <div class="equipment-bar" :class="{ 'is-empty': equipmentTotal === 0 }">
+              <template v-if="equipmentTotal > 0">
+              <div class="equipment-bar">
                 <i
                   v-for="item in equipmentItems"
                   :key="item.key"
@@ -1366,7 +1381,8 @@ onBeforeUnmount(() => {
                   <b>{{ formatNumber(item.value) }}</b>
                 </div>
               </div>
-              <p v-if="equipmentTotal === 0" class="inline-empty">暂无设备台账数据</p>
+              </template>
+              <div v-else class="equipment-empty"><AppIcon name="wrench" :size="24" /><strong>暂无设备台账数据</strong><p>维护设备台账后显示运行与维保状态</p></div>
             </div>
           </article>
 
@@ -1444,7 +1460,7 @@ onBeforeUnmount(() => {
               </aside>
             </header>
             <div class="trend-chart-wrap compact-chart">
-              <MesChart :option="trendOption" height="100%" />
+              <MesChart v-if="hasTrendData" :option="trendOption" height="100%" />
               <div v-if="!hasTrendData" class="empty-overlay compact-empty">
                 <AppIcon name="activity" :size="24" />
                 <strong>近 7 日暂无最终包装报工</strong>
@@ -1456,6 +1472,7 @@ onBeforeUnmount(() => {
 
       <div v-if="scheduleExpanded" class="schedule-modal-backdrop" @click.self="closeSchedule">
         <section
+          ref="scheduleDialog"
           class="schedule-modal"
           :style="scheduleModalStyle"
           role="dialog"
@@ -1464,7 +1481,6 @@ onBeforeUnmount(() => {
         >
           <header class="schedule-modal-header">
             <div>
-              <span>PRODUCTION SCHEDULE</span>
               <strong id="schedule-modal-title">生产计划排期总览</strong>
               <p>{{ previewMode ? '演示排期' : '真实生产计划' }} · {{ scheduleRangeLabel }}</p>
             </div>
@@ -1515,7 +1531,7 @@ onBeforeUnmount(() => {
                     {{ formatNumber(line.plans.reduce((total, plan) => total + Number(plan.plannedQuantity || 0), 0)) }}
                     件 · {{ formatNumber(line.dailyCapacity) }}/日
                   </span>
-                  <small>{{ line.plans.map(formatScheduleTime).join(' / ') }}</small>
+                  <small :title="line.plans.map(formatScheduleTime).join(' / ')">{{ line.plans.map(formatScheduleTime).join(' / ') }}</small>
                 </div>
                 <div class="schedule-row-track">
                   <span v-if="!line.plans.length" class="schedule-row-empty">{{ lineEmptyScheduleText(line) }}</span>

@@ -396,12 +396,12 @@ onBeforeUnmount(() => {
 <style scoped>
 /* 命令卡片沿用系统视觉基线：1px 描边、小圆角、单一主色，不用渐变和阴影光效。 */
 .ai-command-card {
-  --cmd-line: var(--mes-border, #e5e7eb);
+  --cmd-line: var(--mes-border, var(--mes-border));
   --cmd-line-soft: var(--mes-border-light, #eef1f5);
   --cmd-bg: var(--mes-surface-muted, #f7f8fa);
-  --cmd-text: var(--mes-text, #1f2329);
+  --cmd-text: var(--mes-text, var(--mes-text));
   --cmd-text-2: var(--mes-text-secondary, #646a73);
-  --cmd-text-3: var(--mes-text-muted, #8f959e);
+  --cmd-text-3: var(--mes-text-muted, var(--mes-text-muted));
   margin-top: 12px;
   padding: 12px 13px 11px;
   border: 1px solid var(--cmd-line);

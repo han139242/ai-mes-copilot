@@ -91,12 +91,11 @@ function openFirstSearchResult() {
   <aside class="app-sidebar" :class="{ 'is-collapsed': menuCollapsed }">
     <div class="sidebar-brand">
       <span class="sidebar-logo" aria-hidden="true">
-        <span class="logo-ring" />
-        <span class="logo-core" />
+        <AppIcon name="bot" :size="18" />
       </span>
       <div v-show="!menuCollapsed" class="brand-copy">
         <strong>{{ appShortName }}</strong>
-        <span>LAMP MES · 制造执行</span>
+        <span>自然语言 · 制造执行</span>
       </div>
     </div>
 
@@ -175,7 +174,7 @@ function openFirstSearchResult() {
 </template>
 
 <style scoped>
-/* 侧边栏：深色科技蓝底 + 青色高亮，形成“工业控制台”的视觉基调。 */
+/* 侧边栏：浅色导航 + 单一操作色，形成“工业控制台”的视觉基调。 */
 .app-sidebar {
   display: flex;
   width: 100%;
@@ -210,13 +209,13 @@ function openFirstSearchResult() {
 .sidebar-search :deep(.el-input__wrapper) {
   min-height: 32px;
   border-radius: 6px;
-  background: rgb(255 255 255 / 4%);
+  background: var(--mes-sidebar);
   box-shadow: 0 0 0 1px var(--mes-sidebar-border) inset;
 }
 
 .sidebar-search :deep(.el-input__inner) {
-  color: #d7dfe9;
-  font-size: 12.5px;
+  color: var(--mes-sidebar-active-text);
+  font-size: 13px;
 }
 
 .sidebar-search :deep(.el-input__inner::placeholder) {
@@ -250,8 +249,8 @@ function openFirstSearchResult() {
 }
 
 .sidebar-search-results button:hover {
-  color: #fff;
-  background: rgb(255 255 255 / 6%);
+  color: var(--mes-sidebar-active-text);
+  background: var(--mes-sidebar-raised);
 }
 
 .sidebar-search-results button > span {
@@ -263,7 +262,7 @@ function openFirstSearchResult() {
   color: var(--mes-sidebar-muted);
   border: 1px solid var(--mes-sidebar-border);
   border-radius: 5px;
-  background: rgb(255 255 255 / 4%);
+  background: var(--mes-sidebar);
 }
 
 .sidebar-search-results button > div {
@@ -285,7 +284,7 @@ function openFirstSearchResult() {
 .sidebar-search-results small {
   margin-top: 2px;
   color: var(--mes-sidebar-muted);
-  font-size: 9.5px;
+  font-size: 11px;
 }
 .sidebar-search-results p {
   padding: 24px 16px;
@@ -296,6 +295,7 @@ function openFirstSearchResult() {
 
 /* 品牌标志：线框圆环，不用发光和渐变。 */
 .sidebar-logo {
+  color: var(--mes-primary);
   position: relative;
   display: inline-flex;
   width: 30px;
@@ -303,24 +303,9 @@ function openFirstSearchResult() {
   flex: none;
   align-items: center;
   justify-content: center;
-  border: 1px solid rgb(255 255 255 / 16%);
+  border: 1px solid var(--mes-sidebar-featured-border);
   border-radius: 7px;
-  background: rgb(255 255 255 / 5%);
-}
-
-.logo-ring {
-  position: absolute;
-  width: 15px;
-  height: 15px;
-  border: 1.5px solid #cbd5e1;
-  border-radius: 50%;
-}
-
-.logo-core {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: #e2e8f0;
+  background: var(--mes-sidebar-raised);
 }
 
 .brand-copy {
@@ -331,7 +316,7 @@ function openFirstSearchResult() {
 
 .brand-copy strong {
   overflow: hidden;
-  color: #f1f5f9;
+  color: var(--mes-sidebar-active-text);
   font-size: 14px;
   font-weight: 600;
   letter-spacing: 0.2px;
@@ -342,7 +327,7 @@ function openFirstSearchResult() {
 .brand-copy span {
   margin-top: 2px;
   color: var(--mes-sidebar-muted);
-  font-size: 9.5px;
+  font-size: 11px;
   font-weight: 500;
   letter-spacing: 0.5px;
   white-space: nowrap;
@@ -358,35 +343,35 @@ function openFirstSearchResult() {
 }
 
 :deep(.el-menu-item) {
-  height: 36px;
+  height: 40px;
   margin: 1px 8px;
   padding: 0 10px !important;
   gap: 10px;
   color: var(--mes-sidebar-text);
   border-radius: 6px;
-  font-size: 12.5px;
-  line-height: 36px;
+  font-size: 13px;
+  line-height: 40px;
 }
 
 :deep(.el-sub-menu__title) {
-  height: 36px;
+  height: 40px;
   margin: 1px 8px;
   padding: 0 10px !important;
   gap: 10px;
   color: var(--mes-sidebar-text);
   border-radius: 6px;
-  font-size: 12.5px;
-  line-height: 36px;
+  font-size: 13px;
+  line-height: 40px;
 }
 
 :deep(.el-sub-menu__title:hover) {
-  color: #fff;
-  background: rgb(255 255 255 / 5%);
+  color: var(--mes-sidebar-active-text);
+  background: var(--mes-sidebar-raised);
 }
 
 :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
-  color: #ffffff;
-  background: rgb(255 255 255 / 6%);
+  color: var(--mes-sidebar-active-text);
+  background: var(--mes-sidebar-raised);
   font-weight: 500;
 }
 
@@ -412,27 +397,25 @@ function openFirstSearchResult() {
 }
 
 :deep(.el-menu-item:hover) {
-  color: #ffffff;
-  background: rgb(255 255 255 / 5%);
+  color: var(--mes-sidebar-active-text);
+  background: var(--mes-sidebar-raised);
 }
 
-/* 选中项：浅色底 + 左侧主色细条，不用渐变。 */
+/* Selected navigation uses a quiet surface and stronger text. */
 :deep(.el-menu-item.is-active) {
-  color: #ffffff;
+  color: var(--mes-sidebar-active-text);
   background: var(--mes-sidebar-active);
-  box-shadow: inset 2px 0 0 var(--mes-primary);
-  font-weight: 500;
+  font-weight: 600;
 }
 
 :deep(.el-menu-item.is-featured) {
-  color: #e2e8f0;
+  color: var(--mes-sidebar-text);
 }
 
 :deep(.el-menu-item.is-featured:hover),
 :deep(.el-menu-item.is-featured.is-active) {
-  color: #ffffff;
+  color: var(--mes-sidebar-active-text);
   background: var(--mes-sidebar-active);
-  box-shadow: inset 2px 0 0 var(--mes-primary);
 }
 
 :deep(.el-menu--collapse .el-menu-item),
@@ -508,7 +491,7 @@ function openFirstSearchResult() {
 .sidebar-footer span:not(.service-dot) {
   overflow: hidden;
   color: var(--mes-sidebar-muted);
-  font-size: 9.5px;
+  font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

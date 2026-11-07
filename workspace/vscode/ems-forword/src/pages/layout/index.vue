@@ -12,7 +12,7 @@ import { OPEN_AI_ASSISTANT_EVENT } from '@/utils/app-events';
 const route = useRoute();
 const router = useRouter();
 const collapsed = ref(localStorage.getItem('mes_sidebar_collapsed') === 'true');
-const mobile = ref(false);
+const mobile = ref(window.innerWidth < 1120);
 const mobileMenuOpen = ref(false);
 // 刷新标签页时递增 key，Vue 会重新创建当前路由组件，从而重新执行页面初始化和数据加载。
 const viewVersion = ref(0);
@@ -137,7 +137,7 @@ onBeforeUnmount(() => {
 
 .content-region {
   min-height: calc(100dvh - var(--mes-header-height) - var(--mes-tabs-height));
-  padding: 18px 20px 28px;
+  padding: var(--mes-page-padding);
 }
 
 .mobile-mask {
@@ -163,7 +163,7 @@ onBeforeUnmount(() => {
 
 @media (max-width: 768px) {
   .content-region {
-    padding: 12px;
+    padding: var(--mes-page-padding);
   }
 }
 </style>

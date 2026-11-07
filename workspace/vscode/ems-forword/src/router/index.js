@@ -12,6 +12,7 @@ import { getCurrentUserInfo } from '@/api/auth';
 import { hasPermission, resourcePermission } from '@/utils/permission';
 import { firstAccessiblePath, isNavigationPathAccessible } from '@/config/navigation';
 import { restoreSessionUser } from '@/utils/session-recovery';
+import { appName } from '@/config/branding';
 
 // routes 是整个系统的“路径 -> 页面组件”映射表。
 const routes = [
@@ -162,7 +163,7 @@ router.beforeEach(async (to) => {
   // 登录页、404 等公共页面不要求登录。
   if (to.meta.public) {
     // 已登录用户再次访问登录页时，直接送回原目标页或首页。
-    if (to.name === 'Login' && hasAuthenticatedSession()) {
+    if (to.name === 'Login' && hasAuthenticatedSession() && !isFrameworkPreview()) {
       const redirect = typeof to.query.redirect === 'string' ? to.query.redirect : '';
       return redirect.startsWith('/') && isNavigationPathAccessible(redirect)
         ? redirect
@@ -207,7 +208,7 @@ router.beforeEach(async (to) => {
 
 // afterEach 是后置守卫：页面跳转完成后更新浏览器标签标题。
 router.afterEach((to) => {
-  const appTitle = import.meta.env.VITE_APP_TITLE || '智能调光台灯 MES';
+  const appTitle = import.meta.env.VITE_APP_TITLE || appName;
   const title = to.meta.title ? `${to.meta.title} - ${appTitle}` : appTitle;
   document.title = title;
 });

@@ -23,6 +23,14 @@ AI-MES Copilot is a manufacturing execution system built with **Spring Boot, Vue
 
 *Screenshot from a project rehearsal. Quantities shown are demonstration data from that run.*
 
+### Production screen and consistent UI
+
+The PC interface uses ivory surfaces with restrained sky-blue accents across navigation, the AI workbench, business tables, and the production screen. Workflow shortcuts follow the production chain. Authenticated sessions use the server catalog; development previews show disabled, clearly labeled shortcut examples.
+
+![Ivory production screen showing line schedules, risks, quality, and equipment status](docs/images/production-screen.png)
+
+*UI verification screenshot using temporary demonstration data, not actual operational results. See the [UI conventions (Chinese)](docs/UI_DESIGN.md).*
+
 ## Example requests
 
 English translations of example requests for the supported workflows:

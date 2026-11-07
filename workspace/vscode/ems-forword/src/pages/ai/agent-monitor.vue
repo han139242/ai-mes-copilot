@@ -526,13 +526,13 @@ onBeforeUnmount(() => {
 <style scoped>
 /* 执行监控页面：延续工作台的 1px 描边、小圆角、单一主色，表格保持紧凑可读。 */
 .agent-monitor {
-  --am-line: var(--mes-border, #e5e7eb);
+  --am-line: var(--mes-border, var(--mes-border));
   --am-line-soft: var(--mes-border-light, #eef1f5);
   --am-bg: var(--mes-surface-muted, #f7f8fa);
   --am-panel: var(--mes-surface, #fff);
-  --am-text: var(--mes-text, #1f2329);
+  --am-text: var(--mes-text, var(--mes-text));
   --am-text-2: var(--mes-text-secondary, #646a73);
-  --am-text-3: var(--mes-text-muted, #8f959e);
+  --am-text-3: var(--mes-text-muted, var(--mes-text-muted));
   display: flex;
   min-width: 0;
   flex-direction: column;

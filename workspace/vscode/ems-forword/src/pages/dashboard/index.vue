@@ -446,8 +446,8 @@ onBeforeUnmount(() => {
         <AppIcon :name="item.icon" :size="14" />
         {{ item.label }}
       </button>
-      <span class="refresh-hint">
-        <i />数据更新于 {{ lastRefreshAt || '--:--:--' }}
+      <span class="refresh-hint" :class="{ 'is-current': !previewMode && lastRefreshAt }">
+        <i /><template v-if="previewMode">界面预览</template><template v-else-if="lastRefreshAt">数据更新于 {{ lastRefreshAt }}</template><template v-else>尚未同步数据</template>
       </span>
     </section>
 
@@ -544,7 +544,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 14px;
+  margin-bottom: 22px;
 }
 
 .head-copy {
@@ -553,8 +553,8 @@ onBeforeUnmount(() => {
 
 .head-copy h1 {
   margin: 0;
-  color: #1f2329;
-  font-size: 19px;
+  color: var(--mes-text);
+  font-size: 24px;
   font-weight: 600;
   line-height: 1.35;
   letter-spacing: -0.2px;
@@ -562,7 +562,7 @@ onBeforeUnmount(() => {
 
 .head-copy p {
   margin: 3px 0 0;
-  color: #8f959e;
+  color: var(--mes-text-muted);
   font-size: 12px;
   line-height: 1.5;
 }
@@ -587,27 +587,27 @@ onBeforeUnmount(() => {
 }
 
 .head-actions .ai-entry.el-button {
-  color: #3370ff;
-  border-color: #d0dffb;
-  background: #f5f8ff;
+  color: var(--mes-primary);
+  border-color: var(--mes-primary-border);
+  background: var(--mes-primary-soft);
 }
 
 .head-actions .ai-entry.el-button:hover {
   color: #fff;
-  border-color: #3370ff;
-  background: #3370ff;
+  border-color: var(--mes-primary);
+  background: var(--mes-primary);
 }
 
 .head-actions :deep(.el-button--primary.is-plain) {
-  color: #3370ff;
-  border-color: #d0dffb;
+  color: var(--mes-primary);
+  border-color: var(--mes-primary-border);
   background: #fff;
 }
 
 .head-actions :deep(.el-button--primary.is-plain:hover) {
   color: #fff;
-  border-color: #3370ff;
-  background: #2b62e0;
+  border-color: var(--mes-primary);
+  background: var(--mes-primary-hover);
 }
 
 .dashboard-alert {
@@ -618,8 +618,8 @@ onBeforeUnmount(() => {
 .metric-strip {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
-  border: 1px solid #e5e7eb;
-  border-radius: 7px;
+  border: 1px solid var(--mes-border);
+  border-radius: var(--mes-radius);
   background: #fff;
 }
 
@@ -628,8 +628,8 @@ onBeforeUnmount(() => {
   min-width: 0;
   flex-direction: column;
   gap: 6px;
-  padding: 13px 16px;
-  border-left: 1px solid #f0f1f3;
+  padding: 20px;
+  border-left: 1px solid var(--mes-border);
 }
 
 .metric-cell:first-child {
@@ -641,8 +641,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 5px;
   overflow: hidden;
-  color: #8f959e;
-  font-size: 11.5px;
+  color: var(--mes-text-muted);
+  font-size: 12px;
   line-height: 1.3;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -650,15 +650,15 @@ onBeforeUnmount(() => {
 
 .metric-label :deep(svg) {
   flex: none;
-  color: #a5abb4;
+  color: var(--mes-text-muted);
 }
 
 .metric-cell > strong {
   display: flex;
   align-items: baseline;
   gap: 3px;
-  color: #1f2329;
-  font-size: 22px;
+  color: var(--mes-text);
+  font-size: 28px;
   font-weight: 600;
   font-variant-numeric: tabular-nums;
   letter-spacing: -0.4px;
@@ -667,7 +667,7 @@ onBeforeUnmount(() => {
 }
 
 .metric-cell em {
-  color: #8f959e;
+  color: var(--mes-text-muted);
   font-size: 11px;
   font-style: normal;
   font-weight: 400;
@@ -686,8 +686,8 @@ onBeforeUnmount(() => {
 
 .shortcut-label {
   margin-right: 6px;
-  color: #8f959e;
-  font-size: 11.5px;
+  color: var(--mes-text-muted);
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -709,17 +709,17 @@ onBeforeUnmount(() => {
 }
 
 .shortcut-item :deep(svg) {
-  color: #8f959e;
+  color: var(--mes-text-muted);
 }
 
 .shortcut-item:hover {
-  color: #3370ff;
-  border-color: #e5e7eb;
+  color: var(--mes-primary);
+  border-color: var(--mes-border);
   background: #fff;
 }
 
 .shortcut-item:hover :deep(svg) {
-  color: #3370ff;
+  color: var(--mes-primary);
 }
 
 .refresh-hint {
@@ -727,8 +727,8 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 5px;
   margin-left: auto;
-  color: #a5abb4;
-  font-size: 10.5px;
+  color: var(--mes-text-muted);
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -736,8 +736,9 @@ onBeforeUnmount(() => {
   width: 5px;
   height: 5px;
   border-radius: 50%;
-  background: #17a673;
+  background: var(--mes-text-muted);
 }
+.refresh-hint.is-current i { background: var(--mes-success); }
 
 /* ---------- 主体：链路 + 关注 一行，三张图一行 ---------- */
 .board-grid {
@@ -779,7 +780,7 @@ onBeforeUnmount(() => {
 .header-value {
   flex: none;
   color: #4b5563;
-  font-size: 11.5px;
+  font-size: 12px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -819,7 +820,7 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   color: #646a73;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--mes-border);
   border-radius: 6px;
   background: #f7f8fa;
   transition:
@@ -829,26 +830,26 @@ onBeforeUnmount(() => {
 }
 
 .process-step:hover > span {
-  color: #3370ff;
-  border-color: #d0dffb;
-  background: #f5f8ff;
+  color: var(--mes-primary);
+  border-color: var(--mes-primary-border);
+  background: var(--mes-primary-soft);
 }
 
 .process-step strong {
-  font-size: 11.5px;
+  font-size: 12px;
   font-weight: 400;
   white-space: nowrap;
 }
 
 .process-step:hover strong {
-  color: #3370ff;
+  color: var(--mes-primary);
 }
 
 .process-link {
   min-width: 12px;
   height: 1px;
   flex: 1;
-  background: #e5e7eb;
+  background: var(--mes-border);
 }
 
 /* ---------- 运营关注 ---------- */
@@ -874,7 +875,7 @@ onBeforeUnmount(() => {
 }
 
 .attention-list button + button {
-  border-top: 1px solid #f0f1f3;
+  border-top: 1px solid var(--mes-border);
   border-radius: 0;
 }
 .attention-list button:hover {
@@ -887,7 +888,7 @@ onBeforeUnmount(() => {
   white-space: nowrap;
 }
 .attention-list strong {
-  color: #1f2329;
+  color: var(--mes-text);
   font-size: 15px;
   font-weight: 600;
   line-height: 1;
@@ -901,7 +902,7 @@ onBeforeUnmount(() => {
 }
 .attention-list small {
   margin-left: 2px;
-  color: #8f959e;
+  color: var(--mes-text-muted);
   font-size: 9.5px;
   font-weight: 400;
 }
@@ -918,7 +919,7 @@ onBeforeUnmount(() => {
     border-left: 0;
   }
   .metric-cell:nth-child(n + 4) {
-    border-top: 1px solid #f0f1f3;
+    border-top: 1px solid var(--mes-border);
   }
 }
 
@@ -962,7 +963,7 @@ onBeforeUnmount(() => {
     border-left: 0;
   }
   .metric-cell:nth-child(n + 3) {
-    border-top: 1px solid #f0f1f3;
+    border-top: 1px solid var(--mes-border);
   }
   .head-actions :deep(.el-date-editor) {
     width: 100%;

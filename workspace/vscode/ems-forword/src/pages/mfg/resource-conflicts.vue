@@ -253,12 +253,12 @@ onMounted(load);
 <style scoped>
 /* 跨层资源冲突页：与自动化规则、异常闭环同一套描边 + 小圆角 + 单一主色。 */
 .conflict-page {
-  --cp-line: var(--mes-border, #e5e7eb);
+  --cp-line: var(--mes-border, var(--mes-border));
   --cp-line-soft: var(--mes-border-light, #eef1f5);
   --cp-panel: var(--mes-surface, #fff);
-  --cp-text: var(--mes-text, #1f2329);
+  --cp-text: var(--mes-text, var(--mes-text));
   --cp-text-2: var(--mes-text-secondary, #646a73);
-  --cp-text-3: var(--mes-text-muted, #8f959e);
+  --cp-text-3: var(--mes-text-muted, var(--mes-text-muted));
   display: flex;
   min-width: 0;
   flex-direction: column;

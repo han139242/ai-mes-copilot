@@ -702,7 +702,7 @@ onBeforeUnmount(() => {
 }
 
 .header-icon-button.el-button:hover {
-  color: #fff;
+  color: var(--mes-header-text);
   background: var(--mes-header-hover);
 }
 
@@ -736,8 +736,8 @@ onBeforeUnmount(() => {
 
 .global-search:hover {
   color: var(--mes-header-text);
-  border-color: rgb(255 255 255 / 22%);
-  background: rgb(255 255 255 / 10%);
+  border-color: var(--mes-primary-border);
+  background: var(--mes-header-hover);
 }
 
 .global-search span {
@@ -786,10 +786,10 @@ onBeforeUnmount(() => {
   flex: none;
   align-items: center;
   justify-content: center;
-  color: #e2e8f0;
-  border: 1px solid rgb(255 255 255 / 16%);
+  color: var(--mes-header-text);
+  border: 1px solid var(--mes-header-border);
   border-radius: 50%;
-  background: rgb(255 255 255 / 8%);
+  background: var(--mes-header-control-bg);
   font-size: 11.5px;
   font-weight: 500;
 }

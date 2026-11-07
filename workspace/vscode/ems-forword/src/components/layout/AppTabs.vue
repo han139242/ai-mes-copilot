@@ -164,11 +164,11 @@ watch(
   justify-content: center;
   gap: 6px;
   margin: 0;
-  padding: 0 12px;
+  padding: 0 14px;
   color: var(--mes-text-secondary);
   border: 0;
-  border-right: 1px solid var(--mes-border);
-  border-radius: 0;
+  border-right: 0;
+  border-radius: 6px;
   background: transparent;
   font-size: 12px;
   cursor: pointer;
@@ -181,9 +181,9 @@ watch(
 
 .tab-item.active {
   z-index: 1;
-  color: var(--mes-text);
+  color: var(--mes-primary);
   background: var(--mes-tab-surface);
-  box-shadow: inset 0 -2px 0 var(--mes-primary);
+  box-shadow: none;
   font-weight: 600;
 }
 

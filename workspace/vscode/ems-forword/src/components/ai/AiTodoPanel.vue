@@ -12,15 +12,18 @@ import {
   todoGeneratedAt,
   todoItemsSorted,
   todoLoading,
+  todoLoaded,
   todoTotal,
 } from '@/stores/aiTodo';
 import { DATA_CHANGED_EVENT, notifyDataChanged } from '@/utils/app-events';
+import { isFrameworkPreview } from '@/utils/auth';
 
 /*
  * 我的待办面板：把九类业务待办汇总成一张卡片，每条右侧直接给可办理的动作按钮。
  * 动作走的是与工作台相同的预览接口，先看前置条件再确认，确认后才会真正改动业务单据。
  */
 const router = useRouter();
+const previewMode = isFrameworkPreview();
 
 // 九类待办的中文名，键与后端 AiTodoServiceImpl 的 type 常量一一对应。
 const TYPE_LABELS = {
@@ -95,9 +98,7 @@ async function handleAction(item, action, index) {
     if (action.route) {
       // 跳转类动作可以带定位参数，例如 focus 指向具体单据，目标页会选中那一行。
       const query = Object.fromEntries(
-        Object.entries(action.query || {}).filter(
-          ([, value]) => value !== null && value !== undefined && value !== '',
-        ),
+        Object.entries(action.query || {}).filter(([, value]) => value !== null && value !== undefined && value !== ''),
       );
       router.push(Object.keys(query).length ? { path: action.route, query } : action.route);
     }
@@ -167,15 +168,15 @@ onBeforeUnmount(() => {
     <div class="mes-panel-header">
       <div>
         <h2 class="mes-panel-title">我的待办</h2>
-        <span class="panel-caption">
-          共 {{ todoTotal }} 条<template v-if="todoGeneratedAt">
-            · 更新于 {{ todoGeneratedAt.slice(11, 16) }}</template
-          >
+        <span v-if="previewMode" class="panel-caption">连接后端后显示当前账号的待办</span>
+        <span v-else-if="!todoLoaded" class="panel-caption">{{ todoError ? '待办暂不可用' : '正在加载待办' }}</span>
+        <span v-else class="panel-caption">
+          共 {{ todoTotal }} 条<template v-if="todoGeneratedAt"> · 更新于 {{ todoGeneratedAt.slice(11, 16) }}</template>
         </span>
       </div>
-      <div class="todo-head-actions">
+      <div v-if="!previewMode" class="todo-head-actions">
         <el-tooltip content="刷新待办" placement="top">
-          <button class="todo-icon" type="button" aria-label="刷新待办" @click="refreshTodos()">
+          <button class="todo-icon" type="button" aria-label="刷新待办" :disabled="todoLoading" @click="refreshTodos()">
             <AppIcon name="refresh" :size="14" />
           </button>
         </el-tooltip>
@@ -183,49 +184,64 @@ onBeforeUnmount(() => {
       </div>
     </div>
 
-    <div v-if="countChips.length" class="todo-counts">
+    <div v-if="!previewMode && countChips.length" class="todo-counts">
       <span v-for="chip in countChips" :key="chip.type" class="todo-chip">
         {{ chip.label }}
         <strong>{{ chip.count }}</strong>
       </span>
     </div>
 
-    <div v-loading="todoLoading" class="todo-body">
-      <p v-if="todoError" class="todo-tip">{{ todoError }}</p>
-      <p v-else-if="!todoItemsSorted.length" class="todo-tip">当前没有需要处理的待办。</p>
+    <div class="todo-body" :aria-busy="todoLoading && !previewMode">
+      <div v-if="previewMode" class="todo-empty" role="status">
+        <AppIcon name="clipboard" :size="22" />
+        <div>
+          <strong>待办将在连接后端后显示</strong>
+          <p>当前为界面预览，未读取业务待办。</p>
+        </div>
+      </div>
+      <el-skeleton v-else-if="todoLoading && !todoLoaded" :rows="2" animated />
+      <template v-else>
+        <div v-if="todoError" class="todo-error" role="alert">
+          <p>{{ todoError }}<span v-if="todoLoaded"> · 下方保留上次同步结果</span></p>
+          <el-button text type="primary" :loading="todoLoading" @click="refreshTodos()">重新加载</el-button>
+        </div>
+        <p v-if="todoLoaded && !todoError && !todoItemsSorted.length" class="todo-tip" role="status">
+          当前没有需要处理的待办。
+        </p>
 
-      <ul v-else class="todo-list">
-        <li v-for="item in todoItemsSorted" :key="`${item.type}-${item.bizNo}-${item.bizId}`" class="todo-row">
-          <div class="todo-main">
-            <div class="todo-line">
-              <span class="todo-severity" :class="severityMeta(item.severity).className">
-                {{ severityMeta(item.severity).label }}
-              </span>
-              <span class="todo-type">{{ item.typeLabel || TYPE_LABELS[item.type] || item.type }}</span>
-              <strong class="todo-title">{{ item.title }}</strong>
+        <ul v-if="todoLoaded && todoItemsSorted.length" class="todo-list">
+          <li v-for="item in todoItemsSorted" :key="`${item.type}-${item.bizNo}-${item.bizId}`" class="todo-row">
+            <div class="todo-main">
+              <div class="todo-line">
+                <span class="todo-severity" :class="severityMeta(item.severity).className">
+                  {{ severityMeta(item.severity).label }}
+                </span>
+                <span class="todo-type">{{ item.typeLabel || TYPE_LABELS[item.type] || item.type }}</span>
+                <strong class="todo-title">{{ item.title }}</strong>
+              </div>
+              <div class="todo-meta">
+                <span v-if="item.bizNo" class="todo-no">{{ item.bizNo }}</span>
+                <span v-if="waitingText(item.waitingMinutes)" class="todo-wait">
+                  {{ waitingText(item.waitingMinutes) }}
+                </span>
+                <span v-if="item.summary" class="todo-summary">{{ item.summary }}</span>
+              </div>
             </div>
-            <div class="todo-meta">
-              <span v-if="item.bizNo" class="todo-no">{{ item.bizNo }}</span>
-              <span v-if="waitingText(item.waitingMinutes)" class="todo-wait">
-                {{ waitingText(item.waitingMinutes) }}
-              </span>
-              <span v-if="item.summary" class="todo-summary">{{ item.summary }}</span>
-            </div>
-          </div>
 
-          <div v-if="item.actions?.length" class="todo-actions">
-            <el-button
-              v-for="(action, index) in item.actions"
-              :key="actionKey(item, action, index)"
-              size="small"
-              :loading="previewingKey === actionKey(item, action, index)"
-              @click="handleAction(item, action, index)"
-            >
-              {{ action.label || '去办理' }}
-            </el-button>
-          </div>
-        </li>
-      </ul>
+            <div v-if="item.actions?.length" class="todo-actions">
+              <el-button
+                v-for="(action, index) in item.actions"
+                :key="actionKey(item, action, index)"
+                size="small"
+                :loading="previewingKey === actionKey(item, action, index)"
+                @click="handleAction(item, action, index)"
+              >
+                {{ action.label || '去办理' }}
+              </el-button>
+            </div>
+          </li>
+        </ul>
+      </template>
     </div>
 
     <!-- 办理预览：复用工作台的命令卡片，前置条件、影响范围和有效期都在确认前看清。 -->
@@ -244,7 +260,7 @@ onBeforeUnmount(() => {
   display: block;
   margin-top: 1px;
   overflow: hidden;
-  color: #8f959e;
+  color: var(--mes-text-muted);
   font-size: 11px;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -259,8 +275,8 @@ onBeforeUnmount(() => {
 
 .todo-icon {
   display: inline-flex;
-  width: 26px;
-  height: 26px;
+  width: 32px;
+  height: 32px;
   align-items: center;
   justify-content: center;
   color: #646a73;
@@ -271,8 +287,18 @@ onBeforeUnmount(() => {
 }
 
 .todo-icon:hover {
-  color: #3370ff;
-  background: #f5f8ff;
+  color: var(--mes-primary);
+  background: var(--mes-primary-soft);
+}
+.todo-icon:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
+@media (pointer: coarse) {
+  .todo-icon {
+    min-width: var(--mes-touch-target);
+    min-height: var(--mes-touch-target);
+  }
 }
 
 .todo-counts {
@@ -289,13 +315,13 @@ onBeforeUnmount(() => {
   padding: 2px 8px;
   color: #646a73;
   font-size: 11px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--mes-border);
   border-radius: 20px;
   background: #f7f8fa;
 }
 
 .todo-chip strong {
-  color: #1f2329;
+  color: var(--mes-text);
   font-size: 11.5px;
   font-variant-numeric: tabular-nums;
 }
@@ -308,8 +334,35 @@ onBeforeUnmount(() => {
 .todo-tip {
   margin: 0;
   padding: 14px 0;
-  color: #8f959e;
+  color: var(--mes-text-muted);
   font-size: 12px;
+}
+
+.todo-empty {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 6px;
+  color: var(--mes-text-muted);
+}
+.todo-empty strong {
+  color: var(--mes-text-secondary);
+  font-size: 14px;
+  font-weight: 500;
+}
+.todo-empty p {
+  margin-top: 4px;
+  font-size: 13px;
+}
+.todo-error {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.todo-error p {
+  color: var(--mes-text-secondary);
+  font-size: 13px;
 }
 
 .todo-list {
@@ -368,13 +421,13 @@ onBeforeUnmount(() => {
 
 .todo-type {
   flex: none;
-  color: #8f959e;
+  color: var(--mes-text-muted);
   font-size: 11px;
 }
 
 .todo-title {
   overflow: hidden;
-  color: #1f2329;
+  color: var(--mes-text);
   font-size: 12.5px;
   font-weight: 400;
   text-overflow: ellipsis;
@@ -388,12 +441,12 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 8px;
   margin-top: 3px;
-  color: #8f959e;
+  color: var(--mes-text-muted);
   font-size: 11px;
 }
 
 .todo-no {
-  color: #3370ff;
+  color: var(--mes-primary);
   font-variant-numeric: tabular-nums;
 }
 

@@ -4,6 +4,7 @@ import { init, use } from 'echarts/core';
 import { BarChart, LineChart, PieChart } from 'echarts/charts';
 import { GridComponent, LegendComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
+import { activeThemeKey } from '@/utils/theme';
 
 // ECharts按需注册，只打包项目实际使用的柱状图、折线图、饼图和必要组件。
 use([BarChart, LineChart, PieChart, GridComponent, LegendComponent, TooltipComponent, CanvasRenderer]);
@@ -19,19 +20,24 @@ const chartElement = ref();
 let chart;
 let resizeObserver;
 
-// 统一图表配色：主色蓝 + 深青 + 琥珀 + 红 + 中性灰，避免ECharts默认的高饱和彩色。
-const PALETTE = ['#1f6feb', '#0f766e', '#d98a00', '#d64545', '#64748b', '#8b5cf6'];
+// Read the same tokens as forms and navigation; preserve explicit series semantics.
+function palette() {
+  const css = getComputedStyle(document.documentElement);
+  return ['--mes-primary', '--mes-accent', '--mes-warning', '--mes-danger', '--mes-info'].map(
+    (name) => css.getPropertyValue(name).trim(),
+  );
+}
 
 // 坐标轴和网格线统一成浅灰细线，数值刻度用次要文字色。
 const AXIS_BASE = {
   axisLine: { lineStyle: { color: '#e6eaf0' } },
   axisTick: { show: false },
-  axisLabel: { color: '#8a97a8', fontSize: 11 },
+  axisLabel: { color: '#647987', fontSize: 12 },
   splitLine: { lineStyle: { color: '#f0f3f7' } },
 };
 
 function withTheme(option) {
-  const next = { ...option, color: option.color || PALETTE };
+  const next = { ...option, color: option.color || palette() };
   if (next.xAxis && !Array.isArray(next.xAxis)) {
     next.xAxis = {
       ...AXIS_BASE,
@@ -66,6 +72,7 @@ function renderChart() {
 
 // deep:true保证option内部的series、xAxis等嵌套数据变化时也重新绘制。
 watch(() => props.option, renderChart, { deep: true });
+watch(activeThemeKey, renderChart, { flush: 'post' });
 
 // 组件挂载后绘图，并开始监听图表容器尺寸。
 onMounted(() => {

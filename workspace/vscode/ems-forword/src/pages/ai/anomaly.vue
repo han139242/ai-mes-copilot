@@ -503,13 +503,13 @@ onBeforeUnmount(() => {
 <style scoped>
 /* 异常闭环页：与自动化规则、执行监控同一套描边与密度，表格紧凑可读。 */
 .anomaly-page {
-  --ap-line: var(--mes-border, #e5e7eb);
+  --ap-line: var(--mes-border, var(--mes-border));
   --ap-line-soft: var(--mes-border-light, #eef1f5);
   --ap-bg: var(--mes-surface-muted, #f7f8fa);
   --ap-panel: var(--mes-surface, #fff);
-  --ap-text: var(--mes-text, #1f2329);
+  --ap-text: var(--mes-text, var(--mes-text));
   --ap-text-2: var(--mes-text-secondary, #646a73);
-  --ap-text-3: var(--mes-text-muted, #8f959e);
+  --ap-text-3: var(--mes-text-muted, var(--mes-text-muted));
   display: flex;
   min-width: 0;
   flex-direction: column;

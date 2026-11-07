@@ -410,8 +410,8 @@ const summaryRows = computed(() =>
   flex: none;
   align-items: center;
   justify-content: center;
-  color: var(--mes-primary, #3370ff);
-  border: 1px solid var(--mes-primary-border, #d0dffb);
+  color: var(--mes-primary, var(--mes-primary));
+  border: 1px solid var(--mes-primary-border, var(--mes-primary-border));
   border-radius: 8px;
   background: var(--mes-primary-soft, #eaf2ff);
 }
@@ -425,7 +425,7 @@ const summaryRows = computed(() =>
 
 .po-head p {
   margin: 4px 0 0;
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
   font-size: 12px;
 }
 
@@ -441,7 +441,7 @@ const summaryRows = computed(() =>
   align-items: flex-start;
   gap: 11px;
   padding: 14px 16px;
-  border: 1px solid var(--mes-border, #e5e7eb);
+  border: 1px solid var(--mes-border, var(--mes-border));
   border-radius: 8px;
   background: var(--mes-surface, #fff);
 }
@@ -453,7 +453,7 @@ const summaryRows = computed(() =>
   flex: none;
   align-items: center;
   justify-content: center;
-  color: var(--mes-primary, #3370ff);
+  color: var(--mes-primary, var(--mes-primary));
   border-radius: 6px;
   background: var(--mes-primary-soft, #eaf2ff);
 }
@@ -472,7 +472,7 @@ const summaryRows = computed(() =>
 
 .po-stat-value {
   margin: 0;
-  color: var(--mes-text, #1f2329);
+  color: var(--mes-text, var(--mes-text));
   font-size: 24px;
   font-weight: 600;
   line-height: 1.2;
@@ -481,21 +481,21 @@ const summaryRows = computed(() =>
 
 .po-stat-value em {
   margin-left: 3px;
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
   font-size: 12px;
   font-style: normal;
   font-weight: 400;
 }
 
 .po-stat-hint {
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
   font-size: 11px;
 }
 
 /* ---------- 分组 ---------- */
 .po-group {
   padding: 16px 18px 18px;
-  border: 1px solid var(--mes-border, #e5e7eb);
+  border: 1px solid var(--mes-border, var(--mes-border));
   border-radius: 8px;
   background: var(--mes-surface, #fff);
 }
@@ -510,7 +510,7 @@ const summaryRows = computed(() =>
 
 .po-index {
   flex: none;
-  color: var(--mes-primary, #3370ff);
+  color: var(--mes-primary, var(--mes-primary));
   font-size: 22px;
   font-weight: 700;
   line-height: 1;
@@ -534,7 +534,7 @@ const summaryRows = computed(() =>
 }
 
 .po-group-title h2 :deep(svg) {
-  color: var(--mes-primary, #3370ff);
+  color: var(--mes-primary, var(--mes-primary));
 }
 
 .po-pain {
@@ -570,7 +570,7 @@ const summaryRows = computed(() =>
   flex-direction: column;
   gap: 12px;
   padding: 14px 16px;
-  border: 1px solid var(--mes-border, #e5e7eb);
+  border: 1px solid var(--mes-border, var(--mes-border));
   border-radius: 8px;
   background: var(--mes-surface, #fff);
 }
@@ -581,7 +581,7 @@ const summaryRows = computed(() =>
 }
 
 .po-card.is-after {
-  border-color: var(--mes-primary-border, #d0dffb);
+  border-color: var(--mes-primary-border, var(--mes-primary-border));
   box-shadow: inset 0 0 0 1px rgb(51 112 255 / 6%);
 }
 
@@ -591,7 +591,7 @@ const summaryRows = computed(() =>
   align-items: center;
   gap: 8px;
   padding-bottom: 10px;
-  border-bottom: 1px dashed var(--mes-border, #e5e7eb);
+  border-bottom: 1px dashed var(--mes-border, var(--mes-border));
 }
 
 .po-card-tag {
@@ -605,11 +605,11 @@ const summaryRows = computed(() =>
 
 .po-card.is-after .po-card-tag {
   color: #fff;
-  background: var(--mes-primary, #3370ff);
+  background: var(--mes-primary, var(--mes-primary));
 }
 
 .po-card-mode {
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
   font-size: 11.5px;
 }
 
@@ -637,12 +637,12 @@ const summaryRows = computed(() =>
   bottom: -3px;
   left: 9px;
   width: 1px;
-  background: var(--mes-border, #e5e7eb);
+  background: var(--mes-border, var(--mes-border));
   content: '';
 }
 
 .po-card.is-after .po-flow li:not(:last-child)::before {
-  background: var(--mes-primary-border, #d0dffb);
+  background: var(--mes-primary-border, var(--mes-primary-border));
 }
 
 .po-step-no {
@@ -663,13 +663,13 @@ const summaryRows = computed(() =>
 }
 
 .po-card.is-after .po-step-no {
-  color: var(--mes-primary, #3370ff);
-  border-color: var(--mes-primary-border, #d0dffb);
+  color: var(--mes-primary, var(--mes-primary));
+  border-color: var(--mes-primary-border, var(--mes-primary-border));
   background: var(--mes-primary-soft, #eaf2ff);
 }
 
 .po-step-text {
-  color: var(--mes-text, #1f2329);
+  color: var(--mes-text, var(--mes-text));
   font-size: 12.5px;
   line-height: 19px;
 }
@@ -684,7 +684,7 @@ const summaryRows = computed(() =>
   gap: 6px;
   margin: 0;
   padding: 10px 0 0;
-  border-top: 1px dashed var(--mes-border, #e5e7eb);
+  border-top: 1px dashed var(--mes-border, var(--mes-border));
   list-style: none;
 }
 
@@ -708,7 +708,7 @@ const summaryRows = computed(() =>
 }
 
 .po-card.is-after .po-points li::before {
-  background: var(--mes-primary, #3370ff);
+  background: var(--mes-primary, var(--mes-primary));
 }
 
 /* 中间箭头列 */
@@ -725,7 +725,7 @@ const summaryRows = computed(() =>
   width: 1px;
   flex: 1;
   min-height: 18px;
-  background: var(--mes-border, #e5e7eb);
+  background: var(--mes-border, var(--mes-border));
 }
 
 .po-arrow-badge {
@@ -735,15 +735,15 @@ const summaryRows = computed(() =>
   flex: none;
   align-items: center;
   justify-content: center;
-  color: var(--mes-primary, #3370ff);
-  border: 1px solid var(--mes-primary-border, #d0dffb);
+  color: var(--mes-primary, var(--mes-primary));
+  border: 1px solid var(--mes-primary-border, var(--mes-primary-border));
   border-radius: 50%;
   background: var(--mes-primary-soft, #eaf2ff);
 }
 
 .po-arrow-text {
   flex: none;
-  color: var(--mes-primary, #3370ff);
+  color: var(--mes-primary, var(--mes-primary));
   font-size: 10.5px;
   white-space: nowrap;
 }
@@ -755,9 +755,9 @@ const summaryRows = computed(() =>
   gap: 1px;
   margin-top: 14px;
   overflow: hidden;
-  border: 1px solid var(--mes-border, #e5e7eb);
+  border: 1px solid var(--mes-border, var(--mes-border));
   border-radius: 8px;
-  background: var(--mes-border, #e5e7eb);
+  background: var(--mes-border, var(--mes-border));
 }
 
 .po-metric {
@@ -770,7 +770,7 @@ const summaryRows = computed(() =>
 }
 
 .po-metric-label {
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
   font-size: 11.5px;
 }
 
@@ -782,7 +782,7 @@ const summaryRows = computed(() =>
 }
 
 .po-metric-before {
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
   font-size: 12px;
   text-decoration: line-through;
   text-decoration-color: var(--mes-border-strong, #cbd6e2);
@@ -793,7 +793,7 @@ const summaryRows = computed(() =>
 }
 
 .po-metric-after {
-  color: var(--mes-primary, #3370ff);
+  color: var(--mes-primary, var(--mes-primary));
   font-size: 12.5px;
   font-weight: 600;
 }
@@ -801,7 +801,7 @@ const summaryRows = computed(() =>
 /* ---------- 汇总表 ---------- */
 .po-summary {
   padding: 16px 18px 18px;
-  border: 1px solid var(--mes-border, #e5e7eb);
+  border: 1px solid var(--mes-border, var(--mes-border));
   border-radius: 8px;
   background: var(--mes-surface, #fff);
 }

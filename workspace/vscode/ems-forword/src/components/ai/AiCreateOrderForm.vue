@@ -188,7 +188,7 @@ onMounted(() => {
 .create-order-form {
   margin-top: 8px;
   padding: 10px 12px;
-  border: 1px solid var(--mes-border, #e5e7eb);
+  border: 1px solid var(--mes-border, var(--mes-border));
   border-radius: 8px;
   background: var(--mes-surface, #fff);
 }
@@ -197,13 +197,13 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 6px;
-  color: var(--mes-text-primary, #1f2329);
+  color: var(--mes-text-primary, var(--mes-text));
   font-size: 12.5px;
   font-weight: 600;
 }
 
 .form-hint {
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
   font-size: 11px;
   font-weight: 400;
 }
@@ -238,7 +238,7 @@ onMounted(() => {
 
 .form-note {
   margin: 6px 0 0;
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
   font-size: 11px;
 }
 
@@ -275,7 +275,7 @@ onMounted(() => {
 }
 
 .form-safe {
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
   font-size: 11px;
 }
 </style>

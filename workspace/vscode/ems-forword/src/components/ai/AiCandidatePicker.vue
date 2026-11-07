@@ -130,14 +130,14 @@ function blockingText(candidate) {
   align-items: center;
   justify-content: space-between;
   padding: 12px 14px;
-  border-bottom: 1px solid var(--mes-border, #e5e7eb);
+  border-bottom: 1px solid var(--mes-border, var(--mes-border));
 }
 
 .candidate-title {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  color: var(--mes-text-primary, #1f2329);
+  color: var(--mes-text-primary, var(--mes-text));
   font-size: 13px;
   font-weight: 600;
 }
@@ -148,7 +148,7 @@ function blockingText(candidate) {
   justify-content: center;
   width: 22px;
   height: 22px;
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
   border: 0;
   border-radius: 4px;
   background: transparent;
@@ -198,7 +198,7 @@ function blockingText(candidate) {
   color: inherit;
   font-size: 12px;
   text-align: left;
-  border: 1px solid var(--mes-border, #e5e7eb);
+  border: 1px solid var(--mes-border, var(--mes-border));
   border-radius: 6px;
   background: var(--mes-surface, #fff);
   cursor: pointer;
@@ -217,7 +217,7 @@ function blockingText(candidate) {
 }
 
 .candidate-no {
-  color: var(--mes-text-primary, #1f2329);
+  color: var(--mes-text-primary, var(--mes-text));
   font-weight: 600;
   white-space: nowrap;
 }
@@ -230,7 +230,7 @@ function blockingText(candidate) {
 }
 
 .candidate-status {
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
   white-space: nowrap;
 }
 
@@ -245,7 +245,7 @@ function blockingText(candidate) {
 }
 
 .candidate-loading {
-  color: var(--mes-text-muted, #8f959e);
+  color: var(--mes-text-muted, var(--mes-text-muted));
   grid-column: 1 / -1;
 }
 </style>

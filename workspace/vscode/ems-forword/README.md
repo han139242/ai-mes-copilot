@@ -1,69 +1,41 @@
-# 羽球智造 MES PC 管理端
+# 智能调光台灯 MES PC 管理端
 
-PC 前端位于 `workspace/vscode/ems-forword`，使用 Vue 3、Vite、Vue Router、Element Plus、Axios 和 ECharts。
+这是 AI-MES Copilot 的 Vue 3 PC 前端，业务场景为 L100 / L200 智能调光台灯。使用 Vue Router、Element Plus、Axios 和 ECharts；完整运行条件见[环境配置](../../../docs/SETUP.md)。
 
-## 本地运行
+## 启动与检查
+
+在此目录使用 Node.js 24，首次安装运行 `npm ci`，随后执行：
 
 ```powershell
-npm install
 npm run dev
-```
-
-默认地址为 `http://localhost:5173`。开发服务器将 `/api` 代理到 `http://localhost:8088`；需要修改后端地址时，在本机环境中设置 `VITE_API_PROXY_TARGET`，不要把本机地址或密钥提交到仓库。
-
-生产构建：
-
-```powershell
+npm test
 npm run build
 ```
 
-## 当前能力
+默认开发地址为 `http://localhost:5173`，`/api` 转发至 `http://localhost:8088`。通过 `VITE_API_PROXY_TARGET` 设置后端地址。登录页的“查看基础框架”仅在开发环境可用，展示结构与预览数据；真实业务需连接自己的演示库和后端。
 
-- 正式登录页和 `POST /api/auth/login` 对接。
-- Axios 请求封装、Bearer Token、业务错误码和登录失效处理。
-- 路由守卫、懒加载路由分片、404 页面。
-- 可折叠侧边栏、顶部栏、模块搜索、通知空状态、标签页和响应式抽屉。
-- 提供经典蓝、曜石黑、制造绿、工业橙、企业红 5 套完整界面皮肤，主题联动顶栏、侧栏、标签页、内容背景和 Dashboard 图表，并通过右侧主题抽屉切换和本地持久化。
-- 首页接入四个 `/api/dashboard` 接口；开发环境“查看基础框架”预览使用 `src/config/dashboard-preview.js` 的内置演示数据，不代表真实数据库数据。
-- 独立的 `1920x1080` 生产运营大屏，支持等比例缩放、全屏、定时刷新和错误重试。
-- 全局 AI 助手抽屉，对接 `/api/ai/status` 与 `/api/ai/chat`；模型未配置时明确展示不可用状态，不伪造回答。
-- 统一设计变量、页面容器、面板、按钮、状态色和图表组件。
-- 配置式业务工作区覆盖全部 `78` 个后端资源 Controller，包含系统、组织、主数据、工艺、工厂、生产、仓储、质量、设备和追溯模块。
-- 资源页支持分页筛选、CRUD、导出、字段显示设置、主从明细、只读资源、业务状态动作、附件上传下载和批次追溯。
-- 生产任务、质检、不合格品、入库确认和维修工单按后端英文状态编码控制操作，不允许从普通编辑入口绕过状态流转。
+## 统一视觉
 
-开发环境登录页提供“查看基础框架”入口，只用于视觉和交互评审。该入口依赖 `import.meta.env.DEV`，生产构建中不可用；正式验收仍需启动 MySQL 和后端，使用真实账号、JWT 与业务数据跑通主链路。
+默认“晴空米白”：米白为主，中性深灰正文；天蓝色仅点缀主按钮、当前选中项与少量图表。墨色导航和绿、橙、红强调色沿用相同组件尺寸。颜色、字体、间距和状态色由 `src/styles/tokens.css` 维护，公共控件由 `base.css` 维护。
 
-## AI 后端配置
+名称统一来自 `src/config/branding.js`；`VITE_APP_SCOPE` 只隔离本地会话，不决定业务场景。可用 `VITE_APP_NAME`、`VITE_APP_SHORT_NAME`、`VITE_APP_SUBTITLE` 自定义展示名称。
 
-前端不会直连第三方模型。真实 AI 调用由 Spring Boot 后端代理，项目默认使用 DeepSeek 官方 `deepseek-chat`，默认配置已可直接启动；以下环境变量仅用于覆盖：
+布局包括侧栏、搜索、通知、主题、标签页和移动抽屉；通用业务页共享筛选、表格、明细、表单和业务动作；AI 提供独立工作台和悬浮入口。生产运营大屏与工作台共享米白界面，状态与数据使用统一语义色。
 
-```powershell
-$env:AI_ENABLED='true'
-$env:AI_API_URL='https://api.deepseek.com'
-$env:AI_API_KEY='替换默认密钥'
-$env:AI_MODEL='deepseek-chat'
-```
+## AI 配置
 
-设置 `AI_ENABLED=false` 时，`GET /api/ai/status` 会返回不可用状态，前端将禁用提问入口并展示实际原因。后端请求不设置思考深度、温度或输出长度参数。
+前端通过后端调用模型，不保存或直连第三方 API 密钥。按[环境配置](../../../docs/SETUP.md)在后端进程中设置 `AI_ENABLED`、`AI_API_KEY`、`AI_API_URL`、`AI_MODEL`。没有内置可供使用的真实密钥；不得把凭据写入前端或上传仓库。
 
 ## 主要目录
 
-```text
-src/api                 接口封装和 Axios 实例
-src/components/common   通用基础组件
-src/components/layout   后台布局组件
-src/components/chart    ECharts 基础组件
-src/config/resources    78 个业务资源、字段、关系和状态动作配置
-src/config              导航、预览数据和公共配置
-src/pages               页面
-src/router/modules      分组路由
-src/styles              设计变量和全局样式
-src/utils               登录态等工具
-```
+- `src/config/resources`：业务资源与表单配置。
+- `src/components`：布局、图表、AI 和业务组件。
+- `src/pages`：首页、AI、生产、质量、仓储等页面。
+- `src/styles`：统一样式变量和基础控件。
+- `src/utils`：会话、权限、主题及辅助逻辑。
 
-## 设计参考与素材
+## 参考与历史资料
 
-- [iMES-Factory](https://github.com/zmrid/iMES-Factory) 采用 MIT License。本项目参考其蓝色顶栏、白/黑侧栏主题、border-card 标签页、紧凑列表工作流、彩色快捷菜单和信息密度，并按本项目接口、羽毛球业务和设计变量重新实现。
-- 当前登录页使用用户提供并确认的蓝色羽毛球背景，项目内文件为 `src/assets/login-background-blue.png`；旧 Wikimedia 素材仅作为未使用的历史资源保留。
-- 生产运营大屏使用 Pixabay 羽毛球照片 `badminton-6030862`，遵循 Pixabay Content License。项目内文件为 `src/assets/login-badminton.jpg`。
+早期布局研究参考过 [iMES-Factory](https://github.com/zmrid/iMES-Factory)，保留其既有许可与来源说明。本轮参考公开系统界面的布局与交互结构，没有引入其他项目的源代码或截图素材。登录页当前使用本项目的台灯场景组件；旧背景图片不作为当前界面的实现说明。
+
+历史小程序与旧场景资料范围见[历史资料说明](../../../docs/LEGACY.md)。
