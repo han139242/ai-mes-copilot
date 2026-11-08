@@ -24,6 +24,8 @@ const EDGE = 12;
 
 // 工作台页面自带完整对话区，右下角的圆形入口会和输入区提示文字重叠，所以这里隐藏。
 const triggerHidden = computed(() => route.path.startsWith('/ai/workbench'));
+// 私有问答页已有业务助手入口；不让悬浮圆钮遮住小屏输入区。Ctrl+K 仍可打开浮窗。
+const privateKnowledgePage = computed(() => route.path === '/ai/knowledge');
 
 // 浮窗是否真的渲染：工作台「工作台形态」下不渲染，否则会浮在输入区上面挡住发送按钮。
 // dockOpen 会被持久化，上次停在悬浮形态再回来必须靠 mode 判断兜住。
@@ -179,9 +181,12 @@ watch(
 
 // Ctrl/Cmd + K 全局唤起，浏览器占用组合键时不再拦截默认行为。
 function onGlobalKeydown(event) {
+  if (event.defaultPrevented || event.repeat || event.shiftKey || event.altKey) return;
   if (!(event.ctrlKey || event.metaKey) || String(event.key).toLowerCase() !== 'k') {
     return;
   }
+  if ([...document.querySelectorAll('[role="dialog"]:not(.ai-dock)')].some((dialog) => dialog.getClientRects().length))
+    return;
   event.preventDefault();
   if (dockOpen.value) {
     closeDock();
@@ -209,10 +214,11 @@ onBeforeUnmount(() => {
     <!-- 收起状态：右下角圆形入口，仅显示 bot 图标和未读提示点。
          工作台页面已经内置对话区，这里不再显示入口，避免压住底部提示文字。 -->
     <button
-      v-if="!panelVisible && !triggerHidden"
+      v-if="!panelVisible && !triggerHidden && !privateKnowledgePage"
       class="dock-trigger"
       type="button"
       aria-label="打开 AI 助手（Ctrl+K）"
+      aria-keyshortcuts="Control+K Meta+K"
       title="打开 AI 助手（Ctrl+K）"
       @click="openDock"
     >

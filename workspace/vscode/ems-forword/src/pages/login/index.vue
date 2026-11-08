@@ -1,10 +1,11 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import AppIcon from '@/components/common/AppIcon.vue';
 import LampScene from './LampScene.vue';
-import { appName } from '@/config/branding';
+import FaceCaptureDialog from '@/components/auth/FaceCaptureDialog.vue';
+import { appName, appLogo } from '@/config/branding';
 import { getCurrentUserInfo, login } from '@/api/auth';
 import { firstAccessiblePath, isNavigationPathAccessible } from '@/config/navigation';
 import { setCurrentUser, setToken, startFrameworkPreview } from '@/utils/auth';
@@ -14,6 +15,7 @@ const router = useRouter();
 // ref 保存单个响应式值；reactive 适合把整个登录表单作为一个响应式对象管理。
 const formRef = ref();
 const loading = ref(false);
+const faceOpen = ref(false);
 const showPreview = import.meta.env.DEV;
 const year = new Date().getFullYear();
 // 大写锁定提示：密码框输入时容易踩坑，检测到就给出可见提示。
@@ -99,6 +101,27 @@ async function handleLogin() {
   }
 }
 
+async function openFaceLogin() {
+  faceOpen.value = true;
+  await nextTick();
+  formRef.value?.clearValidate();
+}
+
+async function faceLoggedIn(result) {
+  loading.value = true;
+  try {
+    setToken(result.token, form.remember);
+    const userInfo = await getCurrentUserInfo();
+    setCurrentUser(userInfo.data || result.data);
+    ElMessage.success('人脸验证通过');
+    await router.replace(resolveTarget());
+  } catch {
+    // The shared response handler presents account/session failures, as for password login.
+  } finally {
+    loading.value = false;
+  }
+}
+
 // 开发环境下建立不访问后端的框架预览会话并进入首页。
 async function enterPreview() {
   // 仅开发环境提供框架预览，不请求真实登录接口。
@@ -121,21 +144,12 @@ onBeforeUnmount(() => {
 <template>
   <main class="login-page">
     <div class="ambient-art" aria-hidden="true">
-      <span class="ambient-ribbon ribbon-one" /><span class="ambient-ribbon ribbon-two" /><span class="ambient-grid" />
+      <span class="ambient-ribbon ribbon-one" /><span class="ambient-ribbon ribbon-two" />
     </div>
     <header class="page-header">
       <div class="brand">
         <span class="brand-icon" aria-hidden="true">
-          <svg viewBox="0 0 32 32" fill="none">
-            <path
-              d="m10 6 12 4-3 7-12-4 3-7Zm9 10 5 8H12m6-2v4m-9 0h17"
-              stroke="currentColor"
-              stroke-width="1.6"
-              stroke-linecap="round"
-              stroke-linejoin="round"
-            />
-            <path d="m8 17-2 3m7-2-1 4" stroke="currentColor" stroke-opacity=".55" stroke-linecap="round" />
-          </svg>
+          <img :src="appLogo" alt="" width="32" height="32" />
         </span>
         <div class="brand-name">
           <strong>{{ appName }}</strong
@@ -148,7 +162,6 @@ onBeforeUnmount(() => {
     <div class="login-main">
       <section class="product-intro" aria-label="智能调光台灯制造执行系统">
         <div class="intro-copy">
-          <p class="intro-eyebrow"><span /> LIGHTING THE NEXT</p>
           <h1>让每一束光，<br /><span>有序而生。</span></h1>
           <p class="intro-subtitle">智能调光台灯制造执行系统</p>
         </div>
@@ -173,7 +186,6 @@ onBeforeUnmount(() => {
 
       <section class="login-card" aria-label="系统登录">
         <header class="login-heading">
-          <div class="heading-topline"><span class="heading-accent" /><span>WORKSPACE ACCESS</span></div>
           <h2>欢迎登录</h2>
           <p>欢迎使用智能调光台灯 MES</p>
         </header>
@@ -212,6 +224,13 @@ onBeforeUnmount(() => {
           </el-button>
         </el-form>
 
+        <div class="face-login-entry">
+          <button type="button" :disabled="loading" @click="openFaceLogin">
+            <AppIcon name="scan" :size="17" />刷脸登录 · 无需账号
+          </button>
+          <span>已录入即可直接刷脸；首次请用密码登录，在“账号安全”中录入</span>
+        </div>
+
         <div v-if="showPreview" class="development-tools">
           <details class="demo-accounts">
             <summary>演示账号<AppIcon name="chevron" :size="13" /></summary>
@@ -246,10 +265,43 @@ onBeforeUnmount(() => {
       <span>© {{ year }} {{ appName }}</span
       ><span>仅限授权人员访问</span>
     </footer>
+    <FaceCaptureDialog v-model="faceOpen" :username="form.username.trim()" @verified="faceLoggedIn" />
   </main>
 </template>
 
 <style scoped>
+.face-login-entry {
+  display: grid;
+  gap: 9px;
+  margin-top: 20px;
+}
+.face-login-entry button {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid var(--mes-border-strong);
+  border-radius: 7px;
+  background: var(--mes-surface);
+  color: var(--mes-primary);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+}
+.face-login-entry button:hover {
+  background: var(--mes-primary-soft);
+}
+.face-login-entry button:focus-visible {
+  outline: 2px solid var(--mes-primary);
+  outline-offset: 3px;
+}
+.face-login-entry span {
+  color: var(--mes-text-secondary);
+  font-size: 11px;
+  line-height: 1.7;
+  text-align: center;
+}
 /* 登录页专属视觉：深海蓝、青绿与暖光；不影响任何公共组件或其他页面。 */
 .login-page {
   --el-color-primary: var(--mes-primary);
@@ -318,15 +370,6 @@ onBeforeUnmount(() => {
   bottom: -530px;
   border-color: rgb(157 211 202 / 14%);
 }
-.ambient-grid {
-  position: absolute;
-  inset: 15% 44% 0 0;
-  background-image:
-    linear-gradient(rgb(160 218 210 / 4%) 1px, transparent 1px),
-    linear-gradient(90deg, rgb(160 218 210 / 4%) 1px, transparent 1px);
-  background-size: 52px 52px;
-  mask-image: radial-gradient(ellipse at 70% 70%, #000, transparent 75%);
-}
 .page-header,
 .page-footer {
   position: relative;
@@ -355,7 +398,7 @@ onBeforeUnmount(() => {
   color: var(--mes-primary);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 10%);
 }
-.brand-icon svg {
+.brand-icon img {
   width: 30px;
   height: 30px;
 }
@@ -405,21 +448,6 @@ onBeforeUnmount(() => {
 .intro-copy {
   position: relative;
   z-index: 1;
-}
-.intro-eyebrow {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin: 0 0 18px;
-  color: var(--mes-text-secondary);
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 3.5px;
-}
-.intro-eyebrow > span {
-  width: 23px;
-  height: 1px;
-  background: #80c2b7;
 }
 .intro-copy h1 {
   margin: 0;
@@ -554,22 +582,6 @@ onBeforeUnmount(() => {
 }
 .login-heading {
   margin-bottom: 29px;
-}
-.heading-topline {
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-bottom: 20px;
-  color: var(--mes-text-muted);
-  font-size: 8px;
-  letter-spacing: 1.8px;
-}
-.heading-accent {
-  display: block;
-  width: 21px;
-  height: 3px;
-  border-radius: 3px;
-  background: var(--mes-primary);
 }
 .login-heading h2 {
   margin: 0;
@@ -850,9 +862,6 @@ onBeforeUnmount(() => {
   .intro-copy h1 {
     font-size: 45px;
   }
-  .intro-eyebrow {
-    margin-bottom: 13px;
-  }
   .intro-subtitle {
     margin-top: 13px;
   }
@@ -870,9 +879,6 @@ onBeforeUnmount(() => {
   }
   .login-heading {
     margin-bottom: 25px;
-  }
-  .heading-topline {
-    margin-bottom: 15px;
   }
   .access-note {
     margin-top: 18px;
@@ -941,9 +947,6 @@ onBeforeUnmount(() => {
   .ambient-art::before {
     inset: 0;
     background: radial-gradient(ellipse at 80% 5%, rgb(111 185 166 / 15%), transparent 48%);
-  }
-  .ambient-grid {
-    inset: 0 0 35%;
   }
   .ribbon-two {
     left: 55%;

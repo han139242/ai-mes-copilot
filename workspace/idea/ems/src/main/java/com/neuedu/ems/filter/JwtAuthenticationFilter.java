@@ -47,6 +47,12 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     // 放行的路径（无需鉴权的接口，如登录、注册、静态资源）
     private static final String[] EXCLUDE_PATHS = {
             "/api/auth/login",
+            "/api/auth/face/challenge",
+            "/api/auth/face/login",
+            "/api/auth/face/frame",
+            "/api/auth/face/identify-challenge",
+            "/api/auth/face/identify-frame",
+            "/api/auth/face/identify-login",
             "/register",
             "/swagger-ui/**",
             "/v3/api-docs/**",

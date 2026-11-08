@@ -141,7 +141,7 @@ function openEntry(entry) {
   margin-bottom: 14px;
   padding: 0 20px;
   border: 1px solid var(--mes-border);
-  border-left: 3px solid var(--mes-primary);
+  border-left: 1px solid var(--mes-primary);
   border-radius: var(--mes-radius);
   background: #fff;
 }

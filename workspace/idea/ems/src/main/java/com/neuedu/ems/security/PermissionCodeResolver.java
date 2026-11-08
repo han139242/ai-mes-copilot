@@ -16,7 +16,9 @@ import java.util.regex.Pattern;
 public class PermissionCodeResolver {
 
     private static final Set<String> PERMISSION_EXEMPT_PATHS = Set.of(
-            "/api/auth/info", "/api/auth/logout", "/api/hello");
+            "/api/auth/info", "/api/auth/logout", "/api/hello",
+            "/api/auth/face/me", "/api/auth/face/challenge-enroll", "/api/auth/face/enroll", "/api/auth/face/reset",
+            "/api/auth/face/frame-enroll");
 
     private static final Set<String> DOMAINS = Set.of(
             "sys", "org", "mdm", "process", "factory", "mfg", "wms", "qms", "eam", "trace");
@@ -28,6 +30,7 @@ public class PermissionCodeResolver {
     private static final Pattern API_PATTERN = Pattern.compile("^/api/([a-z]+)/([a-z0-9-]+)(?:/.*)?$");
 
     private static final List<SpecialRule> SPECIAL_RULES = List.of(
+            rule("DELETE", "/api/auth/face/admin/[0-9]+", "sys:user:reset-password"),
             rule("POST", "/api/mdm/product-parameter/[^/]+/(confirm|reopen)", "mdm:product-parameter:confirm"),
             rule("POST", "/api/qms/inspection-standard/[^/]+/(confirm|reopen)", "qms:inspection-standard:confirm"),
             rule("GET", "/api/mdm/bom/[^/]+/explosion", "mdm:bom:expand"),

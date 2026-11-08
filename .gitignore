@@ -53,3 +53,6 @@ Thumbs.db
 *.clixml
 *.pem
 *.key
+
+# Local UI acceptance captures and review evidence
+.impeccable/review/

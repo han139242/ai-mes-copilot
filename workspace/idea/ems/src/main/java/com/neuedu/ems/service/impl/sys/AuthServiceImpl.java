@@ -63,6 +63,48 @@ public class AuthServiceImpl implements AuthService {
         return authenticate(user, password);
     }
 
+    @Override
+    public Long faceCandidate(String username) {
+        SysUser user = StringUtils.hasText(username) ? sysUserMapper.getByUserName(username) : null;
+        if (user == null || (user.getDeletedFlag() != null && user.getDeletedFlag() != 0)) return null;
+        validateAccountStatus(user);
+        return user.getUserId();
+    }
+
+    @Override
+    public SysUser completeFaceLogin(Long userId, boolean verified) {
+        SysUser user = userId == null ? null : sysUserMapper.selectById(userId);
+        if (user == null || (user.getDeletedFlag() != null && user.getDeletedFlag() != 0)) return null;
+        validateAccountStatus(user);
+        if (!verified) { handleFailedAttempt(user); return null; }
+        return completeLogin(user);
+    }
+
+    @Override
+    public List<Long> faceIdentificationCandidates() {
+        List<Long> ids = sysUserMapper.faceIdentificationCandidates();
+        if (ids.size() > 100) throw new org.springframework.web.server.ResponseStatusException(
+                org.springframework.http.HttpStatus.SERVICE_UNAVAILABLE, "账号数量超出本机识别范围，请使用密码登录");
+        return ids;
+    }
+
+    @Override
+    public boolean reauthenticate(Long userId, String password) {
+        SysUser user = userId == null ? null : sysUserMapper.selectById(userId);
+        if (user == null || (user.getDeletedFlag() != null && user.getDeletedFlag() != 0)) return false;
+        validateAccountStatus(user);
+        if (!StringUtils.hasText(password) || !passwordHasher.matches(password, user.getPasswordHash())) {
+            handleFailedAttempt(user); return false;
+        }
+        return true;
+    }
+
+    @Override
+    public boolean userExists(Long userId) {
+        SysUser user = userId == null ? null : sysUserMapper.selectById(userId);
+        return user != null && (user.getDeletedFlag() == null || user.getDeletedFlag() == 0);
+    }
+
     /** 校验密码并完成登录；密码不符时按失败策略处理。 */
     private SysUser authenticate(SysUser user, String password) {
         validateAccountStatus(user);

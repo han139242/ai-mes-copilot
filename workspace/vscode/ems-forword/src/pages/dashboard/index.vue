@@ -24,6 +24,8 @@ const summary = ref({});
 const trend = ref([]);
 const quality = ref({});
 const equipment = ref({});
+const hasData = ref(false);
+let loadSequence = 0;
 const currentUser = getCurrentUser();
 // 根据权限控制首页AI助手入口是否显示。
 const canUseAi = computed(() => hasPermission('ai:assistant:use'));
@@ -57,6 +59,17 @@ const greeting = computed(() => {
 });
 // 当前主题变化时同步取得该主题的图表配色。
 const chartPalette = computed(() => activeTheme.value.chart);
+const chartSurface = computed(() => {
+  void activeTheme.value;
+  const style = getComputedStyle(document.documentElement);
+  return {
+    text: style.getPropertyValue('--mes-text').trim(),
+    muted: style.getPropertyValue('--mes-text-secondary').trim(),
+    surface: style.getPropertyValue('--mes-surface').trim(),
+    border: style.getPropertyValue('--mes-border').trim(),
+    danger: style.getPropertyValue('--mes-danger').trim(),
+  };
+});
 
 // 指标条：一行六个统计值，标签在上、数值在下，用分隔线而不是卡片分隔。
 const numberStats = computed(() => [
@@ -136,36 +149,36 @@ const attentionItems = computed(() => [
 // 以下三个computed生成ECharts option，数据或主题变化时MesChart会自动重新绘制。
 const trendOption = computed(() => ({
   animationDuration: 400,
-  color: [chartPalette.value.data, '#c44842'],
+  color: [chartPalette.value.data, chartSurface.value.danger],
   tooltip: {
     trigger: 'axis',
-    backgroundColor: '#171d25',
+    backgroundColor: chartSurface.value.surface,
     borderWidth: 0,
-    textStyle: { color: '#fff', fontSize: 12 },
+    textStyle: { color: chartSurface.value.text, fontSize: 12 },
   },
   legend: {
     top: 0,
     right: 0,
     itemWidth: 12,
     itemHeight: 3,
-    textStyle: { color: '#8f959e', fontSize: 11 },
+    textStyle: { color: chartSurface.value.muted, fontSize: 12 },
   },
   grid: { top: 34, right: 8, bottom: 20, left: 40 },
   xAxis: {
     type: 'category',
     boundaryGap: false,
     data: trend.value.map((item) => dayjs(item.date).format('MM/DD')),
-    axisLine: { lineStyle: { color: '#e5e7eb' } },
+    axisLine: { lineStyle: { color: chartSurface.value.border } },
     axisTick: { show: false },
-    axisLabel: { color: '#8f959e', fontSize: 11 },
+    axisLabel: { color: chartSurface.value.muted, fontSize: 12 },
   },
   yAxis: {
     type: 'value',
     splitNumber: 3,
     axisLine: { show: false },
     axisTick: { show: false },
-    axisLabel: { color: '#8f959e', fontSize: 11 },
-    splitLine: { lineStyle: { color: '#f0f1f3' } },
+    axisLabel: { color: chartSurface.value.muted, fontSize: 12 },
+    splitLine: { lineStyle: { color: chartSurface.value.border } },
   },
   series: [
     {
@@ -197,19 +210,19 @@ const qualityOption = computed(() => {
   const hasData = qualified + unqualified > 0;
   return {
     animationDuration: 400,
-    color: hasData ? [chartPalette.value.primary, '#c44842'] : ['#e5e7eb'],
+    color: hasData ? [chartPalette.value.primary, chartSurface.value.danger] : ['#e5e7eb'],
     tooltip: {
       trigger: 'item',
-      backgroundColor: '#171d25',
+      backgroundColor: chartSurface.value.surface,
       borderWidth: 0,
-      textStyle: { color: '#fff', fontSize: 12 },
+      textStyle: { color: chartSurface.value.text, fontSize: 12 },
     },
     legend: {
       bottom: 0,
       left: 'center',
       itemWidth: 7,
       itemHeight: 7,
-      textStyle: { color: '#8f959e', fontSize: 11 },
+      textStyle: { color: chartSurface.value.muted, fontSize: 12 },
     },
     series: [
       {
@@ -244,15 +257,15 @@ const equipmentOption = computed(() => ({
   tooltip: {
     trigger: 'axis',
     axisPointer: { type: 'shadow' },
-    backgroundColor: '#171d25',
+    backgroundColor: chartSurface.value.surface,
     borderWidth: 0,
-    textStyle: { color: '#fff', fontSize: 12 },
+    textStyle: { color: chartSurface.value.text, fontSize: 12 },
   },
   grid: { top: 8, right: 16, bottom: 14, left: 44 },
   xAxis: {
     type: 'value',
-    axisLabel: { color: '#8f959e', fontSize: 11 },
-    splitLine: { lineStyle: { color: '#f0f1f3' } },
+    axisLabel: { color: chartSurface.value.muted, fontSize: 12 },
+    splitLine: { lineStyle: { color: chartSurface.value.border } },
   },
   yAxis: {
     type: 'category',
@@ -271,7 +284,7 @@ const equipmentOption = computed(() => ({
         { value: Number(equipment.value.idle || 0), itemStyle: { color: '#9db8e0' } },
         { value: Number(equipment.value.stopped || 0), itemStyle: { color: '#a5abb4' } },
         { value: Number(equipment.value.maintenance || 0), itemStyle: { color: '#d98a00' } },
-        { value: Number(equipment.value.fault || 0), itemStyle: { color: '#c44842' } },
+        { value: Number(equipment.value.fault || 0), itemStyle: { color: chartSurface.value.danger } },
         { value: Number(equipment.value.repaired || 0), itemStyle: { color: '#7fa88f' } },
       ],
     },
@@ -302,6 +315,7 @@ const equipmentTotal = computed(
 
 // 统一使用中文千分位格式展示数量，避免模板中重复格式化逻辑。
 function formatNumber(value) {
+  if (value === null || value === undefined) return '--';
   return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 2 }).format(Number(value || 0));
 }
 
@@ -317,12 +331,14 @@ function queryParams() {
 // 预览模式读取本地数据；真实模式并行请求四个统计接口并更新图表。
 // silent 用于定时自动刷新：不显示整页 loading，避免页面反复闪烁。
 async function loadDashboard(silent = false) {
+  const sequence = ++loadSequence;
   // 预览模式直接赋值；真实模式并行请求四块统计数据，全部完成后响应式更新界面。
   if (previewMode) {
     summary.value = previewPayload.summary;
     trend.value = previewPayload.trend;
     quality.value = previewPayload.quality;
     equipment.value = previewPayload.equipment;
+    hasData.value = true;
     return;
   }
 
@@ -338,18 +354,19 @@ async function loadDashboard(silent = false) {
       getQualityStatistics(params),
       getEquipmentStatus(),
     ]);
+    if (sequence !== loadSequence) return;
     summary.value = summaryResult.data || {};
     trend.value = trendResult.data || [];
     quality.value = qualityResult.data || {};
     equipment.value = equipmentResult.data || {};
+    hasData.value = true;
     lastRefreshAt.value = dayjs().format('HH:mm:ss');
   } catch (error) {
     // 自动刷新失败时保留上一次成功的数据，只记错误，不清空看板。
-    if (!silent) {
-      loadError.value = error.displayMessage || error.message || '看板数据加载失败';
-    }
+    if (sequence !== loadSequence) return;
+    loadError.value = error.displayMessage || error.message || '看板数据加载失败';
   } finally {
-    if (!silent) {
+    if (sequence === loadSequence) {
       loading.value = false;
     }
   }
@@ -363,12 +380,14 @@ let refreshTimer = null;
 onMounted(() => {
   loadDashboard();
   refreshTimer = window.setInterval(() => {
+    if (document.hidden) return;
     loadDashboard(true);
     refreshTodos(true);
   }, 60000);
 });
 
 onBeforeUnmount(() => {
+  loadSequence += 1;
   if (refreshTimer) {
     window.clearInterval(refreshTimer);
     refreshTimer = null;
@@ -446,8 +465,10 @@ onBeforeUnmount(() => {
         <AppIcon :name="item.icon" :size="14" />
         {{ item.label }}
       </button>
-      <span class="refresh-hint" :class="{ 'is-current': !previewMode && lastRefreshAt }">
-        <i /><template v-if="previewMode">界面预览</template><template v-else-if="lastRefreshAt">数据更新于 {{ lastRefreshAt }}</template><template v-else>尚未同步数据</template>
+      <span class="refresh-hint" :class="{ 'is-current': !previewMode && lastRefreshAt && !loadError }">
+        <i /><template v-if="previewMode">界面预览</template
+        ><template v-else-if="lastRefreshAt">数据更新于 {{ lastRefreshAt }}</template
+        ><template v-else>尚未同步数据</template>
       </span>
     </section>
 
@@ -512,7 +533,7 @@ onBeforeUnmount(() => {
           <div>
             <h2 class="mes-panel-title">质量概况</h2>
           </div>
-          <span class="header-value">{{ quality.inspectionCount || 0 }} 单</span>
+          <span class="header-value">{{ formatNumber(quality.inspectionCount) }} 单</span>
         </div>
         <div class="chart-body"><MesChart :option="qualityOption" height="200px" /></div>
       </article>
@@ -522,7 +543,7 @@ onBeforeUnmount(() => {
           <div>
             <h2 class="mes-panel-title">设备状态</h2>
           </div>
-          <span class="header-value">{{ equipmentTotal }} 台</span>
+          <span class="header-value">{{ hasData ? equipmentTotal : '--' }} 台</span>
         </div>
         <div class="chart-body"><MesChart :option="equipmentOption" height="200px" /></div>
       </article>
@@ -738,7 +759,9 @@ onBeforeUnmount(() => {
   border-radius: 50%;
   background: var(--mes-text-muted);
 }
-.refresh-hint.is-current i { background: var(--mes-success); }
+.refresh-hint.is-current i {
+  background: var(--mes-success);
+}
 
 /* ---------- 主体：链路 + 关注 一行，三张图一行 ---------- */
 .board-grid {

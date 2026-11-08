@@ -27,6 +27,7 @@
         <url/>
     </scm>
     <properties>
+        <mes.build.directory>${project.basedir}/target</mes.build.directory>
         <java.version>21</java.version>
         <maven.compiler.source>21</maven.compiler.source>
         <maven.compiler.target>21</maven.compiler.target>
@@ -170,6 +171,7 @@
     </dependencies>
 
     <build>
+        <directory>${mes.build.directory}</directory>
         <plugins>
             <plugin>
                 <groupId>org.springframework.boot</groupId>

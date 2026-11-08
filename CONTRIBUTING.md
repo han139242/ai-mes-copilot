@@ -1,6 +1,6 @@
 # 参与贡献 / Contributing
 
-项目已完成课程交付，后续欢迎社区维护。可以从文档、独立环境运行验证、自动化检查或具体业务问题入手。
+项目第一轮课程交付已完成，欢迎社区维护。阶段 2 私有知识、图谱与认证扩展目前在本地开发分支验收，状态见 [阶段 2 验收](docs/STAGE2_ACCEPTANCE.md)。可以从文档、独立环境运行验证、自动化检查或具体业务问题入手。
 
 ## 反馈问题
 
@@ -24,6 +24,7 @@
 - 运行监管与推演工具：在根目录运行 `node --test scripts/local-runtime.test.mjs scripts/ai-decision-preflight.test.mjs`。
 - 后端：按运行说明初始化独立测试库，再在 `workspace/idea/ems` 运行 `./mvnw.cmd -B package`；Linux/macOS 使用 `./mvnw -B package`。
 - 文档：检查链接、命令和说明是否与当前源码一致。
+- 阶段2私有服务：按[服务README](services/private-assistant/README.md)准备独立环境。维护者已取消20次验证上限，调用记录保留；自动检查使用`-NoCloud`及模拟模型，不以取消上限为由主动产生收费请求。真人摄像头验收由本人执行。
 
 没有运行的检查请直接注明，不用旧结果代替本次验证。不通过删除、跳过测试或弱化断言掩盖问题。
 
@@ -55,5 +56,6 @@ The repository's local Git hooks require each commit to update `COLLABORATION.md
 - **Runtime/preflight tools:** run `node --test scripts/local-runtime.test.mjs scripts/ai-decision-preflight.test.mjs` from the repository root.
 - **Backend:** prepare an isolated test database, then run `.\mvnw.cmd -B package` in `workspace/idea/ems`; use `./mvnw -B package` on Linux/macOS.
 - **Documentation:** verify local links, commands, configuration names, and consistency with the source. Check both language versions when changing shared instructions.
+- **Stage 2 private service:** follow the [isolated setup (Chinese)](services/private-assistant/README.md). The owner removed the local 20-call validation cap; preserve the journal. Use offline/mocked requests for maintenance. Removing the cap does not authorize paid test traffic. Human camera acceptance requires the participant.
 
 State which checks were not run. Keep existing test assertions and report actual failures. Submit only content you have the right to publish, and retain third-party license notices.

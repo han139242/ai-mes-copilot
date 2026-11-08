@@ -181,7 +181,7 @@
   grid-template-columns: repeat(4, minmax(0, 1fr)) minmax(250px, 1.6fr);
   margin-bottom: 14px;
   border: 1px solid var(--mes-border);
-  border-left: 3px solid var(--mes-primary);
+  border-left: 1px solid var(--mes-primary);
   background: var(--mes-surface);
 }
 .workbench-summary > div {
@@ -1177,7 +1177,7 @@
   margin: 0;
   padding: 9px 12px;
   color: var(--mes-text);
-  border-left: 3px solid var(--mes-primary);
+  border-left: 1px solid var(--mes-primary);
   border-radius: 6px;
   background: var(--mes-primary-soft);
   font-size: 12px;

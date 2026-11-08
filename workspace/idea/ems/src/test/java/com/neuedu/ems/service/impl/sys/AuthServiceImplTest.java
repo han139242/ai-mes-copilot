@@ -43,6 +43,13 @@ class AuthServiceImplTest {
     @InjectMocks
     private AuthServiceImpl authService;
 
+    @Test void identificationRequiresTheFullActiveRosterAndRejectsOverflow() {
+        when(sysUserMapper.faceIdentificationCandidates()).thenReturn(List.of(1L,2L));
+        assertEquals(List.of(1L,2L),authService.faceIdentificationCandidates());
+        when(sysUserMapper.faceIdentificationCandidates()).thenReturn(java.util.stream.LongStream.rangeClosed(1,101).boxed().toList());
+        assertThrows(org.springframework.web.server.ResponseStatusException.class,authService::faceIdentificationCandidates);
+    }
+
     @Test
     void loginContinuesWhenRedisIsUnavailable() {
         SysUser user = userWithStatus("ENABLE");

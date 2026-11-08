@@ -1,0 +1,15 @@
+lightrag-hku==1.5.7
+fastapi==0.162.0
+uvicorn==0.54.0
+psycopg[binary]==3.3.8
+asyncpg==0.32.0
+pgvector==0.5.1
+fastembed==0.9.1
+opencv-python-headless==5.0.0.93
+pypdf==7.0.0
+python-docx==1.2.0
+openpyxl==3.1.5
+cryptography==50.0.2
+httpx==0.28.1
+pytest==9.2.0
+pytest-asyncio==1.4.1.post1

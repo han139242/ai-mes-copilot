@@ -1,7 +1,7 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref } from 'vue';
 import dayjs from 'dayjs';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppIcon from '@/components/common/AppIcon.vue';
 import AiResultBlocks from '@/components/ai/AiResultBlocks.vue';
@@ -55,6 +55,7 @@ import {
 // 会话状态全部来自 @/stores/aiConversation，工作台和浮窗只是同一份数据的两种渲染位置。
 const previewMode = isFrameworkPreview();
 const router = useRouter();
+const route = useRoute();
 const conversationScroll = ref();
 const composer = ref();
 const question = ref('');
@@ -76,6 +77,7 @@ const usage = ref(null);
 const copiedMessageId = ref('');
 // 小屏下侧栏改为抽屉，默认收起。
 const sidebarOpen = ref(false);
+const sidebarToggle = ref();
 let copiedTimer;
 let statusRetryTimer;
 let statusLoading = false;
@@ -217,7 +219,9 @@ const welcomePrompts = computed(() => {
 const catalog = ref([]);
 const catalogLoading = ref(false);
 const catalogError = ref(false);
-const actionGroups = computed(() => previewMode ? businessActionPreviewGroups() : businessActionGroups(catalog.value));
+const actionGroups = computed(() =>
+  previewMode ? businessActionPreviewGroups() : businessActionGroups(catalog.value),
+);
 const businessActionEntry = ref(null);
 const businessDialogOpen = computed({
   get: () => Boolean(businessActionEntry.value),
@@ -332,8 +336,9 @@ function needsReleaseForm(message) {
 
 // 上下文里的生产订单号：从最近的对话内容里取，用来给排产下拉做预选，
 // 这样刚建完订单接着说「排产」时就不用再挑一次。
-const recentOrderNo = computed(() => resolveOrderContext(activeMessages.value,
-  activeConversation.value?.workflowOrderNo || ''));
+const recentOrderNo = computed(() =>
+  resolveOrderContext(activeMessages.value, activeConversation.value?.workflowOrderNo || ''),
+);
 
 function onBusinessPreviewed(command) {
   businessActionEntry.value = null;
@@ -348,13 +353,20 @@ function askRecovery(step) {
 
 async function recheckCommand(command) {
   try {
-    const response = await previewStructuredCommand({ ...command.params, action: command.action,
-      targetNo: command.targetNo, conversationId: activeConversationId.value, source: 'WORKBENCH' });
+    const response = await previewStructuredCommand({
+      ...command.params,
+      action: command.action,
+      targetNo: command.targetNo,
+      conversationId: activeConversationId.value,
+      source: 'WORKBENCH',
+    });
     if (!response.data?.confirmationId) {
       throw new Error('没有生成有效预览，请重试。');
     }
     onActionPreview(response.data);
-  } catch (error) { onActionError(error?.displayMessage || error.message); }
+  } catch (error) {
+    onActionError(error?.displayMessage || error.message);
+  }
 }
 
 // 排产/下达表单拿到预览命令后与建单表单完全同一条路径。
@@ -785,7 +797,15 @@ function retryMessage(message) {
 
 // 小屏抽屉开关；大屏下侧栏常驻，该状态不影响布局。
 function toggleSidebar() {
-  sidebarOpen.value = !sidebarOpen.value;
+  if (sidebarOpen.value) closeSidebar();
+  else sidebarOpen.value = true;
+}
+function closeSidebar(event) {
+  if (!sidebarOpen.value) return;
+  event?.preventDefault();
+  event?.stopPropagation();
+  sidebarOpen.value = false;
+  nextTick(() => sidebarToggle.value?.focus());
 }
 
 // 形态切换：工作台内嵌 / 右下角悬浮窗，两边共用同一份 store 数据。
@@ -856,6 +876,10 @@ function scrollToLatest() {
 
 // 挂载时先用本地缓存渲染，再让后端历史接管；接口不可用则保持本机记录。
 onMounted(() => {
+  if (typeof route.query.prefill === 'string') {
+    question.value = route.query.prefill.slice(0, 1000);
+    nextTick(() => composer.value?.focus());
+  }
   persistConversations();
   loadStatus();
   loadUsage();
@@ -880,12 +904,14 @@ onBeforeUnmount(() => {
 
 <template>
   <!-- 左侧管理能力与会话，中间展示消息，底部输入区负责发送、停止和重试。 -->
-  <section class="ai-workbench">
+  <section class="ai-workbench" @keydown.esc="closeSidebar">
     <button
       class="sidebar-toggle"
+      ref="sidebarToggle"
       type="button"
       :aria-expanded="sidebarOpen ? 'true' : 'false'"
-      aria-label="打开会话列表"
+      :aria-label="sidebarOpen ? '收起快捷办理与会话' : '打开快捷办理与会话'"
+      aria-controls="ai-workbench-sidebar"
       @click="toggleSidebar"
     >
       <AppIcon name="menu" :size="16" />
@@ -893,7 +919,7 @@ onBeforeUnmount(() => {
 
     <div class="wb-frame" :class="{ 'is-sidebar-open': sidebarOpen }">
       <!-- 侧栏：品牌、新建对话、能力清单、按时间分组的会话记录、模型用量。 -->
-      <aside class="wb-sidebar">
+      <aside id="ai-workbench-sidebar" class="wb-sidebar">
         <div class="wb-brand">
           <span class="brand-mark"><AppIcon name="factory" :size="15" /></span>
           <div class="brand-text">
@@ -1021,7 +1047,6 @@ onBeforeUnmount(() => {
               </button>
             </div>
           </details>
-
         </div>
 
         <div class="wb-foot">
@@ -1047,6 +1072,9 @@ onBeforeUnmount(() => {
             <p>{{ activeCapability.dataScope }}</p>
           </div>
           <div class="head-side">
+            <RouterLink to="/ai/knowledge" class="ghost-button"
+              ><AppIcon name="database" :size="14" />我的知识</RouterLink
+            >
             <!-- 形态切换：工作台内嵌 / 右下角悬浮窗，两种形态共用同一份会话数据。 -->
             <div class="mode-switch" role="group" aria-label="AI 助手形态">
               <button
@@ -1106,7 +1134,9 @@ onBeforeUnmount(() => {
             class="ghost-button"
             type="button"
             @click="previewMode ? router.push({ path: '/login', query: { redirect: '/ai/workbench' } }) : loadStatus()"
-          >{{ previewMode ? '连接并登录' : '重新检查' }}</button>
+          >
+            {{ previewMode ? '连接并登录' : '重新检查' }}
+          </button>
         </div>
 
         <el-scrollbar v-if="!showDockNotice" ref="conversationScroll" class="chat-scroll">
@@ -1114,36 +1144,39 @@ onBeforeUnmount(() => {
             <section v-if="showWelcome" class="welcome">
               <div class="welcome-head">
                 <h2>用一句话查询或办理业务</h2>
+                <p>从你正在处理的事情开始。查询直接返回，涉及办理时先预览、再确认。</p>
               </div>
 
-              <!-- 能力卡片：每张卡挂两条推荐问句，点卡片只切上下文，点问句只填输入框。 -->
-              <div class="welcome-grid">
-                <article
+              <!-- 选择业务类型后显示当前说明与示例，示例只填入输入框。 -->
+              <div class="welcome-modes" role="group" aria-label="业务问题类型">
+                <button
                   v-for="capability in capabilities"
                   :key="capability.id"
-                  class="welcome-card"
-                  :class="{ active: activeCapability.id === capability.id }"
+                  type="button"
+                  :aria-pressed="activeCapability.id === capability.id"
+                  @click="selectCapability(capability.id)"
                 >
-                  <button class="welcome-card-head" type="button" :aria-pressed="activeCapability.id === capability.id" @click="selectCapability(capability.id)">
-                    <span class="welcome-card-icon"><AppIcon :name="capability.icon" :size="15" /></span>
-                    <span class="welcome-card-text">
-                      <strong>{{ capability.label }}</strong>
-                      <span>{{ capability.description }}</span>
-                    </span>
-                  </button>
-                  <div class="welcome-card-prompts">
-                    <button
-                      v-for="prompt in capability.quickPrompts.slice(0, 2)"
-                      :key="prompt"
-                      type="button"
-                      @click="selectQuickPrompt(prompt)"
-                    >
-                      <AppIcon name="arrow" :size="11" />
-                      <span>{{ prompt }}</span>
-                    </button>
-                  </div>
-                </article>
+                  <AppIcon :name="capability.icon" :size="16" />{{ capability.label }}
+                </button>
               </div>
+              <section class="welcome-focus" :aria-label="activeCapability.label">
+                <div class="welcome-focus-heading">
+                  <AppIcon :name="activeCapability.icon" :size="22" />
+                  <h3>{{ activeCapability.label }}</h3>
+                </div>
+                <p>{{ activeCapability.description }}</p>
+                <div class="welcome-focus-prompts">
+                  <button
+                    v-for="prompt in activeCapability.quickPrompts.slice(0, 3)"
+                    :key="prompt"
+                    type="button"
+                    @click="selectQuickPrompt(prompt)"
+                  >
+                    <AppIcon name="arrow" :size="11" />
+                    <span>{{ prompt }}</span>
+                  </button>
+                </div>
+              </section>
 
               <details class="welcome-examples">
                 <summary class="welcome-examples-label">更多提问示例</summary>
@@ -1158,7 +1191,6 @@ onBeforeUnmount(() => {
                   </button>
                 </div>
               </details>
-
             </section>
 
             <section v-else class="message-list">
@@ -1403,10 +1435,21 @@ onBeforeUnmount(() => {
     />
 
     <!-- 「可办理」里点创建生产订单时弹这个表单：选产品、客户、数量、交期，选完生成预览。 -->
-    <el-dialog v-model="businessDialogOpen" :title="businessActionEntry?.label || '办理业务'" width="560px" append-to-body>
-      <AiBusinessActionForm v-if="businessActionEntry" :key="businessActionEntry.flowKey"
-        :entry="businessActionEntry" :order-no="recentOrderNo" :conversation-id="activeConversationId"
-        @previewed="onBusinessPreviewed" @question="(text) => askRecovery({ question: text })" />
+    <el-dialog
+      v-model="businessDialogOpen"
+      :title="businessActionEntry?.label || '办理业务'"
+      width="560px"
+      append-to-body
+    >
+      <AiBusinessActionForm
+        v-if="businessActionEntry"
+        :key="businessActionEntry.flowKey"
+        :entry="businessActionEntry"
+        :order-no="recentOrderNo"
+        :conversation-id="activeConversationId"
+        @previewed="onBusinessPreviewed"
+        @question="(text) => askRecovery({ question: text })"
+      />
     </el-dialog>
     <el-dialog v-model="createOrderDialog" title="创建生产订单" width="560px" append-to-body>
       <AiCreateOrderForm

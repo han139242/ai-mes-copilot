@@ -1,0 +1,10 @@
+.venv/
+.pytest_cache/
+data/
+models/
+logs/
+evidence/
+private-env.ps1
+model-secret.clixml
+*.sqlite3
+*.sqlite3-*

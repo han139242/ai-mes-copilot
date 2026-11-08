@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppIcon from '@/components/common/AppIcon.vue';
-import { appName, appShortName } from '@/config/branding';
+import { appName, appShortName, appLogo } from '@/config/branding';
 import { getNavigationGroups, getNavigationItems } from '@/config/navigation';
 import { openAiAssistant } from '@/utils/app-events';
 import { backendConnection, backendConnectionLabel } from '@/utils/service-connection';
@@ -91,7 +91,7 @@ function openFirstSearchResult() {
   <aside class="app-sidebar" :class="{ 'is-collapsed': menuCollapsed }">
     <div class="sidebar-brand">
       <span class="sidebar-logo" aria-hidden="true">
-        <AppIcon name="bot" :size="18" />
+        <img :src="appLogo" alt="" width="26" height="26" />
       </span>
       <div v-show="!menuCollapsed" class="brand-copy">
         <strong>{{ appShortName }}</strong>
@@ -293,7 +293,7 @@ function openFirstSearchResult() {
   text-align: center;
 }
 
-/* 品牌标志：线框圆环，不用发光和渐变。 */
+/* 透明品牌图与现有米白底座搭配，明确尺寸避免加载时跳动。 */
 .sidebar-logo {
   color: var(--mes-primary);
   position: relative;
@@ -306,6 +306,11 @@ function openFirstSearchResult() {
   border: 1px solid var(--mes-sidebar-featured-border);
   border-radius: 7px;
   background: var(--mes-sidebar-raised);
+}
+
+.sidebar-logo img {
+  display: block;
+  object-fit: contain;
 }
 
 .brand-copy {

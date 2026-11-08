@@ -1540,7 +1540,7 @@ const hasAnyChart = computed(() => Boolean(deviationOption.value || materialOpti
 .blocker-card {
   padding: 8px 10px;
   border: 1px solid #f0d9a8;
-  border-left: 3px solid #d98a00;
+  border-left: 1px solid #d98a00;
   border-radius: 5px;
   background: #fffbf0;
 }

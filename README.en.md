@@ -1,5 +1,9 @@
 # AI-MES Copilot
 
+The owner removed the former local 20-call validation cap. Existing request records are preserved; `PRIVATE_LLM_LIMIT=0` means no local cap, while provider billing and document-processing consent still apply. The knowledge workspace uses expandable help and reversible settings drafts. See the [current interaction and usage notes (Chinese)](docs/INTERACTION_REFINEMENT.md).
+
+Local stage-2 development now includes username-free face identification, guided capture and ambiguous-match rejection. Existing per-user private templates and MES authorization are preserved. Real-camera acceptance remains pending; see the [implementation and verification notes (Chinese)](docs/FACE_AUTO_CAPTURE.md).
+
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 [简体中文](README.md) · English
@@ -30,6 +34,16 @@ The PC interface uses ivory surfaces with restrained sky-blue accents across nav
 ![Ivory production screen showing line schedules, risks, quality, and equipment status](docs/images/production-screen.png)
 
 *UI verification screenshot using temporary demonstration data, not actual operational results. See the [UI conventions (Chinese)](docs/UI_DESIGN.md).*
+
+### Stage 2: grounded private knowledge
+
+Stage 2 adds a separate PostgreSQL database per user, five document formats, versioned citations, vector RAG, LightRAG / Apache AGE graph retrieval and fusion, role preferences, and face enrollment, management, and authentication through the existing MES session. Knowledge answers can prefill the business assistant; existing permissions and preview/confirmation remain in force.
+
+See the [implementation](docs/STAGE2_IMPLEMENTATION.md), [measured checks and outstanding work](docs/STAGE2_ACCEPTANCE.md), [upstream references](docs/STAGE2_REFERENCES.md), and [isolated setup](services/private-assistant/README.md). These documents and the new interface are in Chinese.
+
+The maintainer has enrolled a face and reported successful username-free login. Latest human latency, a second participant, and wrong-person rejection still require on-device acceptance. Dify is an optional extension and has not been deployed. The maintainer removed the local 20-request cap; processing consent, durable accounting, and provider quotas still apply. This maintenance round made no additional paid requests. See the [current requirement checklist and release checks](docs/STAGE2_FINAL_RELEASE.md) (Chinese); older acceptance records retain their dated scope.
+
+The latest refinement adds **relationship-path exploration** over the current authorized graph: choose two entities, inspect an association within six edges, open its current sources, and prefill a question without sending it. Short mobile windows keep the composer visible, while the workbench retains its capability modes and business shortcuts. Portable regressions cover the actual ECharts camera and geometry, shortcut ownership, and todo pagination. See the [refinement record and design references](docs/EXPERIENCE_REFINEMENT.md) (Chinese).
 
 ## Example requests
 

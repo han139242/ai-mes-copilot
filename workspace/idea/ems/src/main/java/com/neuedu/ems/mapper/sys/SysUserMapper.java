@@ -23,6 +23,9 @@ public interface SysUserMapper extends BaseMapper<SysUser> {
     @Select("select * from sys_user where username = #{username} and deleted_flag = 0")
     SysUser getByUserName(@Param("username") String username);
 
+    @Select("select user_id from sys_user where deleted_flag=0 and status='ENABLE' order by user_id limit 101")
+    List<Long> faceIdentificationCandidates();
+
     @Update("""
             update sys_user
             set status = case when login_fail_count + 1 >= #{maxAttempts} then 'LOCKED' else status end,

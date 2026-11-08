@@ -134,6 +134,7 @@ moduleCatalog.ai = {
   description: '业务问答、看板解读、风险分析与智能写作',
   entries: [
     { label: '进入 AI 工作台', path: '/ai/workbench', icon: 'bot', permission: 'ai:assistant:use' },
+    { label: '我的知识', path: '/ai/knowledge', icon: 'database', permission: 'ai:assistant:use' },
     { label: '执行监控', path: '/ai/agent-monitor', icon: 'monitor', permission: 'ai:assistant:use' },
     { label: '自动化规则', path: '/ai/automation', icon: 'workflow', permission: 'ai:assistant:use' },
     { label: '自动化任务', path: '/ai/tasks', icon: 'workflow', permission: 'ai:assistant:use' },
@@ -148,6 +149,7 @@ export const navigationGroups = [
     label: '重点能力',
     items: [
       { label: 'AI 工作台', icon: 'bot', path: '/ai/workbench', featured: true, permission: 'ai:assistant:use' },
+      { label: '我的知识', icon: 'database', path: '/ai/knowledge', permission: 'ai:assistant:use' },
       // 预警中心要在侧边栏能直接点到：它的"改限度"就在页面里的规则页签，
       // 只放在模块目录里等于没有入口。
       { label: '预警中心', icon: 'bell', path: '/ai/alert', permission: 'ai:assistant:use' },
@@ -202,7 +204,8 @@ export function getNavigationItems() {
   // AI 子页面属于模块目录，搜索也应能找到，但仍须执行相同的权限过滤。
   const aiItems = (moduleCatalog.ai.entries || []).map(filterItem).filter(Boolean);
   const itemsByPath = new Map();
-  [...menuItems, ...aiItems].forEach((item) => {
+  const accountItems = [{ label: '账号安全', path: '/account/security', icon: 'shield-check' }];
+  [...menuItems, ...aiItems, ...accountItems].forEach((item) => {
     const key = item.path || item.action;
     if (key && !itemsByPath.has(key)) {
       itemsByPath.set(key, item);
@@ -217,7 +220,7 @@ export function firstAccessiblePath(fallback = '/dashboard') {
   const items = getNavigationItems();
   return (
     preferredHomePaths.find((path) => items.some((item) => item.path === path)) ||
-    items.find((item) => item.path)?.path ||
+    items.find((item) => item.path && item.path !== '/account/security')?.path ||
     fallback
   );
 }

@@ -29,6 +29,33 @@ class JwtAuthenticationFilterTest {
     private PermissionService permissionService;
     private TokenRevocationService tokenRevocationService;
 
+    @Test void onlyLoginGuidanceIsAnonymousAndEnrollmentGuidanceStaysProtected() throws Exception {
+        var openRequest=new MockHttpServletRequest("POST","/api/auth/face/frame");
+        var openChain=new MockFilterChain();
+        filter.doFilter(openRequest,new MockHttpServletResponse(),openChain);
+        org.junit.jupiter.api.Assertions.assertNotNull(openChain.getRequest());
+        for(String path:new String[]{"frame-enroll","enroll","reset","me","frame/foreign"}) {
+            var response=new MockHttpServletResponse();
+            var chain=new MockFilterChain();
+            filter.doFilter(new MockHttpServletRequest("POST","/api/auth/face/"+path),response,chain);
+            assertEquals(401,response.getStatus(),path);
+            assertNull(chain.getRequest());
+        }
+    }
+
+    @Test void discoveryAllowsOnlyThreeExactPublicEndpoints() throws Exception {
+        for(String path:new String[]{"identify-challenge","identify-frame","identify-login"}) {
+            var chain=new MockFilterChain();
+            filter.doFilter(new MockHttpServletRequest("POST","/api/auth/face/"+path),new MockHttpServletResponse(),chain);
+            org.junit.jupiter.api.Assertions.assertNotNull(chain.getRequest(),path);
+        }
+        for(String path:new String[]{"identify-frame/foreign","identify-enroll","identify-reset"}) {
+            var response=new MockHttpServletResponse();var chain=new MockFilterChain();
+            filter.doFilter(new MockHttpServletRequest("POST","/api/auth/face/"+path),response,chain);
+            assertEquals(401,response.getStatus());assertNull(chain.getRequest());
+        }
+    }
+
     @BeforeEach
     void setUp() {
         filter = new JwtAuthenticationFilter();

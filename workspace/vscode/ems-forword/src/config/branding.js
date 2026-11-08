@@ -10,6 +10,9 @@ export const appName = import.meta.env.VITE_APP_NAME || '智能调光台灯 MES'
 // 侧边栏、顶栏空间有限时使用短名称，避免中英文混排被截断。
 export const appShortName = import.meta.env.VITE_APP_SHORT_NAME || '台灯 MES';
 
+// Generated transparent mark, shared by the sidebar and login page.
+export const appLogo = new URL('../assets/branding/ai-mes-mark-v1.png', import.meta.url).href;
+
 // 登录页左侧品牌区使用的产品定位文案。
 export const appSubtitle = import.meta.env.VITE_APP_SUBTITLE || '智能调光台灯数字化制造执行系统';
 

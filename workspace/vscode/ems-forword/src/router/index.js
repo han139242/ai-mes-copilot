@@ -44,6 +44,18 @@ const routes = [
     // children 中的页面都显示在 layout 的内部路由出口中。
     children: [
       {
+        path: 'account/security',
+        name: 'AccountSecurity',
+        component: () => import('@/pages/account/security.vue'),
+        meta: { title: '账号安全', icon: 'shield-check' },
+      },
+      {
+        path: 'ai/knowledge',
+        name: 'PrivateKnowledge',
+        component: () => import('@/pages/ai/private-knowledge.vue'),
+        meta: { title: '我的知识', icon: 'database', permission: 'ai:assistant:use' },
+      },
+      {
         path: 'mdm/manufacturing-preparation',
         name: 'ManufacturingPreparation',
         component: () => import('@/pages/mdm/manufacturing-preparation.vue'),

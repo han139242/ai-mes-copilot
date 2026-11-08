@@ -1,0 +1,18 @@
+name: mes-stage2-private
+services:
+  postgres:
+    build: .
+    image: mes-stage2-postgres:17-age1.7-vector0.8.1
+    environment:
+      POSTGRES_PASSWORD: ${PRIVATE_PG_PASSWORD:?Set a private PostgreSQL admin password}
+    ports:
+      - "127.0.0.1:55432:5432"
+    volumes:
+      - ${PRIVATE_PG_DATA:?Set an isolated data folder}:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    mem_limit: 1200m
+    restart: unless-stopped

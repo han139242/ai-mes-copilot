@@ -1,4 +1,4 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 $repoDirectory = Split-Path -Parent $PSScriptRoot
 $localRuntimeConfig = Join-Path $repoDirectory 'tmp/local-runtime.json'
 if (Test-Path -LiteralPath $localRuntimeConfig) {

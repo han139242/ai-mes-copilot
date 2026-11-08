@@ -97,9 +97,15 @@ const searchResults = computed(() => {
   if (!keyword) {
     return items.slice(0, 7);
   }
-  return items.filter((item) => [item.label, item.description].some((value) =>
-    String(value || '').toLowerCase().includes(keyword),
-  )).slice(0, 8);
+  return items
+    .filter((item) =>
+      [item.label, item.description].some((value) =>
+        String(value || '')
+          .toLowerCase()
+          .includes(keyword),
+      ),
+    )
+    .slice(0, 8);
 });
 
 // 打开全局搜索对话框。
@@ -282,6 +288,10 @@ function notificationTime(value) {
 
 // 处理用户菜单命令，目前logout会调用后端退出并无条件清理本地认证状态。
 async function handleCommand(command) {
+  if (command === 'security') {
+    await router.push('/account/security');
+    return;
+  }
   // 退出时无论后端logout是否成功都清理本地Token，避免用户继续停留在受保护页面。
   if (command === 'logout') {
     try {
@@ -375,7 +385,7 @@ function showAlertNotification(payload) {
         router.push('/ai/alert');
       }
       closeAlertNotification();
-    }
+    },
   });
   loadAlertPending();
 }
@@ -443,10 +453,15 @@ function scheduleAlertReconnect() {
   alertReconnectDelay = Math.min(alertReconnectDelay * 2, 60000);
 }
 
-// 处理全局Ctrl/Cmd+K快捷键并阻止浏览器默认行为。
+// 导航与助手使用不同快捷键，避免一次按键同时打开两个界面。
 function handleShortcut(event) {
-  // Ctrl/Cmd + K打开全局菜单搜索。
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
+  if (event.defaultPrevented || event.repeat || event.altKey) return;
+  if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'k') {
+    if (
+      !searchOpen.value &&
+      [...document.querySelectorAll('[role="dialog"]')].some((dialog) => dialog.getClientRects().length)
+    )
+      return;
     event.preventDefault();
     openSearch();
   }
@@ -518,7 +533,13 @@ onBeforeUnmount(() => {
     </div>
 
     <div class="header-actions">
-      <button class="global-search" type="button" @click="openSearch">
+      <button
+        class="global-search"
+        type="button"
+        title="搜索模块（Ctrl+Shift+K）"
+        aria-keyshortcuts="Control+Shift+K Meta+Shift+K"
+        @click="openSearch"
+      >
         <AppIcon name="search" :size="17" />
         <span>搜索模块</span>
       </button>
@@ -630,6 +651,7 @@ onBeforeUnmount(() => {
         </button>
         <template #dropdown>
           <el-dropdown-menu>
+            <el-dropdown-item command="security"> <AppIcon name="shield-check" :size="16" />账号安全 </el-dropdown-item>
             <el-dropdown-item command="logout">
               <AppIcon name="logout" :size="16" />
               退出登录

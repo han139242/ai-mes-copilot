@@ -1,5 +1,5 @@
 <script setup>
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import AppIcon from '@/components/common/AppIcon.vue';
@@ -55,6 +55,18 @@ const countChips = computed(() =>
 const preview = ref(null);
 const previewVisible = ref(false);
 const previewingKey = ref('');
+const expanded = ref(false);
+const currentPage = ref(1);
+const pageSize = 10;
+const pageCount = computed(() => Math.max(1, Math.ceil(todoItemsSorted.value.length / pageSize)));
+const visibleTodos = computed(() =>
+  expanded.value
+    ? todoItemsSorted.value.slice((currentPage.value - 1) * pageSize, currentPage.value * pageSize)
+    : todoItemsSorted.value.slice(0, 6),
+);
+watch(pageCount, (count) => {
+  currentPage.value = Math.min(currentPage.value, count);
+});
 
 function severityMeta(severity) {
   return SEVERITY_META[String(severity || '').toUpperCase()] || SEVERITY_META.LOW;
@@ -145,7 +157,8 @@ function handleResolved(payload) {
 }
 
 function openList() {
-  router.push('/ai/tasks');
+  expanded.value = !expanded.value;
+  currentPage.value = 1;
 }
 
 // 工作台办理成功后会广播 mes:data-changed，这里跟着刷新，两个页面数字不会打架。
@@ -171,7 +184,9 @@ onBeforeUnmount(() => {
         <span v-if="previewMode" class="panel-caption">连接后端后显示当前账号的待办</span>
         <span v-else-if="!todoLoaded" class="panel-caption">{{ todoError ? '待办暂不可用' : '正在加载待办' }}</span>
         <span v-else class="panel-caption">
-          共 {{ todoTotal }} 条<template v-if="todoGeneratedAt"> · 更新于 {{ todoGeneratedAt.slice(11, 16) }}</template>
+          共 {{ todoTotal }} 条<template v-if="todoTotal > todoItemsSorted.length">
+            · 已加载 {{ todoItemsSorted.length }} 条</template
+          ><template v-if="todoGeneratedAt"> · 更新于 {{ todoGeneratedAt.slice(11, 16) }}</template>
         </span>
       </div>
       <div v-if="!previewMode" class="todo-head-actions">
@@ -180,7 +195,9 @@ onBeforeUnmount(() => {
             <AppIcon name="refresh" :size="14" />
           </button>
         </el-tooltip>
-        <el-button link type="primary" @click="openList">全部待办</el-button>
+        <el-button v-if="todoItemsSorted.length > 6" link type="primary" :aria-expanded="expanded" @click="openList">{{
+          expanded ? '收起待办' : '查看更多'
+        }}</el-button>
       </div>
     </div>
 
@@ -210,7 +227,7 @@ onBeforeUnmount(() => {
         </p>
 
         <ul v-if="todoLoaded && todoItemsSorted.length" class="todo-list">
-          <li v-for="item in todoItemsSorted" :key="`${item.type}-${item.bizNo}-${item.bizId}`" class="todo-row">
+          <li v-for="item in visibleTodos" :key="`${item.type}-${item.bizNo}-${item.bizId}`" class="todo-row">
             <div class="todo-main">
               <div class="todo-line">
                 <span class="todo-severity" :class="severityMeta(item.severity).className">
@@ -241,6 +258,16 @@ onBeforeUnmount(() => {
             </div>
           </li>
         </ul>
+        <div v-if="todoLoaded && expanded" class="todo-pagination" aria-label="已加载待办分页">
+          <span>第 {{ currentPage }} / {{ pageCount }} 页 · 按紧急程度排序</span>
+          <div>
+            <button type="button" :disabled="currentPage === 1" @click="currentPage -= 1">上一页</button>
+            <button type="button" :disabled="currentPage >= pageCount" @click="currentPage += 1">下一页</button>
+          </div>
+          <p v-if="todoTotal > todoItemsSorted.length">
+            此处显示已加载的 {{ todoItemsSorted.length }} 条，完整记录可到对应业务页查看。
+          </p>
+        </div>
       </template>
     </div>
 
@@ -369,6 +396,39 @@ onBeforeUnmount(() => {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+.todo-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px 0 0;
+  color: var(--mes-text-secondary);
+  font-size: 12px;
+}
+.todo-pagination > div {
+  display: flex;
+  gap: 8px;
+}
+.todo-pagination button {
+  min-height: 44px;
+  padding: 8px 14px;
+  color: var(--mes-primary);
+  background: var(--mes-primary-soft);
+  border: 1px solid var(--mes-primary-border);
+  border-radius: var(--mes-radius-sm);
+  font: inherit;
+  cursor: pointer;
+}
+.todo-pagination button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+.todo-pagination p {
+  width: 100%;
+  margin: 0;
+  line-height: 1.8;
 }
 
 .todo-row {
