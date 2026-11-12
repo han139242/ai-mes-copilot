@@ -2,99 +2,105 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-用自然语言驱动制造执行：查数据、分析问题、办理任务、跟踪结果。
+**面向智能调光台灯制造的 AI 助手：查业务、读资料、追关系，把建议带入可确认的业务流程。**
 
-An AI-assisted manufacturing execution system built with Spring Boot, Vue 3 and MySQL. Use natural language to query business data and carry out supported tasks through preview, confirmation, execution and result verification.
+Spring Boot · Vue 3 · MySQL · Python / FastAPI · PostgreSQL / pgvector / Apache AGE · LightRAG
 
-[运行说明](docs/SETUP.md) · [AI 能力](docs/FEATURES.md) · [参与贡献](CONTRIBUTING.md) · [版本发布](https://github.com/han139242/ai-mes-copilot/releases)
+[AI 架构详解](docs/AI_ARCHITECTURE.md) · [教师演示与讲解](docs/TEACHER_DEMO.md) · [功能目录](docs/FEATURES.md) · [部署运行](docs/SETUP.md) · [English](README.en.md)
 
-[English README](README.en.md)
+项目以智能调光台灯 L100 / L200 为场景，连接采购、库存、生产、质量、设备与发货。在已有 MES 上集成自然语言业务办理、私有 RAG、GraphRAG 和研判工作单，让业务数据与文档知识各有依据、能够衔接。
 
-AI-MES Copilot 是一个以智能调光台灯 L100 / L200 为业务场景的 MES（制造执行系统）。基于 Spring Boot、Vue 3 和 MySQL，将采购、库存、生产、质量、设备与发货连接起来，让用户通过 AI 工作台用日常语言推进业务。
+## AI 能做什么
 
-## 核心特色
+| 能力 | 使用示例 | 实现方式 |
+|---|---|---|
+| **业务查询与分析** | “哪些物料低于安全库存？”“工单还缺什么开工条件？” | 从受权限控制的能力目录选择工具，查询当前业务数据，返回结论、表格、图表和下一步 |
+| **业务办理** | 创建订单、排产、生成工单、领料、报工、入库和发货 | 结构化计划 → 校验与预览 → 用户确认 → 领域服务执行 → 回查 |
+| **私有文档 RAG** | “L100 当前生效的驱动板是什么？” | 本地中文嵌入与 pgvector 检索，结合有效原文生成带文件、版本和位置的答复 |
+| **GraphRAG 与融合问答** | “驱动板、装配工序和检验规范怎样关联？” | LightRAG 抽取实体关系，AGE 保存图谱，关联检索与文档证据共同支持回答 |
+| **图谱探索** | 搜索 L100、查看关系、探索实体间路径 | ECharts 展示实际图数据，节点和边可追溯原文，支持筛选、缩放和文字列表 |
+| **研判工作单** | 保存结论，补现场备注和人工核对项，导出交接稿 | 保存答复与来源快照，导出或转业务前复核版本，衔接原业务草稿 |
+| **多轮与个性化** | 连续追问、按质检或仓储岗位解释 | 私有历史、岗位和篇幅偏好；工作台与浮窗共用草稿，重试保留下一问 |
 
-- **自然语言贯穿业务主链**：从创建生产订单、排产和生成父子工单，到领料转线边、派工、开工、报工、成品入库及销售发货。
-- **39 项业务能力**：20 项查询与分析能力、19 项直接办理能力；通用查询通过受权限控制的资源目录覆盖更多业务数据。
-- **多轮对话与结构化结果**：理解上下文和追问，返回业务结论、表格、图表、来源及下一步建议。
-- **预览、确认、执行、回查**：写操作生成确认卡，执行时复核权限、单据状态、前置条件和重复请求，保留执行记录。
-- **自动化与主动预警**：规则扫描、事件触发、多步任务、通知和异常处理；任务执行状态可追踪。
-- **面向真实业务的一致性约束**：多层 BOM、组件与整机父子工单、线边库存成对移转、逐件检验和八阶段订单进度。
+业务能力目录含 **20 项查询分析、19 项直接办理**。知识检索、图谱和工作单属于独立扩展，具体行为见[功能说明](docs/FEATURES.md)。
 
-![AI 工作台：自然语言低库存查询、业务表格与图表](docs/images/ai-workbench.png)
+![AI 工作台：业务问答、表格与来源](docs/images/ai-workbench.png)
 
-*项目演练截图，展示问答结果与来源结构；截图中的数量为当时的演示数据。*
+*业务工作台历史演示截图，图中数量为当时的演示数据。最新操作步骤见演示说明。*
 
-### 生产大屏与统一界面
+## AI 架构
 
-PC 界面采用米白底色与天蓝点缀，统一导航、AI 工作台、业务表格和生产大屏。左侧快捷办理按生产链组织，正式会话仅呈现服务端目录；开发预览保留不可执行的入口样式，并明确标记状态。
-
-![米白主题生产大屏：产线排期、风险关注、质量与设备状态](docs/images/production-screen.png)
-
-*界面验收截图，使用临时演示数据，不代表实际经营结果。运行与主题约定见[界面说明](docs/UI_DESIGN.md)。*
-
-### 阶段 2：有依据的私有知识助手
-
-新增每用户独立 PostgreSQL 数据库、五格式资料管理、带版本引用的向量 RAG、LightRAG / AGE 图谱和融合问答、岗位偏好，以及人脸录入/管理/原会话认证入口。知识依据可转到原业务助手草稿，业务执行继续使用原权限与预览确认。
-
-人脸登录支持直接识别已录入账号，自动提示、采集和最终核验；歧义拒绝，保留密码入口。原模板保留，真实摄像头验收状态和参考见[采集与识别说明](docs/FACE_AUTO_CAPTURE.md)。
-
-[实施与核心代码](docs/STAGE2_IMPLEMENTATION.md) · [实际验收和剩余事项](docs/STAGE2_ACCEPTANCE.md) · [开源参考](docs/STAGE2_REFERENCES.md) · [独立启动](services/private-assistant/README.md)
-
-本轮实际截图反馈后的界面整理、教师逐项要求及待本人验收内容，见[阶段 2 复核与界面优化](docs/STAGE2_REVIEW_20261108.md)。
-
-本轮整合了私有知识、自动人脸登录、精简交互和统一台灯标志。上传与重试直接唤醒索引，取消后未发布的版本停止上线；来源与图谱切换丢弃过期响应。[教师要求逐项对照与发布检查](docs/STAGE2_FINAL_RELEASE.md)是当前状态入口，早期验收记录按各自日期保留。
-
-维护者已反馈免账号人脸可以登录；最新真人总耗时、第二位参与者和错误脸仍需现场验收。Dify未部署，属于可选加分方向。本地调用默认无次数上限，处理同意、调用记录和平台额度仍有效。维护验证没有新增收费请求，离线通过率不等于模型生成准确率。
-
-人脸采集已改为[自动动作引导](docs/FACE_AUTO_CAPTURE.md)：连续合格后自动采集正面和随机左右转头，三步完成自动核验，支持关闭语音提示；已有模板继续可用。本轮未实现眨眼判定。
-
-体验深化增加了**关联路径探索**：选择两个实体，查看当前图中六段以内的最短关联，逐步打开有效来源，再把线索带入提问草稿。手机输入区适应短窗口，工作台保留全部能力类型和快捷办理；新增图谱镜头、实际图元、快捷键与待办分页回归。参考来源、实际检查与采用边界见[本轮优化记录](docs/EXPERIENCE_REFINEMENT.md)。
-
-## 可以怎样问
-
-- “今天生产了多少？合格数和不良数分别是多少？”
-- “哪些物料低于安全库存？缺口是多少？”
-- “这张工单现在能开工吗？还缺什么条件？”
-- “安排这张生产订单，然后按订单生成工单。”
-- “生成这张工单的领料单，再转到线边仓。”
-- “这张订单已经做到哪一步？接下来应该做什么？”
-
-办理前需要当前账号有对应权限、对象存在且前置业务已完成；缺少单号、库位、数量等信息时，助手会继续询问。逐件检验的实测值由质检人员录入，AI 协助查询、衔接流程和提交已有结果。
-
-## 业务范围
-
-主数据与产品工艺、仓储库存、生产执行、质量管理、设备维护、班组排班、采购与销售、系统权限，以及 AI 问答、智能办理、预警自动化和可视化看板。
-
-完整生产链为：采购来料 → 来料检验 → 组件生产 / 库存组件领用 → 领料转线边 → 整机生产 → 逐件检验 → 成品入库 → 出货检验 → 销售发货。
-
-## 代码结构
-
-```text
-workspace/idea/ems/            Spring Boot 后端、领域服务、数据库结构与测试
-workspace/vscode/ems-forword/  Vue 3 PC 前端、AI 工作台与业务页面
-services/private-assistant/   阶段 2 私有知识、图谱、人脸服务与合成样例
-workspace/vx/                 历史微信小程序代码
-scripts/                      启动监管、迁移、演练与核验工具
-docs/                         公开版运行说明与验证口径
+```mermaid
+flowchart TB
+    UI["Vue：AI 工作台 / 我的知识 / 研判工作单"] --> J["Spring Boot：统一登录、账号状态与权限"]
+    J --> B["业务 AI：意图理解 → 结构化计划 → 能力目录"]
+    B --> Q["查询工具 / 办理预览"]
+    Q --> M[("MySQL：订单、库存、生产、质量")]
+    Q --> C["人工确认 · 领域事务 · 重复请求保护"]
+    C --> M
+    J -->|签名身份| K["Python 私有知识服务"]
+    K --> V["文档检索：本地嵌入 + pgvector"]
+    K --> G["关联检索：LightRAG + Apache AGE"]
+    V --> P[("每用户独立 PostgreSQL")]
+    G --> P
+    V --> E["有效原文、版本与位置校验"]
+    G --> E
+    E --> L["获准后生成 / 本地原文摘录"]
+    L --> N["带引用答复 → 研判工作单"]
+    N -->|用户主动转交草稿| B
 ```
 
-本次交付重点是后端与 PC 端。历史微信小程序独立保留，其运行配置需另行维护。旧场景资料及脚本的边界见[历史资料说明](docs/LEGACY.md)。
+**两条主线对应两类事实。** 当前库存由业务工具查询数据库；检验规范由私有知识检索原文。模型负责理解、计划和组织语言，程序负责权限、事实查询和业务执行。知识页识别实时业务请求后提供转交入口，用户检查草稿再继续。
 
-## 快速开始
+资料上传后保留原文位置，分别建设文档向量与图谱。文档、图谱和融合模式显示实际采用的方式；图谱未就绪时可以使用已就绪文档。未配置模型或未同意处理时，仍能展示本地检索原文。
 
-完整开发与验证环境使用 JDK 21、Node.js 24（本轮为 24.19.0）、MySQL 8.0；Python 3 用于部分迁移和核验工具。Redis 为可选组件。前端构建依赖支持较早的 Node 版本，完整会话测试的要求见[运行说明](docs/SETUP.md)。
+**[AI 架构详解](docs/AI_ARCHITECTURE.md)** 包含业务 Agent 时序图、RAG 入库与问答、GraphRAG、用户隔离、工作单闭环、技术取舍及关键代码入口。
+
+## 用一个场景讲清价值
+
+合成演示资料中的关联链为：
+
+```text
+L100 产品 → DRV-07 驱动板 → PROC-DIM 调光装配 → QC-DIM-01 检验规范
+```
+
+1. 问当前驱动板，打开文档 RAG 的引用原文。
+2. 问驱动板与工序、检验怎样关联，查看融合答复和图谱路径。
+3. 追问能否改用 DRV-08，核对 ECO-L100-02 的“未批准候选变更”状态。
+4. 保存为研判工作单，补人工核对项，再转为业务助手草稿。
+
+[10 份关联资料](services/private-assistant/examples/lamp-showcase/README.md)覆盖产品、BOM、装配、检验、故障、设备、仓储、变更、岗位和交接，可构建 PDF、DOCX、XLSX、TXT、MD 五格式包，并提供 [24 个核对问题](services/private-assistant/examples/lamp-showcase/questions.json)。**全部为合成教学样例。**
+
+现场顺序、可直接使用的问题、讲解台词和无模型时的展示方式见 **[教师演示指南](docs/TEACHER_DEMO.md)**。
+
+## 完整业务系统
+
+采购来料 → 来料检验 → 组件生产 / 库存组件领用 → 领料转线边 → 整机生产 → 逐件检验 → 成品入库 → 出货检验 → 销售发货。
+
+系统包含多层 BOM、父子工单、线边库存成对移转、逐件检验、八阶段订单进度、预警及多步任务。统一导航支持模块搜索，业务表单保护未保存内容，手机与桌面分别调整布局。
+
+![生产大屏：产线排期、质量与设备状态](docs/images/production-screen.png)
+
+*生产大屏历史界面验收截图，使用临时演示数据。*
+
+本地 YuNet / SFace 人脸认证与原账号、JWT 和退出流程衔接，支持录入、重录、解绑及管理员授权重置，实际真人验收范围见[人脸说明](docs/FACE_AUTO_CAPTURE.md)。
+
+## 运行与验证
 
 ```powershell
 git clone https://github.com/han139242/ai-mes-copilot.git
 Set-Location ai-mes-copilot
 ```
 
-先按[运行说明](docs/SETUP.md)准备独立演示库和环境变量，再启动后端与前端。开发服务器默认使用后端 8088、前端 5173。
+| 场景 | 入口 |
+|---|---|
+| 基础 MES：JDK 21、Node.js 24、MySQL 8 | [配置与启动](docs/SETUP.md) |
+| RAG / GraphRAG：Python 3.12、PostgreSQL、模型缓存 | [私有知识服务部署](services/private-assistant/README.md) |
+| 课堂资料和提问 | [合成资料与构建方法](services/private-assistant/examples/lamp-showcase/README.md) |
+| 本轮检查结果及历史证据 | [验证说明](docs/VERIFICATION.md) |
+| 教师要求与现场待验项 | [阶段 2 要求对照](docs/STAGE2_FINAL_RELEASE.md) |
 
-## 测试与构建
-
-前端：
+基础手动启动默认前端 5173 / 后端 8088；独立阶段 2 启动器使用前端 5181 / 后端 8089 / 私有服务 8091 / PostgreSQL 55432。先准备对应独立库和配置，服务状态以实际检查为准。
 
 ```powershell
 Push-Location workspace/vscode/ems-forword
@@ -104,43 +110,25 @@ npm run build
 Pop-Location
 ```
 
-运行监管与推演工具：
+模型密钥和数据库口令通过本机环境提供。公开仓库只含源码、测试、合成样例和说明。离线检索与真实生成分别验证；当前引用校验**不能自动证明每句回答都被来源支持**，关键结论需核对原文。Dify 尚未部署；第二位参与者、错误脸等真人现场项目见要求对照。
 
-```powershell
-node --test scripts/local-runtime.test.mjs scripts/ai-decision-preflight.test.mjs
+## 代码与文档
+
+```text
+workspace/idea/ems/            Spring Boot：业务 AI、权限、领域服务与测试
+workspace/vscode/ems-forword/  Vue 3：AI 工作台、知识页、图谱与工作单
+services/private-assistant/   Python：私有 RAG、GraphRAG、人脸与合成资料
+scripts/                      启动、迁移、运行监管与验证
+docs/                         架构、演示、部署与分轮验证记录
+workspace/vx/                 保留的历史微信小程序代码
 ```
 
-后端使用仓库内 Maven Wrapper；先配置独立测试数据库和环境变量，再从 `workspace/idea/ems` 运行 `./mvnw.cmd -B package`。接库测试会写入测试数据，不与日常演示共用数据库。跳过的测试单独统计。
+- [AI 架构与关键实现](docs/AI_ARCHITECTURE.md) · [教师演示与讲解](docs/TEACHER_DEMO.md)
+- [功能目录](docs/FEATURES.md) · [阶段 2 实现](docs/STAGE2_IMPLEMENTATION.md) · [开源参考](docs/STAGE2_REFERENCES.md)
+- [版本记录](CHANGELOG.md) · [贡献指南](CONTRIBUTING.md) · [历史代码边界](docs/LEGACY.md)
 
-当前公开源码包含 2026-11-02 的 CodeArts 整改。对应源码在独立验证环境的后端完整回归记录为 **1118 项，0 失败、0 错误、0 跳过**；各轮检查范围分别记录在[验证说明](docs/VERIFICATION.md)。
+## 贡献与许可
 
-2026-11-05 的 AI 使用便利性修订完成后，后端完整回归 **1134 项**、前端 **74 项**、运行监管与推演 **20 项**通过，后端打包与前端生产构建通过；本轮真实模型评估按授权共调用 **20 次**。具体场景与能力路由差异见[对话理解记录](docs/AI_USABILITY.md)。
+感谢 [@han139242](https://github.com/han139242)、[@AnHC-00](https://github.com/AnHC-00)、[@zengjingye](https://github.com/zengjingye)。成员署名见[贡献者说明](CONTRIBUTORS.md)。
 
-## 项目文档
-
-- [环境配置、数据库初始化与启动](docs/SETUP.md)
-- [AI 能力、任务办理与业务边界](docs/FEATURES.md)
-- [测试范围与验证记录](docs/VERIFICATION.md)
-- [CodeArts 整改记录](docs/CODE_QUALITY.md)
-- [对话理解与使用便利性改进](docs/AI_USABILITY.md)
-- English: [Overview](README.en.md) · [Setup](docs/SETUP.en.md) · [AI capabilities](docs/FEATURES.en.md)
-
-公开仓库保留源码、数据库结构迁移和示例数据，不包含个人报告、学号、答辩材料、共享数据库凭据、本机运行状态或私有历史记录。
-
-## 贡献者
-
-感谢共同完成项目的成员：
-
-- [@han139242](https://github.com/han139242)
-- [@AnHC-00](https://github.com/AnHC-00)
-- [@zengjingye](https://github.com/zengjingye)
-
-成员署名与后续贡献方式见[贡献者说明](CONTRIBUTORS.md)。
-
-## 项目状态与后续维护
-
-本项目已完成课程交付，并以开源形式保留。后续欢迎社区通过 Issue 反馈问题、通过 Pull Request 提交改进；参与方式见[贡献指南](CONTRIBUTING.md)，版本记录见[CHANGELOG](CHANGELOG.md)。
-
-## 许可证
-
-项目原创代码采用 [MIT License](LICENSE)，允许使用、修改和商用，需保留版权及许可声明。第三方依赖保留各自的许可证和版权信息。
+原创代码采用 [MIT License](LICENSE)，第三方依赖保留各自版权和许可证。欢迎通过 Issue 反馈问题或通过 Pull Request 改进。

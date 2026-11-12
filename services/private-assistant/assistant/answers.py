@@ -42,19 +42,19 @@ def graph_citations(data, documents):
         if not doc or doc["version"] != int(match[2]) or doc["hash"] != match[3]:
             continue
         content = chunk.get("content", "")
-        position = re.search(r"【来源定位：([^】]+)】", content)
-        if not position:
-            continue
-        locator = position[1]
-        text = re.sub(r"^【来源定位：[^】]+】\s*", "", content)
-        # A locator must really exist in this exact active document version.
-        if not any(piece["locator"] == locator and text.strip() and
-                   re.sub(r"\s+", "", text) in re.sub(r"\s+", "", piece["text"])
-                   for piece in doc["pieces"]):
-            continue
-        result.append({"chunkId": chunk.get("chunk_id", ""), "documentId": doc["id"],
-                       "name": doc["name"], "version": doc["version"], "hash": doc["hash"],
-                       "locator": locator, "text": text, "retrieval": "graph"})
+        positions = list(re.finditer(r"【来源定位：([^】]+)】", content))
+        for index, position in enumerate(positions):
+            locator = position[1]
+            end = positions[index+1].start() if index+1 < len(positions) else len(content)
+            text = content[position.end():end].strip()
+            # Each span in a packed chunk must match its own exact active source.
+            if not any(piece["locator"] == locator and text and
+                       re.sub(r"\s+", "", text) in re.sub(r"\s+", "", piece["text"])
+                       for piece in doc["pieces"]):
+                continue
+            result.append({"chunkId": chunk.get("chunk_id", ""), "documentId": doc["id"],
+                           "name": doc["name"], "version": doc["version"], "hash": doc["hash"],
+                           "locator": locator, "text": text, "retrieval": "graph"})
     return result
 
 

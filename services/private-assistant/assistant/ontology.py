@@ -10,7 +10,7 @@ DOMAIN_PREFIXES={"PROC","QC","SOP","STD","DRV","LED","PCB","ADP","MAT","OP","RIG
 
 def graph_profile(settings):
     # Bump the pipeline revision whenever extraction guidance/chunking/normalization changes.
-    value={"pipeline":"lamp-domain-v2-lightrag-1.5.7-chunks240-overlap30", "provider":settings.llm_url.rstrip("/"),
+    value={"pipeline":"lamp-domain-v3-lightrag-1.5.7-packed480-wordpiece512-overlap30", "provider":settings.llm_url.rstrip("/"),
            "model":settings.llm_model,"embedding":settings.embedding_model}
     return hashlib.sha256(json.dumps(value,sort_keys=True).encode()).hexdigest()
 

@@ -1,8 +1,49 @@
 import io
+import re
 import zipfile
 from pathlib import Path
+from xml.etree import ElementTree
+from itertools import chain
 
 SUPPORTED = {".pdf", ".docx", ".xlsx", ".txt", ".md"}
+
+
+def validate_sheet_coordinates(content):
+    """Bound actual cells before read-only Excel can allocate sparse rows/columns.
+
+    Some legitimate exporters omit dimensions; others declare stale dimensions.
+    Check real coordinates rather than trusting that optional metadata.
+    """
+    with zipfile.ZipFile(io.BytesIO(content)) as archive:
+        for name in archive.namelist():
+            # OPC parts need not have a .xml extension. Inspect actual roots,
+            # without guessing extensions, fixed paths, or a byte-prefix length.
+            row_number = column = 0
+            with archive.open(name) as stream:
+                events=ElementTree.iterparse(stream, events=('start', 'end'))
+                try:first=next(events)
+                except (ElementTree.ParseError,StopIteration):continue
+                if first[1].tag.rsplit('}',1)[-1]!='worksheet':continue
+                for event, element in chain([first],events):
+                    tag = element.tag.rsplit('}', 1)[-1]
+                    if event == 'start' and tag == 'row':
+                        row_number = int(element.get('r', row_number + 1)); column = 0
+                        if not 1 <= row_number <= 10000:
+                            raise ValueError('工作表超过 10000 行或 100 列')
+                    elif event == 'start' and tag == 'c':
+                        reference = element.get('r')
+                        if reference:
+                            match = re.fullmatch(r'([A-Za-z]{1,3})([1-9][0-9]{0,6})', reference)
+                            if not match: raise ValueError('工作表单元格坐标无效')
+                            column = 0
+                            for letter in match[1].upper(): column = column * 26 + ord(letter) - 64
+                            cell_row = int(match[2])
+                        else:
+                            column += 1; cell_row = row_number
+                        if column > 100 or cell_row > 10000:
+                            raise ValueError('工作表超过 10000 行或 100 列')
+                    elif event == 'end':
+                        element.clear()
 
 
 def parse_file(name: str, content: bytes, max_bytes=8*1024*1024, max_chars=240_000):
@@ -34,13 +75,14 @@ def parse_file(name: str, content: bytes, max_bytes=8*1024*1024, max_chars=240_0
                           for r, row in enumerate(table.rows, 1))
     elif suffix == ".xlsx":
         from openpyxl import load_workbook
+        validate_sheet_coordinates(content)
         book = load_workbook(io.BytesIO(content), read_only=True, data_only=True)
         try:
             if len(book.worksheets) > 30:
                 raise ValueError("工作表过多")
             for sheet in book:
-                if sheet.max_row > 10000 or sheet.max_column > 100:
-                    raise ValueError("工作表超过 10000 行或 100 列")
+                # Actual coordinates were bounded above; don't truncate to stale metadata.
+                sheet.reset_dimensions()
                 for row in sheet.iter_rows():
                     cells = [cell for cell in row if cell.value is not None]
                     if cells:

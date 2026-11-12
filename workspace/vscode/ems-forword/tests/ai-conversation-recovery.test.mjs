@@ -2,13 +2,16 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { registerHooks } from 'node:module';
+import { ref } from 'vue';
 import { businessResultHistory, commandPreviewHistory, orderResultHistory } from '../src/utils/ai-order-context.js';
 
 // Import the actual store with its real Vue/dayjs dependencies. Only browser
 // storage, account lookup and HTTP boundaries are replaced; no store code is copied.
 function deferred() {
   let resolve;
-  const promise = new Promise((complete) => { resolve = complete; });
+  const promise = new Promise((complete) => {
+    resolve = complete;
+  });
   return { promise, resolve };
 }
 
@@ -28,11 +31,19 @@ async function fixture(t) {
   const chatStarted = deferred();
   const calls = { list: 0, detail: 0, chat: 0 };
   const stored = new Map([
-    ['mes_ai_conversations_v2__7', JSON.stringify([{
-      id: 'local-existing', remoteId: 1, title: 'Existing conversation',
-      capabilityId: 'general', archived: false,
-      messages: [{ id: 'cached', role: 'assistant', content: 'Cached history' }],
-    }])],
+    [
+      'mes_ai_conversations_v2__7',
+      JSON.stringify([
+        {
+          id: 'local-existing',
+          remoteId: 1,
+          title: 'Existing conversation',
+          capabilityId: 'general',
+          archived: false,
+          messages: [{ id: 'cached', role: 'assistant', content: 'Cached history' }],
+        },
+      ]),
+    ],
     ['mes_ai_active_v2__7', 'local-existing'],
   ]);
   const previousStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
@@ -43,12 +54,18 @@ async function fixture(t) {
       setItem: (name, value) => stored.set(name, String(value)),
       removeItem: (name) => stored.delete(name),
       key: (index) => [...stored.keys()][index] ?? null,
-      get length() { return stored.size; },
+      get length() {
+        return stored.size;
+      },
     },
   });
   const api = {
+    authRevision: ref(0),
     getCurrentUser: () => ({ userId: 7 }),
-    listConversations: () => { calls.list++; return list.promise; },
+    listConversations: () => {
+      calls.list++;
+      return list.promise;
+    },
     getConversationDetail: () => {
       calls.detail++;
       detailStarted.resolve();
@@ -77,10 +94,14 @@ async function fixture(t) {
   const aliases = {
     '@/api/ai': ['chatWithAi'],
     '@/api/ai/conversations': [
-      'createConversation', 'deleteConversation', 'getConversationDetail',
-      'listConversations', 'renameConversation', 'setConversationArchived',
+      'createConversation',
+      'deleteConversation',
+      'getConversationDetail',
+      'listConversations',
+      'renameConversation',
+      'setConversationArchived',
     ],
-    '@/utils/auth': ['getCurrentUser'],
+    '@/utils/auth': ['getCurrentUser', 'authRevision'],
     '@/utils/ai-order-context': ['businessResultHistory', 'orderResultHistory', 'commandPreviewHistory'],
   };
   const storeUrl = new URL('../src/stores/aiConversation.js', import.meta.url);
@@ -89,9 +110,13 @@ async function fixture(t) {
     resolve(specifier, context, nextResolve) {
       const names = context.parentURL === storeUrl.href && aliases[specifier];
       if (!names) return nextResolve(specifier, context);
-      const source = names.map((name) =>
-        `export const ${name} = (...args) => globalThis[${JSON.stringify(key)}].${name}(...args);`,
-      ).join('\n');
+      const source = names
+        .map((name) =>
+          name === 'authRevision'
+            ? `export const authRevision = globalThis[${JSON.stringify(key)}].authRevision;`
+            : `export const ${name} = (...args) => globalThis[${JSON.stringify(key)}].${name}(...args);`,
+        )
+        .join('\n');
       return { shortCircuit: true, url: `data:text/javascript,${encodeURIComponent(source)}` };
     },
   });
@@ -102,7 +127,14 @@ async function fixture(t) {
     hooks.deregister();
   }
   return {
-    store, list, detail, chat, detailStarted, chatStarted, calls, api,
+    store,
+    list,
+    detail,
+    chat,
+    detailStarted,
+    chatStarted,
+    calls,
+    api,
     persisted: () => JSON.parse(stored.get('mes_ai_conversations_v2__7')),
   };
 }
@@ -110,8 +142,14 @@ async function fixture(t) {
 function assertNewMessagesSurvive(f, conversation, expectedHistory = 'Cached history') {
   const expected = [expectedHistory, 'New question', 'New answer'];
   assert.equal(f.store.activeConversation.value, conversation);
-  assert.deepEqual(f.store.activeMessages.value.map((message) => message.content), expected);
-  assert.deepEqual(f.persisted()[0].messages.map((message) => message.content), expected);
+  assert.deepEqual(
+    f.store.activeMessages.value.map((message) => message.content),
+    expected,
+  );
+  assert.deepEqual(
+    f.persisted()[0].messages.map((message) => message.content),
+    expected,
+  );
   assert.equal(f.store.sending.value, false);
 }
 
@@ -173,8 +211,14 @@ test('normal recovery still replaces cached history with server conversations an
   assert.equal(f.store.historySynced.value, true);
   assert.equal(f.store.activeConversation.value.remoteId, 1);
   assert.equal(f.store.activeMessages.value[0].fromHistory, true);
-  assert.deepEqual(f.store.activeMessages.value.map((message) => message.content), ['Old server history']);
-  assert.deepEqual(f.persisted()[0].messages.map((message) => message.content), ['Old server history']);
+  assert.deepEqual(
+    f.store.activeMessages.value.map((message) => message.content),
+    ['Old server history'],
+  );
+  assert.deepEqual(
+    f.persisted()[0].messages.map((message) => message.content),
+    ['Old server history'],
+  );
   assert.deepEqual(f.calls, { list: 1, detail: 1, chat: 0 });
 });
 
@@ -185,9 +229,16 @@ test('long conversation restores the latest messages across the final two pages'
     requested.push(params.current);
     const first = (params.current - 1) * 100 + 1;
     const last = Math.min(params.current * 100, 237);
-    return { data: { pages: 3, messages: Array.from({ length: last - first + 1 }, (_, i) => ({
-      messageId: first + i, role: 'assistant', content: `Message ${first + i}`,
-    })) } };
+    return {
+      data: {
+        pages: 3,
+        messages: Array.from({ length: last - first + 1 }, (_, i) => ({
+          messageId: first + i,
+          role: 'assistant',
+          content: `Message ${first + i}`,
+        })),
+      },
+    };
   };
   assert.equal(await f.store.loadActiveMessages(), true);
   assert.deepEqual(requested, [1, 3, 2]);
@@ -199,15 +250,20 @@ test('long conversation restores the latest messages across the final two pages'
 
 test('a delayed final page cannot overwrite a message sent during history recovery', async (t) => {
   const f = await fixture(t);
-  const last = deferred(); const lastStarted = deferred();
+  const last = deferred();
+  const lastStarted = deferred();
   f.api.getConversationDetail = async (_id, params) => {
     if (params.current === 1) return { data: { pages: 2, messages: [] } };
-    lastStarted.resolve(); return last.promise;
+    lastStarted.resolve();
+    return last.promise;
   };
   const original = f.store.activeConversation.value;
-  const loading = f.store.loadActiveMessages(); await lastStarted.promise;
-  const sending = f.store.sendMessage('New question'); await f.chatStarted.promise;
-  f.chat.resolve({ data: { answer: 'New answer' } }); await sending;
+  const loading = f.store.loadActiveMessages();
+  await lastStarted.promise;
+  const sending = f.store.sendMessage('New question');
+  await f.chatStarted.promise;
+  f.chat.resolve({ data: { answer: 'New answer' } });
+  await sending;
   last.resolve({ data: { messages: [{ messageId: 237, role: 'assistant', content: 'Stale final page' }] } });
   assert.equal(await loading, false);
   assertNewMessagesSurvive(f, original);

@@ -1,5 +1,5 @@
 <script setup>
-import { watch } from 'vue';
+import { nextTick, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import AppIcon from '@/components/common/AppIcon.vue';
 import { firstAccessiblePath, getModuleDefinition } from '@/config/navigation';
@@ -8,6 +8,14 @@ import { firstAccessiblePath, getModuleDefinition } from '@/config/navigation';
 const emit = defineEmits(['refresh']);
 const route = useRoute();
 const router = useRouter();
+defineProps({ compact: Boolean });
+const closingPath = ref('');
+const tabsScroll = ref();
+
+async function revealActiveTab() {
+  await nextTick();
+  tabsScroll.value?.querySelector('.tab-item.active')?.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+}
 
 // tabs与layout中的标签数组双向绑定，新增和关闭标签时父子组件看到同一份状态。
 const tabs = defineModel({
@@ -56,16 +64,24 @@ function isActive(tab) {
 }
 
 // 固定首页不能关闭；关闭当前标签后自动跳到右侧、左侧或首页。
-function closeTab(tab) {
-  if (tab.affix) {
-    return;
-  }
+async function closeTab(tab) {
+  if (tab.affix || closingPath.value) return;
   const index = tabs.value.findIndex((item) => item.path === tab.path);
-  tabs.value.splice(index, 1);
-  if (isActive(tab)) {
-    const next = tabs.value[index] || tabs.value[index - 1];
-    // 切回标签时优先回到它记住的 fullPath，没有历史地址时才退回路径。
-    router.push(next ? next.fullPath || next.path : firstAccessiblePath('/forbidden'));
+  if (index < 0) return;
+  closingPath.value = tab.path;
+  try {
+    if (isActive(tab)) {
+      const next = tabs.value[index + 1] || tabs.value[index - 1];
+      const failure = await router.push(next ? next.fullPath || next.path : firstAccessiblePath('/forbidden'));
+      // Router guards can keep an unsaved page open. Keep its tab as well.
+      if (failure || isActive(tab)) return;
+    }
+    tabs.value = tabs.value.filter((item) => item.path !== tab.path);
+    await revealActiveTab();
+  } catch {
+    // A failed navigation must never remove the current page's tab.
+  } finally {
+    closingPath.value = '';
   }
 }
 
@@ -77,36 +93,39 @@ function closeOthers() {
 // immediate使组件首次加载时也立刻登记当前路由。
 watch(
   () => route.fullPath,
-  () => addCurrentRoute(route),
+  () => {
+    addCurrentRoute(route);
+    revealActiveTab();
+  },
   { immediate: true },
 );
 </script>
 
 <template>
   <!-- 左侧循环显示已打开页面标签，右侧提供刷新和关闭其他标签操作。 -->
-  <div class="app-tabs">
-    <div class="tabs-scroll">
-      <button
-        v-for="tab in tabs"
-        :key="tab.path"
-        type="button"
-        class="tab-item"
-        :class="{ active: isActive(tab) }"
-        @click="router.push(tab.fullPath || tab.path)"
-      >
-        <span class="tab-title">{{ tab.title }}</span>
-        <span
+  <nav class="app-tabs" :class="{ 'is-compact': compact }" aria-label="已打开页面">
+    <div ref="tabsScroll" class="tabs-scroll">
+      <div v-for="tab in tabs" :key="tab.path" class="tab-item" :class="{ active: isActive(tab) }">
+        <button
+          class="tab-open"
+          type="button"
+          :title="tab.title"
+          :aria-current="isActive(tab) ? 'page' : undefined"
+          @click="router.push(tab.fullPath || tab.path)"
+        >
+          <span class="tab-title">{{ tab.title }}</span>
+        </button>
+        <button
           v-if="!tab.affix"
           class="tab-close"
-          role="button"
-          tabindex="0"
-          aria-label="关闭标签页"
+          type="button"
+          :aria-label="`关闭${tab.title}标签页`"
+          :disabled="closingPath === tab.path"
           @click.stop="closeTab(tab)"
-          @keydown.enter.stop="closeTab(tab)"
         >
           <AppIcon name="close" :size="12" />
-        </span>
-      </button>
+        </button>
+      </div>
     </div>
 
     <div class="tab-actions">
@@ -124,7 +143,7 @@ watch(
         </template>
       </el-dropdown>
     </div>
-  </div>
+  </nav>
 </template>
 
 <style scoped>
@@ -136,6 +155,18 @@ watch(
   align-items: center;
   border-bottom: 1px solid var(--mes-border);
   background: var(--mes-tabs-bg);
+}
+.app-tabs.is-compact {
+  height: 40px;
+  border-bottom: 0;
+  background: transparent;
+}
+.is-compact .tabs-scroll {
+  padding: 0;
+  gap: 4px;
+}
+.is-compact .tab-item {
+  font-size: 13px;
 }
 
 .tabs-scroll {
@@ -164,7 +195,7 @@ watch(
   justify-content: center;
   gap: 6px;
   margin: 0;
-  padding: 0 14px;
+  padding: 0 8px 0 12px;
   color: var(--mes-text-secondary);
   border: 0;
   border-right: 0;
@@ -192,16 +223,39 @@ watch(
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.tab-open {
+  display: inline-flex;
+  min-width: 0;
+  height: 100%;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  color: inherit;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.tab-open:focus-visible,
+.tab-close:focus-visible {
+  outline: 2px solid var(--mes-primary);
+  outline-offset: 2px;
+}
 
 .tab-close {
   display: inline-flex;
-  width: 18px;
-  height: 18px;
+  width: 24px;
+  height: 28px;
   flex: none;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
+  padding: 0;
+  border: 0;
+  border-radius: var(--mes-radius-sm);
+  background: transparent;
   color: var(--mes-text-muted);
+  cursor: pointer;
 }
 
 .tab-close:hover {
@@ -227,6 +281,10 @@ watch(
 }
 
 @media (max-width: 640px) {
+  .tab-open,
+  .tab-close {
+    min-height: 36px;
+  }
   .tab-item {
     min-width: 94px;
   }

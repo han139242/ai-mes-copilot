@@ -5,13 +5,20 @@ import AppIcon from '@/components/common/AppIcon.vue';
 import { aiPageContext } from '@/utils/ai-page-context';
 import {
   activeMessages,
+  activeQuestion,
+  canUndoQuestion,
   cancelSend,
   dockOpen,
   ensureActiveConversation,
+  hasQuestionDrafts,
+  historyChanging,
   mode,
   sendMessage,
   sending,
+  replaceQuestion,
   setDockOpen,
+  setMode,
+  undoQuestionReplacement,
 } from '@/stores/aiConversation';
 
 // 全局悬浮助手：任何业务页面右下角都能唤起，和工作台读同一份 store。
@@ -35,7 +42,7 @@ const panelVisible = computed(() => dockOpen.value && !(triggerHidden.value && m
 const dockMessages = activeMessages;
 const dockSending = sending;
 
-const question = ref('');
+const question = activeQuestion;
 const composer = ref();
 const messageList = ref();
 // pinned 为 true 时固定吸附右下角；一旦拖动就转为自由位置，位置限制在视口内。
@@ -66,6 +73,7 @@ const windowStyle = computed(() => {
 });
 
 function openDock() {
+  if (triggerHidden.value) setMode('dock');
   setDockOpen(true);
   unreadHint.value = false;
   nextTick(() => {
@@ -130,7 +138,7 @@ function endDrag() {
 
 function submit() {
   const content = question.value.trim();
-  if (!content || dockSending.value) {
+  if (!content || dockSending.value || historyChanging.value) {
     return;
   }
   question.value = '';
@@ -140,7 +148,7 @@ function submit() {
 
 // 浮窗里 Enter 直接发送，Shift+Enter 换行，和独立工作台保持一致。
 function onKeydown(event) {
-  if (event.isComposing || event.shiftKey || event.key !== 'Enter') {
+  if (event.isComposing || event.keyCode === 229 || event.shiftKey || event.key !== 'Enter') {
     return;
   }
   event.preventDefault();
@@ -148,13 +156,15 @@ function onKeydown(event) {
 }
 
 function useQuickPrompt(prompt) {
-  question.value = prompt;
+  if (historyChanging.value) return;
+  replaceQuestion(prompt);
   nextTick(() => composer.value?.focus?.());
 }
 
 // 命令预览需要完整的前置条件卡片，浮窗放不下，引导用户回工作台确认。
 function goWorkbench() {
   setDockOpen(false);
+  setMode('workbench');
   router.push('/ai/workbench');
 }
 
@@ -188,15 +198,22 @@ function onGlobalKeydown(event) {
   if ([...document.querySelectorAll('[role="dialog"]:not(.ai-dock)')].some((dialog) => dialog.getClientRects().length))
     return;
   event.preventDefault();
-  if (dockOpen.value) {
+  if (panelVisible.value) {
     closeDock();
   } else {
     openDock();
   }
 }
 
+function beforeUnload(event) {
+  if (!hasQuestionDrafts.value) return;
+  event.preventDefault();
+  event.returnValue = '';
+}
+
 onMounted(() => {
   window.addEventListener('keydown', onGlobalKeydown);
+  window.addEventListener('beforeunload', beforeUnload);
   if (dockOpen.value) {
     scrollToLatest();
   }
@@ -204,6 +221,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   window.removeEventListener('keydown', onGlobalKeydown);
+  window.removeEventListener('beforeunload', beforeUnload);
   endDrag();
   cancelSend();
 });
@@ -313,7 +331,8 @@ onBeforeUnmount(() => {
               rows="1"
               maxlength="500"
               placeholder="输入问题，Enter 发送"
-              :disabled="dockSending"
+              aria-label="浮窗业务问题"
+              :disabled="historyChanging"
               @keydown="onKeydown"
             />
             <button
@@ -330,13 +349,16 @@ onBeforeUnmount(() => {
               class="dock-send"
               type="button"
               aria-label="发送"
-              :disabled="!question.trim()"
+              :disabled="historyChanging || !question.trim()"
               @click="submit"
             >
               <AppIcon name="arrow" :size="13" />
             </button>
           </div>
-          <p class="dock-hint">Enter 发送 / Shift+Enter 换行</p>
+          <div class="dock-input-options">
+            <button v-if="canUndoQuestion" type="button" @click="undoQuestionReplacement">撤销填入</button>
+            <p class="dock-hint">Enter 发送 / Shift+Enter 换行</p>
+          </div>
         </footer>
       </template>
     </section>
@@ -354,6 +376,21 @@ onBeforeUnmount(() => {
   --dock-text-2: var(--mes-text-secondary, #646a73);
   --dock-text-3: var(--mes-text-muted, var(--mes-text-muted));
   --dock-radius: 8px;
+}
+.dock-input-options {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.dock-input-options > button {
+  min-height: 32px;
+  padding: 2px 0;
+  color: var(--mes-primary);
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
 }
 
 .dock-trigger {

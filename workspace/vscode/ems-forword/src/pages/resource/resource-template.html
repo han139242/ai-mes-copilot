@@ -1,10 +1,20 @@
 
   <!-- 通用CRUD界面：依次渲染工具栏、筛选区、主表、分页、明细区和各类弹窗。 -->
   <div v-if="config" class="mes-page resource-page">
-    <el-alert v-if="config.key === 'wms-outbound-order'" type="info" :closable="false" show-icon
-      title="库存半成品领料：半成品必须够整份需求，余量不足会直接提示，只能改领原材料；够整份时先从下方出库明细打开“领用检验单”，全部合格后再转线边。无需重复生产组件，整机装配仍正常执行。撤回未确认领料可恢复原生产安排。" />
-    <el-alert v-if="config.key === 'mfg-task'" type="info" :closable="false" show-icon
-      title="计划数量是合格目标，达标只计已审核报工；不良不计入合格数。原任务本次报工结束后，仍须通过返工或补产补足差额。" />
+    <el-alert
+      v-if="config.key === 'wms-outbound-order'"
+      type="info"
+      :closable="false"
+      show-icon
+      title="库存半成品领料：半成品必须够整份需求，余量不足会直接提示，只能改领原材料；够整份时先从下方出库明细打开“领用检验单”，全部合格后再转线边。无需重复生产组件，整机装配仍正常执行。撤回未确认领料可恢复原生产安排。"
+    />
+    <el-alert
+      v-if="config.key === 'mfg-task'"
+      type="info"
+      :closable="false"
+      show-icon
+      title="计划数量是合格目标，达标只计已审核报工；不良不计入合格数。原任务本次报工结束后，仍须通过返工或补产补足差额。"
+    />
     <WorkReportPreparationPanel
       v-if="config.key === 'mfg-work-report' && filters.taskId"
       :task-id="filters.taskId"
@@ -18,17 +28,12 @@
           <span class="resource-title-icon"><AppIcon :name="config.icon" :size="18" /></span>
           <div class="resource-title-line">
             <h1>{{ config.title }}</h1>
-            <span class="resource-count">共 {{ total }} 条</span>
+            <span class="resource-count" aria-live="polite">{{ resultCountLabel }}</span>
             <el-tag v-if="previewMode" size="small" type="warning" effect="plain">预览数据</el-tag>
           </div>
         </div>
         <div class="resource-toolbar">
           <div class="toolbar-primary">
-            <el-button v-if="batchDeleteAllowed" type="danger" plain
-              :disabled="!selectedBatchRows.length || loading" :loading="batchDeleting" @click="handleBatchDelete">
-              批量删除{{ selectedBatchRows.length ? `（${selectedBatchRows.length}）` : '' }}
-            </el-button>
-            <span v-if="batchDeleteAllowed && selectedBatchRows.length">已选 {{ selectedBatchRows.length }} 张（当前页）</span>
             <el-button v-if="permissions.create && !config.contextCreateOnly" type="primary" @click="openCreate()"
               ><AppIcon name="plus" :size="16" />新增</el-button
             >
@@ -43,12 +48,20 @@
             </el-button>
           </div>
           <div class="toolbar-secondary">
+            <el-button
+              class="mobile-filter-toggle"
+              :aria-controls="`query-${config.key}`"
+              :aria-expanded="mobileFiltersOpen"
+              @click="mobileFiltersOpen = !mobileFiltersOpen"
+              ><AppIcon name="filter" :size="15" />筛选{{ activeFilterCount ? ` (${activeFilterCount})` : '' }}</el-button
+            >
             <span class="data-source" :class="{ 'is-local': localDataMode }"><i />{{ dataSourceLabel }}</span>
             <el-tooltip content="导出 Excel" placement="top">
               <el-button
                 v-if="permissions.export"
                 class="mes-icon-button"
                 :loading="exporting"
+                :disabled="loading || !hasLoaded || Boolean(loadError)"
                 aria-label="导出 Excel"
                 @click="handleExport"
                 ><AppIcon name="download" :size="16"
@@ -77,7 +90,7 @@
               </div>
             </el-popover>
             <el-tooltip content="刷新数据" placement="top">
-              <el-button class="mes-icon-button" aria-label="刷新数据" @click="refreshData"
+              <el-button class="mes-icon-button" aria-label="刷新数据" :loading="loading" @click="refreshData"
                 ><AppIcon name="refresh" :size="16"
               /></el-button>
             </el-tooltip>
@@ -85,16 +98,17 @@
         </div>
       </header>
 
-      <div class="resource-querybar">
+      <div :id="`query-${config.key}`" class="resource-querybar" :class="{ 'is-mobile-expanded': mobileFiltersOpen }">
         <div class="filter-grid">
           <div v-for="item in visibleFilters" :key="item.prop" class="filter-item">
-            <label>{{ item.label }}</label>
+            <label :for="`filter-${config.key}-${item.prop}`">{{ item.label }}</label>
             <ResourceField
               v-model="filters[item.prop]"
               :field="item"
+              :input-id="`filter-${config.key}-${item.prop}`"
               :options="optionsFor(item)"
               compact
-              @keyup.enter="handleSearch"
+              @keyup.enter="!$event.isComposing && $event.keyCode !== 229 && handleSearch()"
             />
           </div>
         </div>
@@ -102,11 +116,40 @@
           <el-button type="primary" @click="handleSearch"><AppIcon name="search" :size="15" />查询</el-button>
           <el-button @click="resetSearch"><AppIcon name="refresh" :size="15" />重置</el-button>
           <el-button v-if="hasExtraFilters" text @click="filterExpanded = !filterExpanded">
-            <AppIcon name="filter" :size="15" />{{
-              filterExpanded ? '收起条件' : `高级查询${activeFilterCount ? ` (${activeFilterCount})` : ''}`
-            }}
+            <AppIcon name="filter" :size="15" />{{ filterExpanded ? '收起条件' : `高级查询${activeFilterCount ? `
+            (${activeFilterCount})` : ''}` }}
           </el-button>
         </div>
+      </div>
+
+      <div v-if="appliedFilterItems.length || filtersChanged" class="resource-query-state" aria-live="polite">
+        <span v-if="appliedFilterItems.length" class="query-state-label">已应用</span>
+        <button
+          v-for="item in appliedFilterItems"
+          :key="item.prop"
+          type="button"
+          class="applied-filter"
+          :disabled="loading"
+          :title="`${item.label}：${item.value}`"
+          :aria-label="`移除筛选：${item.label}，${item.value}`"
+          @click="removeAppliedFilter(item.prop)"
+        >
+          <span>{{ item.label }}：{{ item.value }}</span><AppIcon name="close" :size="13" />
+        </button>
+        <span v-if="filtersChanged" class="query-pending"><AppIcon name="edit" :size="13" />条件已修改，查询后生效</span>
+      </div>
+
+      <div v-if="batchDeleteAllowed && selectedBatchRows.length" class="resource-selectionbar" role="status">
+        <strong>已选 {{ selectedBatchRows.length }} 条</strong><span>当前页</span>
+        <el-button text :disabled="batchDeleting" @click="clearBatchSelection">取消选择</el-button>
+        <el-button
+          type="danger"
+          plain
+          :disabled="loading || Boolean(loadError)"
+          :loading="batchDeleting"
+          @click="handleBatchDelete"
+          >删除所选</el-button
+        >
       </div>
 
       <div v-if="activeAlerts.length" class="resource-business-alert" role="status">
@@ -124,9 +167,11 @@
 
       <div v-if="loadError" class="resource-load-error" role="alert">
         <div>
-          <AppIcon name="alert" :size="17" /><span><strong>数据加载失败</strong>{{ loadError }}</span>
+          <AppIcon name="alert" :size="17" /><span
+            ><strong>{{ hasLoaded ? '加载失败，保留上次结果' : '数据暂未读到' }}</strong>{{ loadError }}</span
+          >
         </div>
-        <el-button type="danger" plain size="small" @click="refreshData"
+        <el-button type="danger" plain size="small" :loading="loading" @click="retryQuery"
           ><AppIcon name="refresh" :size="14" />重新加载</el-button
         >
       </div>
@@ -134,26 +179,30 @@
       <el-table
         v-live-column-resize
         ref="mainTableRef"
-        v-loading="loading"
+        v-loading="loading && hasLoaded"
         :data="rows"
         :row-key="config.idField"
         :tree-props="{ children: 'children' }"
         :row-class-name="tableRowClassName"
-        :height="detailConfig && detailViewAllowed ? 'min(38vh, 420px)' : 'min(66vh, 700px)'"
+        :max-height="showMasterDetail ? 'min(38vh, 420px)' : 'min(64vh, 680px)'"
         highlight-current-row
         default-expand-all
         stripe
         border
         class="resource-table"
         :class="{
-          'compact-fixed-columns': config.compactFixedColumns,
-          'selection-only-highlight': config.selectionOnlyHighlight,
-        }"
+            'compact-fixed-columns': config.compactFixedColumns,
+            'selection-only-highlight': config.selectionOnlyHighlight,
+          }"
         @current-change="handleCurrentRowChange"
         @selection-change="selectedBatchRows = $event"
       >
-        <el-table-column v-if="batchDeleteAllowed" type="selection" width="48"
-          :selectable="(row) => !batchDeleting && canDeleteRow(row)" />
+        <el-table-column
+          v-if="batchDeleteAllowed"
+          type="selection"
+          width="48"
+          :selectable="(row) => !batchDeleting && canDeleteRow(row)"
+        />
         <el-table-column type="index" label="#" width="54" align="center" />
         <el-table-column
           v-for="(item, index) in visibleTableFields"
@@ -187,9 +236,24 @@
             >
           </template>
         </el-table-column>
-        <el-table-column label="操作" :width="config.actionColumnWidth || 154" fixed="right" align="center">
+        <el-table-column
+          label="操作"
+          :width="config.actionColumnWidth || (detailConfig ? 184 : 154)"
+          fixed="right"
+          align="center"
+        >
           <template #default="scope">
             <div class="row-actions">
+              <el-tooltip v-if="detailConfig" content="查看关联明细" placement="top">
+                <el-button
+                  link
+                  type="primary"
+                  aria-label="查看关联明细"
+                  :disabled="loading || Boolean(loadError)"
+                  @click.stop="openRelatedDetail(scope.row)"
+                  ><AppIcon name="link" :size="16"
+                /></el-button>
+              </el-tooltip>
               <el-tooltip content="查看详情" placement="top"
                 ><el-button link type="primary" aria-label="查看详情" @click="openDetail(scope.row)"
                   ><AppIcon name="eye" :size="16" /></el-button
@@ -209,10 +273,7 @@
                     ><AppIcon name="edit" :size="16" /></el-button
                 ></span>
               </el-tooltip>
-              <el-dropdown
-                v-if="visibleActions(scope.row).length || visibleRelations(scope.row).length"
-                trigger="click"
-              >
+              <el-dropdown v-if="visibleActions(scope.row).length || visibleRelations(scope.row).length" trigger="click">
                 <el-button link type="primary">更多<AppIcon name="chevron" :size="13" /></el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
@@ -253,30 +314,55 @@
         </el-table-column>
         <template #empty>
           <div class="table-empty">
-            <el-empty :description="loadError ? '数据暂不可用' : '暂无符合条件的数据'" :image-size="70">
-              <el-button v-if="loadError" type="primary" plain @click="refreshData"
-                ><AppIcon name="refresh" :size="15" />重新加载</el-button
+            <el-skeleton v-if="loading && !hasLoaded" :rows="5" animated aria-label="正在读取数据" />
+            <template v-else>
+              <AppIcon :name="loadError ? 'alert' : 'clipboard'" :size="30" />
+              <strong
+                >{{ loadError ? '暂时无法显示记录' : appliedFilterItems.length ? '没有匹配的记录' :
+                `暂无${config.title.replace('管理', '')}记录` }}</strong
               >
-            </el-empty>
+              <el-button v-if="loadError" plain @click="retryQuery">重新加载</el-button>
+              <el-button v-else-if="appliedFilterItems.length" plain @click="resetSearch">清除筛选</el-button>
+              <el-button
+                v-else-if="permissions.create && !config.contextCreateOnly"
+                type="primary"
+                plain
+                @click="openCreate()"
+                >新增{{ config.title.replace('管理', '') }}</el-button
+              >
+            </template>
           </div>
         </template>
       </el-table>
 
+      <div v-if="missingReferenceCount" class="resource-reference-status" role="status">
+        <span>{{ referenceNamesLoading ? '正在读取关联名称…' : `${missingReferenceCount} 处关联名称未取得` }}</span>
+        <el-button v-if="!referenceNamesLoading && canRetryReferenceNames" link type="primary" @click="hydrateReferenceLabels()">重新读取名称</el-button>
+      </div>
       <div v-if="!config.treeEndpoint" class="resource-pagination">
-        <span>共 {{ total }} 条记录</span>
+        <span
+          >{{ hasLoaded ? `共 ${total} 条记录` : '尚未读取记录' }}{{ loadError && hasLoaded ? ' · 上次结果' : '' }}</span
+        >
         <el-pagination
           v-model:current-page="pagination.current"
           v-model:page-size="pagination.size"
           :total="total"
+          :disabled="loading || !hasLoaded || Boolean(loadError)"
           :page-sizes="[10, 20, 50, 100]"
-          layout="sizes, prev, pager, next, jumper"
+          :pager-count="5"
+          layout="sizes, prev, pager, next, jumper, slot"
           background
           @current-change="handlePageChange"
           @size-change="handleSizeChange"
-        />
+        >
+          <span class="pagination-position" role="status">第 {{ pagination.current }} / {{ Math.max(1, Math.ceil(total / pagination.size)) }} 页</span>
+        </el-pagination>
       </div>
 
-      <section v-if="detailConfig && detailViewAllowed" class="master-detail-panel">
+      <div v-if="detailConfig && !selectedRow && rows.length" class="resource-detail-hint">
+        <AppIcon name="link" :size="14" />点选一条记录，查看关联明细
+      </div>
+      <section v-if="detailConfig && detailViewAllowed && selectedRow" class="master-detail-panel">
         <header class="master-detail-head">
           <div>
             <span class="master-detail-icon"><AppIcon name="link" :size="16" /></span>
@@ -290,22 +376,31 @@
                 <el-tab-pane v-for="item in detailConfigs" :key="item.key" :label="item.title" :name="item.key" />
               </el-tabs>
               <strong v-else>{{ detailConfig.title }}</strong>
-              <small v-if="selectedRow">{{ selectedRowLabel }} · {{ detailRows.length }} 条</small>
-              <small v-else>点击上方一条记录查看对应明细</small>
+              <small
+                >{{ selectedRowLabel }} · {{ detailLoading ? '读取中…' : detailError ? '读取失败' : `${detailRows.length}
+                条` }}</small
+              >
             </div>
           </div>
-          <el-tooltip v-if="selectedRow" content="刷新明细" placement="top">
-            <el-button
-              class="mes-icon-button"
-              aria-label="刷新明细"
-              :loading="detailLoading"
-              @click="loadMasterDetail(selectedRow)"
-              ><AppIcon name="refresh" :size="15"
-            /></el-button>
-          </el-tooltip>
+          <div class="master-detail-controls">
+            <el-button text :aria-expanded="showMasterDetail" @click="detailExpanded = !detailExpanded"
+              >{{ detailExpanded ? '收起明细' : '展开明细' }}</el-button
+            >
+            <el-tooltip v-if="showMasterDetail" content="刷新明细" placement="top">
+              <el-button
+                class="mes-icon-button"
+                aria-label="刷新明细"
+                :loading="detailLoading"
+                @click="loadMasterDetail(selectedRow)"
+                ><AppIcon name="refresh" :size="15"
+              /></el-button>
+            </el-tooltip>
+          </div>
         </header>
-        <p v-if="detailConfig.description" class="master-detail-description">{{ detailConfig.description }}</p>
-        <div v-if="detailError" class="master-detail-error" role="alert">
+        <p v-if="showMasterDetail && detailConfig.description" class="master-detail-description">
+          {{ detailConfig.description }}
+        </p>
+        <div v-if="showMasterDetail && detailError" class="master-detail-error" role="alert">
           <div>
             <AppIcon name="alert" :size="16" /><span><strong>明细加载失败</strong>{{ detailError }}</span>
           </div>
@@ -314,6 +409,7 @@
           >
         </div>
         <el-table
+          v-if="showMasterDetail"
           v-live-column-resize
           v-loading="detailLoading"
           :data="detailRows"
@@ -363,6 +459,8 @@
       class="resource-drawer"
       :size="formMode === 'view' ? 'min(720px, 100vw)' : 'min(820px, 100vw)'"
       :with-header="false"
+      :before-close="closeForm"
+      :title="formMode === 'view' ? `${config.title}详情` : formTitle"
       append-to-body
     >
       <div class="drawer-shell">
@@ -373,19 +471,19 @@
               <strong>{{ formMode === 'view' ? `${config.title.replace('管理', '')}详情` : formTitle }}</strong>
             </div>
           </div>
-          <el-button text aria-label="关闭" @click="formOpen = false"><AppIcon name="close" :size="18" /></el-button>
+          <el-button text aria-label="关闭" :disabled="submitting" @click="closeForm"
+            ><AppIcon name="close" :size="18"
+          /></el-button>
         </header>
         <main class="drawer-content">
+          <el-alert v-if="formError" :title="formError" type="error" :closable="false" show-icon />
           <el-descriptions v-if="formMode === 'view'" :column="2" border class="detail-descriptions">
             <el-descriptions-item
               v-for="item in config.fields.filter((fieldItem) => fieldItem.detail !== false)"
               :key="item.prop"
               :label="item.label"
             >
-              <el-tag
-                v-if="item.options?.length"
-                :type="tagTypeFor(item, formModel[item.prop], formModel)"
-                size="small"
+              <el-tag v-if="item.options?.length" :type="tagTypeFor(item, formModel[item.prop], formModel)" size="small"
                 >{{ formatValue(item, formModel[item.prop], formModel) }}</el-tag
               >
               <span v-else>{{ formatValue(item, formModel[item.prop], formModel) }}</span>
@@ -398,7 +496,7 @@
             :qualified-quantity="Number(formModel.qualifiedQuantity || 0)"
             :defect-quantity="Number(formModel.defectQuantity || 0)"
             editable
-            @materials="childRows = $event"
+            @materials="handlePreparedMaterials"
             @blocked="reportPreparationBlocked = $event"
             @preparation="reportPlanReference = $event"
           />
@@ -411,6 +509,7 @@
             :model="formModel"
             :rules="formRules"
             label-position="top"
+            scroll-to-error
             class="resource-form"
           >
             <el-form-item
@@ -419,10 +518,15 @@
               :label="item.label"
               :prop="item.prop"
               :class="{
-                wide: item.type === 'textarea' || (config.key === 'mfg-work-report' && item.prop === 'actualWorkHours'),
-              }"
+                  wide: item.type === 'textarea' || (config.key === 'mfg-work-report' && item.prop === 'actualWorkHours'),
+                }"
             >
-              <ResourceField v-model="formModel[item.prop]" :field="item" :options="optionsFor(item)" />
+              <ResourceField
+                :model-value="formModel[item.prop]"
+                :field="item"
+                :options="optionsFor(item)"
+                @update:model-value="changeFormField(item, $event)"
+              />
               <p
                 v-if="config.key === 'mfg-work-report' && item.prop === 'actualWorkHours'"
                 class="report-plan-reference"
@@ -436,15 +540,8 @@
 
           <section v-if="config.fullChild" class="child-editor">
             <div class="child-editor-head">
-              <div>
-                <strong>{{ config.fullChild.title }}</strong
-                ><span>{{ childRows.length }} 条</span>
-              </div>
-              <el-button
-                v-if="formMode !== 'view' && !config.fullChild.hideAdd"
-                type="primary"
-                plain
-                @click="addChild"
+              <div><strong>{{ config.fullChild.title }}</strong><span>{{ childRows.length }} 条</span></div>
+              <el-button v-if="formMode !== 'view' && !config.fullChild.hideAdd" type="primary" plain @click="addChild"
                 ><AppIcon name="plus" :size="15" />添加明细</el-button
               >
             </div>
@@ -465,10 +562,10 @@
                 <template #default="scope">
                   <ResourceField
                     v-if="formMode !== 'view'"
-                    v-model="scope.row[item.prop]"
+                    :model-value="scope.row[item.prop]"
                     :field="item"
                     :options="optionsFor(item, scope.row)"
-                    @update:model-value="handleChildFieldChange(item, scope.row)"
+                    @update:model-value="changeChildField(item, scope.row, $event)"
                     compact
                   />
                   <span v-else>{{ formatValue(item, scope.row[item.prop], scope.row) }}</span>
@@ -483,15 +580,27 @@
           </section>
         </main>
         <footer class="drawer-footer">
-          <el-button @click="formOpen = false">{{ formMode === 'view' ? '关闭' : '取消' }}</el-button>
-          <el-button v-if="formMode !== 'view'" type="primary" :loading="submitting" @click="submitForm"
+          <span v-if="formDirty" class="draft-indicator">未保存</span>
+          <el-button :disabled="submitting" @click="closeForm">{{ formMode === 'view' ? '关闭' : '取消' }}</el-button>
+          <el-button
+            v-if="formMode !== 'view'"
+            type="primary"
+            :loading="submitting || formSubmitPending"
+            @click="submitForm"
             ><AppIcon name="save" :size="16" />保存</el-button
           >
         </footer>
       </div>
     </el-drawer>
 
-    <el-dialog v-model="actionOpen" :title="currentAction?.label" width="min(520px, 92vw)" append-to-body>
+    <el-dialog
+      v-model="actionOpen"
+      :title="currentAction?.label"
+      width="min(520px, 92vw)"
+      :before-close="closeAction"
+      append-to-body
+    >
+      <el-alert v-if="actionError" :title="actionError" type="error" :closable="false" show-icon />
       <el-alert
         v-if="currentAction?.description"
         :title="currentAction.description"
@@ -502,29 +611,27 @@
       <el-descriptions v-if="actionModel._lineSidePreparation" :column="1" border>
         <el-descriptions-item label="生产工单">{{ actionModel._lineSidePreparation.workOrderNo }}</el-descriptions-item>
         <el-descriptions-item label="目标产线">{{ actionModel._lineSidePreparation.lineName }}</el-descriptions-item>
-        <el-descriptions-item label="库位选择依据">{{
-          actionModel._lineSidePreparation.explanation
-        }}</el-descriptions-item>
+        <el-descriptions-item label="库位选择依据"
+          >{{ actionModel._lineSidePreparation.explanation }}</el-descriptions-item
+        >
       </el-descriptions>
       <template v-if="actionModel._dispatchPreview">
         <el-descriptions :column="1" border class="dispatch-preview">
           <el-descriptions-item label="产线">{{ actionModel._dispatchPreview.lineName }}</el-descriptions-item>
-          <el-descriptions-item label="预计开始">{{
-            actionModel._dispatchPreview.plannedStartTime
-              ? dayjs(actionModel._dispatchPreview.plannedStartTime).format('YYYY-MM-DD HH:mm')
-              : '待确定'
-          }}</el-descriptions-item>
-          <el-descriptions-item label="预计完成">{{
-            actionModel._dispatchPreview.dueTime
-              ? dayjs(actionModel._dispatchPreview.dueTime).format('YYYY-MM-DD HH:mm')
-              : '待确定'
-          }}</el-descriptions-item>
+          <el-descriptions-item label="预计开始"
+            >{{ actionModel._dispatchPreview.plannedStartTime ?
+            dayjs(actionModel._dispatchPreview.plannedStartTime).format('YYYY-MM-DD HH:mm') : '待确定'
+            }}</el-descriptions-item
+          >
+          <el-descriptions-item label="预计完成"
+              >{{ actionModel._dispatchPreview.dueTime ? dayjs(actionModel._dispatchPreview.dueTime).format('YYYY-MM-DD HH:mm') : '待确定' }}</el-descriptions-item
+          >
           <el-descriptions-item label="工艺标准工时"
             >{{ actionModel._dispatchPreview.estimatedMinutes }} 分钟（不含休班等待）</el-descriptions-item
           >
-          <el-descriptions-item label="计划截止">{{
-            actionModel._dispatchPreview.planDeadline || '未设置'
-          }}</el-descriptions-item>
+          <el-descriptions-item label="计划截止"
+            >{{ actionModel._dispatchPreview.planDeadline || '未设置' }}</el-descriptions-item
+          >
         </el-descriptions>
         <el-alert
           v-for="message in actionModel._dispatchPreview.blockers || []"
@@ -548,25 +655,21 @@
           >前往班组排班</el-button
         >
       </template>
-      <el-form ref="actionFormRef" :model="actionModel" :rules="actionRules" label-position="top">
-        <el-form-item
-          v-for="item in currentAction?.fields || []"
-          :key="item.prop"
-          :label="item.label"
-          :prop="item.prop"
-        >
+      <el-form ref="actionFormRef" :model="actionModel" :rules="actionRules" label-position="top" scroll-to-error>
+        <el-form-item v-for="item in currentAction?.fields || []" :key="item.prop" :label="item.label" :prop="item.prop">
           <ResourceField
-            v-model="actionModel[item.prop]"
+            :model-value="actionModel[item.prop]"
             :field="fieldForAction(item)"
             :options="optionsFor(fieldForAction(item), actionRow)"
+            @update:model-value="changeActionField(item, $event)"
           />
         </el-form-item>
       </el-form>
       <template #footer
-        ><el-button @click="actionOpen = false">取消</el-button
+        ><el-button :disabled="submitting" @click="closeAction">取消</el-button
         ><el-button
           type="primary"
-          :loading="submitting"
+          :loading="submitting || actionSubmitPending"
           :disabled="Boolean(currentAction?.canSubmit && !currentAction.canSubmit(actionModel))"
           @click="submitAction"
           >确认执行</el-button
@@ -574,7 +677,7 @@
       >
     </el-dialog>
 
-    <el-dialog v-model="uploadOpen" title="上传附件" width="min(520px, 92vw)" append-to-body>
+    <el-dialog v-model="uploadOpen" title="上传附件" width="min(520px, 92vw)" :before-close="closeUpload" append-to-body>
       <el-upload
         drag
         :auto-upload="false"
@@ -594,7 +697,7 @@
         />
       </div>
       <template #footer
-        ><el-button @click="uploadOpen = false">取消</el-button
+        ><el-button :disabled="submitting" @click="closeUpload">取消</el-button
         ><el-button type="primary" :loading="submitting" @click="submitUpload">上传</el-button></template
       >
     </el-dialog>
@@ -623,9 +726,9 @@
                 show-overflow-tooltip
             /></el-table>
             <el-descriptions v-else-if="value && typeof value === 'object'" :column="1" border
-              ><el-descriptions-item v-for="(childValue, childKey) in value" :key="childKey" :label="childKey">{{
-                typeof childValue === 'object' ? JSON.stringify(childValue) : childValue
-              }}</el-descriptions-item></el-descriptions
+              ><el-descriptions-item v-for="(childValue, childKey) in value" :key="childKey" :label="childKey"
+                >{{ typeof childValue === 'object' ? JSON.stringify(childValue) : childValue }}</el-descriptions-item
+              ></el-descriptions
             >
             <p v-else>{{ value ?? '--' }}</p>
           </section>

@@ -5,7 +5,7 @@ import AppSidebar from '@/components/layout/AppSidebar.vue';
 import AppHeader from '@/components/layout/AppHeader.vue';
 import AppTabs from '@/components/layout/AppTabs.vue';
 import AiDock from '@/components/ai/AiDock.vue';
-import { OPEN_AI_ASSISTANT_EVENT } from '@/utils/app-events';
+import { allowPageRefresh, OPEN_AI_ASSISTANT_EVENT } from '@/utils/app-events';
 
 // 这是登录后的后台总布局：侧栏负责菜单，Header 负责顶部操作，Tabs 记录已打开页面，
 // 内层 RouterView 再显示当前选中的具体业务页面。
@@ -17,6 +17,17 @@ const mobileMenuOpen = ref(false);
 // 刷新标签页时递增 key，Vue 会重新创建当前路由组件，从而重新执行页面初始化和数据加载。
 const viewVersion = ref(0);
 const tabs = ref([]);
+let refreshPending = false;
+async function refreshCurrentPage() {
+  if (refreshPending) return;
+  refreshPending = true;
+  const originalPath = route.fullPath;
+  try {
+    if ((await allowPageRefresh()) && route.fullPath === originalPath) viewVersion.value += 1;
+  } finally {
+    refreshPending = false;
+  }
+}
 
 // 根据窗口宽度更新移动端状态，并在回到桌面端时关闭移动抽屉。
 function updateViewport() {
@@ -88,8 +99,12 @@ onBeforeUnmount(() => {
     </div>
 
     <section class="layout-main">
-      <AppHeader :mobile="mobile" @toggle="toggleSidebar" />
-      <AppTabs v-model="tabs" @refresh="viewVersion += 1" />
+      <AppHeader :mobile="mobile" @toggle="toggleSidebar">
+        <template #navigation><div id="mes-header-tabs" class="header-tabs-target" /></template>
+      </AppHeader>
+      <Teleport to="#mes-header-tabs" :disabled="mobile" defer>
+        <AppTabs v-model="tabs" :compact="!mobile" @refresh="refreshCurrentPage" />
+      </Teleport>
       <main class="content-region">
         <!-- 这里显示 layout 的子路由，例如生产订单、设备管理等具体业务页面。 -->
         <RouterView v-slot="{ Component }">
@@ -114,6 +129,13 @@ onBeforeUnmount(() => {
 
 .layout-shell.sidebar-collapsed {
   padding-left: var(--mes-sidebar-collapsed-width);
+}
+.layout-shell:not(.is-mobile) {
+  --mes-tabs-height: 0px;
+}
+.header-tabs-target {
+  width: 100%;
+  min-width: 0;
 }
 
 .sidebar-region {

@@ -2,7 +2,7 @@
  * 版权所有 (c) 智能调光台灯 MES 项目组 2026
  * 本项目为课程实训作品，版权说明按 CodeArts 文件头注释规范补充。
  */
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import dayjs from 'dayjs';
 import { chatWithAi } from '@/api/ai';
 import {
@@ -13,7 +13,8 @@ import {
   renameConversation as renameRemoteConversation,
   setConversationArchived,
 } from '@/api/ai/conversations';
-import { getCurrentUser } from '@/utils/auth';
+import { authRevision, getCurrentUser } from '@/utils/auth';
+import { sliceUtf16 } from '../utils/text.js';
 import { businessResultHistory, commandPreviewHistory, orderResultHistory } from '@/utils/ai-order-context';
 import { sanitizeAiPageContext } from '../utils/ai-page-context.js';
 
@@ -147,6 +148,7 @@ function loadLocalConversations() {
 export const conversations = ref(loadLocalConversations());
 export const activeConversationId = ref(localStorage.getItem(storageKey(ACTIVE_BASE)) || '');
 export const sending = ref(false);
+export const historyChanging = ref(false);
 export const mode = ref(localStorage.getItem(MODE_KEY) === 'dock' ? 'dock' : 'workbench');
 export const dockOpen = ref(localStorage.getItem(DOCK_OPEN_KEY) === 'true');
 // 后端历史是否已接管：false 时页面顶部提示「当前为本机记录」，避免把缓存当成后台数据。
@@ -154,6 +156,10 @@ export const historySynced = ref(false);
 
 let abortController;
 let messageRevision = 0;
+let sessionRevision = 0;
+let ownerScope = accountScope();
+const questionDrafts = ref({});
+const replacedDrafts = ref({});
 
 export const activeConversation = computed(
   () => conversations.value.find((item) => item.id === activeConversationId.value) || conversations.value[0],
@@ -161,10 +167,79 @@ export const activeConversation = computed(
 export const activeMessages = computed(() => activeConversation.value?.messages || []);
 export const hasMessages = computed(() => activeMessages.value.length > 0);
 
+function draftKey(conversation) {
+  return conversation?.id || '';
+}
+
+export function conversationDraft(conversation) {
+  return questionDrafts.value[draftKey(conversation)] || '';
+}
+
+// 输入只保留在本次登录的内存中，工作台和浮窗共用，不写入历史或存储。
+export const activeQuestion = computed({
+  get: () => conversationDraft(activeConversation.value),
+  set: (value) => {
+    const key = draftKey(ensureActiveConversation());
+    const text = sliceUtf16(String(value || ''), 500);
+    if (text) questionDrafts.value[key] = text;
+    else clearQuestion(activeConversation.value);
+  },
+});
+export const hasQuestionDrafts = computed(() => Object.values(questionDrafts.value).some((value) => value.trim()));
+export const canUndoQuestion = computed(() => replacedDrafts.value[draftKey(activeConversation.value)] !== undefined);
+
+export function replaceQuestion(text) {
+  const value = sliceUtf16(String(text || ''), 500);
+  if (value === activeQuestion.value) return;
+  const key = draftKey(ensureActiveConversation());
+  if (activeQuestion.value.trim()) replacedDrafts.value[key] = activeQuestion.value;
+  activeQuestion.value = value;
+}
+
+export function undoQuestionReplacement() {
+  const key = draftKey(activeConversation.value);
+  if (!Object.hasOwn(replacedDrafts.value, key)) return;
+  activeQuestion.value = replacedDrafts.value[key];
+  delete replacedDrafts.value[key];
+}
+
+function clearQuestion(conversation) {
+  const key = draftKey(conversation);
+  delete questionDrafts.value[key];
+  delete replacedDrafts.value[key];
+}
+
+function currentVersion(conversation) {
+  return conversations.value.find(
+    (item) => item.id === conversation.id || (conversation.remoteId && item.remoteId === conversation.remoteId),
+  );
+}
+
+async function changeConversation(conversation, remoteChange, applyChange) {
+  if (!conversation || sending.value || historyChanging.value) return false;
+  const revision = sessionRevision;
+  historyChanging.value = true;
+  messageRevision++;
+  try {
+    if (conversation.remoteId) await remoteChange(conversation.remoteId);
+    if (revision !== sessionRevision) return false;
+    const current = currentVersion(conversation);
+    if (!current) return false;
+    applyChange(current);
+    persistConversations();
+    return true;
+  } finally {
+    if (revision === sessionRevision) {
+      messageRevision++;
+      historyChanging.value = false;
+    }
+  }
+}
+
 // 今天 / 更早分组，供侧栏会话记录使用。
 export const sessionGroups = computed(() => {
   const recent = conversations.value
-    .filter((item) => !item.archived && (item.messages.length || item.remoteId))
+    .filter((item) => !item.archived && (item.messages.length || item.remoteId || conversationDraft(item).trim()))
     .sort((left, right) => dayjs(right.updatedAt).valueOf() - dayjs(left.updatedAt).valueOf());
   return [
     { key: 'today', label: '今天', items: recent.filter((item) => dayjs(item.updatedAt).isSame(dayjs(), 'day')) },
@@ -174,7 +249,7 @@ export const sessionGroups = computed(() => {
 
 export const archivedConversations = computed(() =>
   conversations.value
-    .filter((item) => item.archived && item.messages.length)
+    .filter((item) => item.archived && (item.messages.length || conversationDraft(item).trim()))
     .sort((left, right) => dayjs(right.updatedAt).valueOf() - dayjs(left.updatedAt).valueOf()),
 );
 
@@ -205,20 +280,18 @@ export function setDockOpen(value) {
   }
 }
 
-export function selectConversation(id) {
+export async function selectConversation(id) {
   const target = conversations.value.find((item) => item.id === id);
   if (!target) {
     return;
   }
   if (target.archived) {
-    target.archived = false;
-    if (target.remoteId) {
-      setConversationArchived(target.remoteId, false).catch(() => {});
-    }
+    if (!(await restoreConversation(id))) return false;
   }
   activeConversationId.value = id;
   persistConversations();
-  loadActiveMessages();
+  await loadActiveMessages();
+  return true;
 }
 
 export function ensureActiveConversation(capabilityId = 'general') {
@@ -241,8 +314,11 @@ export function setConversationCapability(capabilityId) {
 export function newConversation(capabilityId = 'general') {
   // 远端列表里的 messages=[] 表示尚未加载，不能当作空白草稿复用。
   messageRevision += 1;
-  const draft = conversations.value.find((item) => !item.remoteId && !item.archived && !item.messages.length);
+  const draft = conversations.value.find(
+    (item) => !item.remoteId && !item.archived && !item.messages.length && !conversationDraft(item).trim(),
+  );
   if (draft) {
+    clearQuestion(draft);
     draft.capabilityId = capabilityId;
     draft.updatedAt = dayjs().toISOString();
     activeConversationId.value = draft.id;
@@ -255,82 +331,52 @@ export function newConversation(capabilityId = 'general') {
 }
 
 // 真删除：后端会话一并删除，本地只留一个空草稿，避免历史里残留旧记录。
-export async function clearActiveConversation() {
+export function clearActiveConversation() {
   const conversation = ensureActiveConversation();
-  const { remoteId } = conversation;
-  conversation.messages = [];
-  conversation.title = '新对话';
-  conversation.remoteId = null;
-  conversation.updatedAt = dayjs().toISOString();
-  persistConversations();
-  if (remoteId) {
-    try {
-      await deleteRemoteConversation(remoteId);
-    } catch {
-      // 后端删除失败不影响本地清空，下次同步时该会话会重新出现，属于可接受的降级。
-    }
-  }
+  const draft = conversationDraft(conversation);
+  return changeConversation(conversation, deleteRemoteConversation, (current) => {
+    if (conversationDraft(current) === draft) clearQuestion(current);
+    current.messages = [];
+    current.title = '新对话';
+    current.remoteId = null;
+    current.updatedAt = dayjs().toISOString();
+  });
 }
 
-export async function removeConversation(id) {
+export function removeConversation(id) {
   const conversation = conversations.value.find((item) => item.id === id);
-  if (!conversation) {
-    return;
-  }
-  const { remoteId } = conversation;
-  conversations.value = conversations.value.filter((item) => item.id !== id);
-  if (!conversations.value.length) {
-    conversations.value.push(createLocalConversation());
-  }
-  if (activeConversationId.value === id) {
-    activeConversationId.value = conversations.value[0].id;
-  }
-  persistConversations();
-  if (remoteId) {
-    try {
-      await deleteRemoteConversation(remoteId);
-    } catch {
-      // 静默失败：本地已移除，后端残留不影响当前使用。
-    }
-  }
+  return changeConversation(conversation, deleteRemoteConversation, (current) => {
+    clearQuestion(current);
+    conversations.value = conversations.value.filter((item) => item.id !== current.id);
+    if (!conversations.value.length) conversations.value.push(createLocalConversation());
+    if (activeConversationId.value === current.id) activeConversationId.value = conversations.value[0].id;
+  });
 }
 
-export async function archiveConversation(id) {
+export function archiveConversation(id) {
   const conversation = conversations.value.find((item) => item.id === id);
-  if (!conversation) {
-    return;
-  }
-  conversation.archived = true;
-  conversation.updatedAt = dayjs().toISOString();
-  if (activeConversationId.value === id) {
-    newConversation();
-  }
-  persistConversations();
-  if (conversation.remoteId) {
-    try {
-      await setConversationArchived(conversation.remoteId, true);
-    } catch {
-      // 静默失败，本地已归档。
-    }
-  }
+  return changeConversation(
+    conversation,
+    (remoteId) => setConversationArchived(remoteId, true),
+    (current) => {
+      current.archived = true;
+      current.updatedAt = dayjs().toISOString();
+      if (activeConversationId.value === current.id) newConversation();
+    },
+  );
 }
 
-export async function restoreConversation(id) {
+export function restoreConversation(id) {
   const conversation = conversations.value.find((item) => item.id === id);
-  if (!conversation) {
-    return;
-  }
-  conversation.archived = false;
-  conversation.updatedAt = dayjs().toISOString();
-  activeConversationId.value = id;
-  persistConversations();
-  if (conversation.remoteId) {
-    try {
-      await setConversationArchived(conversation.remoteId, false);
-    } catch {
-      // 静默失败。
-    }
-  }
+  return changeConversation(
+    conversation,
+    (remoteId) => setConversationArchived(remoteId, false),
+    (current) => {
+      current.archived = false;
+      current.updatedAt = dayjs().toISOString();
+      activeConversationId.value = current.id;
+    },
+  );
 }
 
 // 后端消息行转成页面消息：blocks / suggestions / command 都是 JSON 字符串，
@@ -392,8 +438,8 @@ async function recentRemoteMessages(remoteId, response) {
     const latest = await getConversationDetail(remoteId, { current: lastPage, size: 100 });
     rows = Array.isArray(latest?.data?.messages) ? latest.data.messages : [];
     if (rows.length < MAX_MESSAGES) {
-      const previous = lastPage === 2 ? response
-        : await getConversationDetail(remoteId, { current: lastPage - 1, size: 100 });
+      const previous =
+        lastPage === 2 ? response : await getConversationDetail(remoteId, { current: lastPage - 1, size: 100 });
       rows = [...(Array.isArray(previous?.data?.messages) ? previous.data.messages : []), ...rows];
     }
   }
@@ -403,7 +449,7 @@ async function recentRemoteMessages(remoteId, response) {
 // 拉当前会话的消息；失败时保留本地缓存，页面照常可用。
 export async function loadActiveMessages() {
   const conversation = activeConversation.value;
-  if (!conversation?.remoteId || sending.value) {
+  if (!conversation?.remoteId || sending.value || historyChanging.value) {
     return false;
   }
   const revision = messageRevision;
@@ -429,7 +475,7 @@ export async function loadActiveMessages() {
 
 // 首屏先用本地缓存渲染，再尝试让后端接管会话列表与消息。
 export async function syncFromBackend() {
-  if (sending.value) {
+  if (sending.value || historyChanging.value) {
     return false;
   }
   const revision = messageRevision;
@@ -443,6 +489,7 @@ export async function syncFromBackend() {
     const remote = records.map((record) => {
       const mapped = mapRemoteConversation(record);
       const previous = loaded.get(record.conversationId);
+      if (previous) mapped.id = previous.id;
       if (previous?.messages?.length) {
         mapped.messages = previous.messages;
         mapped.workflowOrderNo = previous.workflowOrderNo || '';
@@ -450,14 +497,26 @@ export async function syncFromBackend() {
       return mapped;
     });
     // 本地尚未同步到后端的会话（接口不可用时创建的）要留着，否则内容会凭空消失。
-    const localOnly = conversations.value.filter((item) => !item.remoteId &&
-      (item.messages.length || item.id === activeConversationId.value));
+    const remoteIds = new Set(remote.map((item) => item.remoteId));
+    const localOnly = conversations.value.filter(
+      (item) =>
+        (!item.remoteId &&
+          (item.messages.length || item.id === activeConversationId.value || conversationDraft(item).trim())) ||
+        (item.remoteId && !remoteIds.has(item.remoteId) && (item.archived || conversationDraft(item).trim())),
+    );
     if (remote.length || localOnly.length) {
       const previousId = activeConversationId.value;
       const previousRemote = conversations.value.find((item) => item.id === previousId)?.remoteId;
-      conversations.value = [...localOnly, ...remote].slice(0, MAX_CONVERSATIONS);
-      const matched = conversations.value.find((item) => item.id === previousId
-        || (previousRemote && item.remoteId === previousRemote));
+      const merged = [...localOnly, ...remote];
+      const withDrafts = merged.filter((item) => conversationDraft(item).trim());
+      const withoutDrafts = merged.filter((item) => !conversationDraft(item).trim());
+      conversations.value = [
+        ...withDrafts,
+        ...withoutDrafts.slice(0, Math.max(0, MAX_CONVERSATIONS - withDrafts.length)),
+      ];
+      const matched = conversations.value.find(
+        (item) => item.id === previousId || (previousRemote && item.remoteId === previousRemote),
+      );
       activeConversationId.value = matched?.id || conversations.value[0]?.id || '';
       persistConversations();
     }
@@ -497,7 +556,15 @@ function historyPayload(messages) {
     .slice(-20)
     .map((item) => ({
       role: item.role,
-      content: [commandPreviewHistory(item), orderResultHistory(item), businessResultHistory(item), String(item.content)].filter(Boolean).join('\n').slice(0, 2000),
+      content: [
+        commandPreviewHistory(item),
+        orderResultHistory(item),
+        businessResultHistory(item),
+        String(item.content),
+      ]
+        .filter(Boolean)
+        .join('\n')
+        .slice(0, 2000),
     }));
 }
 
@@ -579,6 +646,7 @@ function appendFailure(conversation, error, text, clientMessageId) {
 // 追加一条「办理预览」消息：气泡按钮点开后由工作台调用，卡片仍由 AiCommandCard 渲染，
 // 用户不点确认就不会有任何业务动作。
 export function appendCommandMessage(command, options = {}) {
+  if (historyChanging.value) return false;
   if (!command) {
     return false;
   }
@@ -587,7 +655,8 @@ export function appendCommandMessage(command, options = {}) {
   conversation.messages.push({
     id: newId('message'),
     role: 'assistant',
-    content: options.content || `已生成「${command.actionLabel || command.action || '业务办理'}」的预览，确认后才执行。`,
+    content:
+      options.content || `已生成「${command.actionLabel || command.action || '业务办理'}」的预览，确认后才执行。`,
     blocks: [],
     suggestions: [],
     actions: [],
@@ -609,23 +678,29 @@ export function appendCommandMessage(command, options = {}) {
 // 否则后端会把它当成新提问再落一条库。
 export async function sendMessage(content, options = {}) {
   const text = String(content || '').trim();
-  if (!text || sending.value) {
+  if (!text || sending.value || historyChanging.value) {
     return false;
   }
   const capabilityId = options.capabilityId || 'general';
   const conversation = ensureActiveConversation(capabilityId);
+  const revision = sessionRevision;
+  if (!options.preserveDraft) clearQuestion(conversation);
   const clientMessageId = options.clientMessageId || newId('client');
   const previousRequest = options.clientMessageId
-    ? [...conversation.messages].reverse().find((item) => item.role === 'user' && item.clientMessageId === clientMessageId)
+    ? [...conversation.messages]
+        .reverse()
+        .find((item) => item.role === 'user' && item.clientMessageId === clientMessageId)
     : null;
   const requestContext = sanitizeAiPageContext(previousRequest?.requestContext ?? options.context);
   appendUserMessage(conversation, text, clientMessageId, requestContext);
   sending.value = true;
   persistConversations();
 
-  abortController = new AbortController();
+  const controller = new AbortController();
+  abortController = controller;
   try {
     const remoteId = await ensureRemoteConversation(conversation);
+    if (revision !== sessionRevision || controller.signal.aborted) return false;
     const result = await chatWithAi(
       {
         question: text,
@@ -635,16 +710,18 @@ export async function sendMessage(content, options = {}) {
         clientMessageId,
         context: { ...requestContext, source: options.source || 'ai-workbench', capability: capabilityId },
       },
-      abortController.signal,
+      controller.signal,
     );
-    appendAnswer(conversation, result.data || {});
+    if (revision === sessionRevision) appendAnswer(conversation, result.data || {});
   } catch (error) {
-    appendFailure(conversation, error, text, clientMessageId);
+    if (revision === sessionRevision) appendFailure(conversation, error, text, clientMessageId);
   } finally {
-    conversation.updatedAt = dayjs().toISOString();
-    sending.value = false;
-    abortController = null;
-    persistConversations();
+    if (revision === sessionRevision) {
+      conversation.updatedAt = dayjs().toISOString();
+      sending.value = false;
+      if (abortController === controller) abortController = null;
+      persistConversations();
+    }
   }
   return true;
 }
@@ -683,8 +760,40 @@ export function resetAiStorage() {
   } catch {
     // 忽略清理失败。
   }
+  resetMemory();
+}
+
+function resetMemory() {
+  sessionRevision++;
+  messageRevision++;
+  abortController?.abort();
+  abortController = null;
+  questionDrafts.value = {};
+  replacedDrafts.value = {};
   conversations.value = [createLocalConversation()];
   activeConversationId.value = conversations.value[0].id;
   sending.value = false;
+  historyChanging.value = false;
   historySynced.value = false;
+  dockOpen.value = false;
+  mode.value = 'workbench';
 }
+
+const stopAuthWatch = watch(
+  authRevision,
+  () => {
+    const nextScope = accountScope();
+    if (ownerScope === nextScope) return;
+    ownerScope = nextScope;
+    resetMemory();
+    conversations.value = loadLocalConversations();
+    activeConversationId.value = conversations.value[0]?.id || '';
+    try {
+      activeConversationId.value = localStorage.getItem(storageKey(ACTIVE_BASE)) || activeConversationId.value;
+    } catch {
+      // 当前会话在内存中继续使用。
+    }
+  },
+  { flush: 'sync' },
+);
+if (import.meta.hot) import.meta.hot.dispose(stopAuthWatch);

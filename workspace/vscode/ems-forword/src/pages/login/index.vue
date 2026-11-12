@@ -37,7 +37,7 @@ const rules = {
 const demoAccounts = [
   { username: 'admin', label: '系统管理员', role: '全功能' },
   { username: 'lamp_operator', label: '操作工', role: '现场作业' },
-  { username: 'lamp_quality', label: '陈静', role: '质检员' },
+  { username: 'lamp_quality', label: '质检员', role: '质量与知识库' },
   { username: 'lamp_warehouse', label: '刘洋', role: '仓管员' },
   { username: 'lamp_leader', label: '赵磊', role: '班组长' },
 ];

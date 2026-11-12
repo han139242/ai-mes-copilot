@@ -30,9 +30,12 @@ let chart,
   layoutWidth = 0,
   resetCamera = true;
 const zoomPercent = ref(100);
+const detailedLabels = ref(true);
 const orderedCanvasHeight = ref(null);
 function syncZoom() {
-  zoomPercent.value = Math.round((chart?.getOption()?.series?.[0]?.zoom || 1) * 100);
+  const zoom = chart?.getOption()?.series?.[0]?.zoom || 1;
+  zoomPercent.value = Math.round(zoom * 100);
+  detailedLabels.value = zoom >= 0.75;
 }
 function zoomBy(factor) {
   if (!chart || !visible.value.nodes.length) return;
@@ -154,6 +157,7 @@ async function render() {
   }
   const camera = resetCamera ? null : chart.getOption()?.series?.[0];
   const orderedPath = view.value === 'path' && path.value.state === 'found' && pathOnly.value;
+  const overview = !orderedPath && visible.value.nodes.length > 8 && (camera?.zoom || 1) < 0.75;
   layoutWidth = canvas.value.clientWidth || chart.getWidth();
   const verticalPath = layoutWidth < Math.max(720, visible.value.nodes.length * 160);
   orderedCanvasHeight.value =
@@ -178,6 +182,7 @@ async function render() {
           top: orderedPath ? 100 : 60,
           bottom: orderedPath ? 45 : 48,
           roam: true,
+          nodeScaleRatio: 1,
           zoom: camera?.zoom || 1,
           center: camera?.center || ['50%', '50%'],
           force: { repulsion: 1100, edgeLength: [150, 210], gravity: 0.08, layoutAnimation: false },
@@ -195,13 +200,34 @@ async function render() {
             formatter: (event) => `${event.data.record.label}\n${event.data.record.type}`,
           },
           emphasis: { focus: 'adjacency', scale: true },
+          labelLayout: { hideOverlap: !orderedPath },
           data: visible.value.nodes.map((node, index) => ({
             id: node.id,
             name: node.label,
             record: node,
             ...(orderedPath ? { x: verticalPath ? 0 : index * 180, y: verticalPath ? index * 100 : 0 } : {}),
-            symbol: 'roundRect',
-            symbolSize: node.id === selected.value?.id ? [132, 62] : [120, 56],
+            symbol: overview ? 'circle' : 'roundRect',
+            symbolSize: overview
+              ? node.type === '产品'
+                ? 60
+                : node.id === selected.value?.id
+                  ? 52
+                  : 32
+              : node.id === selected.value?.id
+                ? [132, 62]
+                : [120, 56],
+            label: {
+              show:
+                !overview ||
+                node.type === '产品' ||
+                node.id === selected.value?.id ||
+                Boolean(
+                  search.value.trim() && node.label.toLocaleLowerCase() === search.value.trim().toLocaleLowerCase(),
+                ),
+              position: overview ? 'bottom' : 'inside',
+              formatter: (event) =>
+                overview ? event.data.record.label : `${event.data.record.label}\n${event.data.record.type}`,
+            },
             itemStyle: {
               color: color('--mes-surface'),
               borderWidth: node.id === selected.value?.id || pathNodes.value.has(node.id) ? 3 : 1.5,
@@ -253,6 +279,7 @@ watch([() => props.value, () => props.documents, visible, () => props.usedRelati
 });
 watch([pathEdges, pathNodes], render);
 watch([selected, activeTheme], render, { flush: 'post' });
+watch(detailedLabels, render);
 onMounted(render);
 onBeforeUnmount(() => {
   observer?.disconnect();
@@ -285,7 +312,13 @@ onBeforeUnmount(() => {
       <el-select v-model="selectedType" clearable placeholder="全部类型" aria-label="实体类型"
         ><el-option v-for="type in types" :key="type" :label="type" :value="type"
       /></el-select>
-      <el-button @click="fitInitialGraph(); syncZoom()">适应窗口</el-button>
+      <el-button
+        @click="
+          fitInitialGraph();
+          syncZoom();
+        "
+        >适应窗口</el-button
+      >
       <el-button title="清除筛选并恢复 100% 缩放" @click="resetView">还原视图</el-button>
       <span class="graph-count">{{ visible.nodes.length }} 节点 · {{ visible.edges.length }} 关系</span>
     </div>

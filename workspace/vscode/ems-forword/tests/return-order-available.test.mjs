@@ -106,8 +106,8 @@ test('退料原因跟随表头退料类型，不再写死良品退料', () => {
   );
   assert.match(pageSource, /row\.returnReason = row\.returnReason \|\| reasonDefault\(\);/, '预填原因要取当前类型对应的文案');
   const watcher = pageSource.slice(
-    pageSource.indexOf('watch(() => formModel.value.returnType'),
-    pageSource.indexOf('watch(() => actionModel.value.warehouseId'),
+    pageSource.search(/watch\(\s*\(\)\s*=>\s*formModel\.value\.returnType/),
+    pageSource.search(/watch\(\s*\(\)\s*=>\s*actionModel\.value\.warehouseId/),
   );
   assert.ok(watcher.length > 0, '必须监听退料类型变化');
   assert.match(watcher, /syncChildReasonDefaults\(\);/, '切换类型时要整批同步明细原因');

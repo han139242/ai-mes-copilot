@@ -17,10 +17,10 @@ def initialize(path):
                           capture_output=True, text=True, timeout=10)
 
 
-@pytest.mark.parametrize("existing", ["postgres/PG_VERSION", "data/journal.sqlite3"])
+@pytest.mark.parametrize("existing", ["postgres/PG_VERSION", "data/journal.sqlite3", "postgres-volume.json"])
 def test_missing_config_with_existing_state_requires_recovery(tmp_path, existing):
     state = tmp_path / existing
-    state.parent.mkdir(parents=True)
+    state.parent.mkdir(parents=True,exist_ok=True)
     state.write_bytes(b"existing-private-state")
     config = tmp_path / "private-env.ps1"
 
@@ -54,3 +54,12 @@ def test_fresh_configuration_is_private_and_quotes_paths(tmp_path):
                   if line.startswith("$env:PRIVATE_ASSISTANT_SECRET="))
     assert len(secret) >= 64
     assert secret not in result.stdout + result.stderr
+    assert '$env:PRIVATE_PG_VOLUME=' in text
+    assert '$env:PRIVATE_PG_DATA=' not in text
+
+
+def test_separate_runtime_paths_get_distinct_native_volume_names(tmp_path):
+    first=tmp_path/'one'/'private-env.ps1';second=tmp_path/'two'/'private-env.ps1'
+    assert initialize(first).returncode==0 and initialize(second).returncode==0
+    volume=lambda p: next(row for row in p.read_text().splitlines() if 'PRIVATE_PG_VOLUME' in row)
+    assert volume(first)!=volume(second)

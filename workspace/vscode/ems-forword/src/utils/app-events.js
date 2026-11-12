@@ -6,6 +6,22 @@
 export const OPEN_AI_ASSISTANT_EVENT = 'mes:open-ai-assistant';
 // AI 办理成功后会改动业务单据，用这个事件通知各页面重新拉数据。
 export const DATA_CHANGED_EVENT = 'mes:data-changed';
+export const BEFORE_PAGE_REFRESH_EVENT = 'mes:before-page-refresh';
+
+// A component refresh bypasses router leave guards. Collect the active page's
+// draft checks before the layout replaces it; never refresh after a failed check.
+export function registerPageRefreshGuard(check) {
+  const listener = (event) => event.detail.checks.push(Promise.resolve().then(check));
+  window.addEventListener(BEFORE_PAGE_REFRESH_EVENT, listener);
+  return () => window.removeEventListener(BEFORE_PAGE_REFRESH_EVENT, listener);
+}
+
+export async function allowPageRefresh() {
+  const checks = [];
+  window.dispatchEvent(new CustomEvent(BEFORE_PAGE_REFRESH_EVENT, { detail: { checks } }));
+  const results = await Promise.allSettled(checks);
+  return results.every((result) => result.status === 'fulfilled' && result.value !== false);
+}
 
 // 任意组件调用该函数都会在 window 上广播“打开 AI 助手”事件；布局组件负责监听并跳转。
 export function openAiAssistant() {

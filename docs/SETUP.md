@@ -2,6 +2,8 @@
 
 简体中文 · [English](SETUP.en.md) · [项目首页](../README.md)
 
+本文配置基础 MES。需要 RAG、GraphRAG、研判工作单和人脸服务时，继续按[私有知识服务部署](../services/private-assistant/README.md)准备独立环境；展示入口见[教师演示](TEACHER_DEMO.md)。
+
 以下命令从仓库根目录开始，适用于 Windows PowerShell。完整开发与验证使用 JDK 21、Node.js 24（本轮为 24.19.0）、MySQL 8.0 和 Python 3；让 `java`、`mysql`、`node`、`npm`、`python` 可以在终端调用。
 
 前端构建依赖声明兼容 Node.js `^20.19.0 || >=22.12.0`；会话测试还使用 `node:module.registerHooks`，该接口从 Node.js 22.15.0 / 23.5.0 开始提供，见[官方说明](https://nodejs.org/api/module.html#moduleregisterhooksoptions)。使用 Node.js 24 可复现本轮完整前端测试。

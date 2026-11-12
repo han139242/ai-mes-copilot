@@ -33,7 +33,7 @@ await test('actual graph symbols, labels and responsive path geometry', async ()
     const raw = {
       nodes: Array.from({ length: nodeCount }, (_, i) => ({
         id: String(i),
-        properties: { name: 'Entity ' + i, entity_type: 'type' },
+        properties: { name: 'Entity ' + i, entity_type: nodeCount > 8 && i < 2 ? '产品' : 'type' },
       })),
       edges: Array.from({ length: nodeCount - 1 }, (_, i) => ({
         id: 'e' + i,
@@ -103,9 +103,13 @@ await test('actual graph symbols, labels and responsive path geometry', async ()
     }
   }
 
-  for (const [width, height] of [[298, 388], [800, 460], [1400, 600]]) {
+  for (const [width, height] of [
+    [298, 388],
+    [800, 460],
+    [1400, 600],
+  ]) {
     const app = makeHarness(width, height, 6);
-    const row = {name: 'force-first-fit-' + width, errors: []};
+    const row = { name: 'force-first-fit-' + width, errors: [] };
     try {
       app.c.view.value = 'browse';
       await app.c.render();
@@ -115,18 +119,60 @@ await test('actual graph symbols, labels and responsive path geometry', async ()
       app.c.fitInitialGraph();
       await settle(app);
       row.observed = app.c.snapshot();
-      if(row.observed.zoom > initialZoom + 0.001) row.errors.push('Repeated fit zoomed back out of the fitted camera');
+      if (row.observed.zoom > initialZoom + 0.001) row.errors.push('Repeated fit zoomed back out of the fitted camera');
       for (const node of row.observed.nodes) {
         const b = node.bounds;
-        if (![b.x,b.y,b.width,b.height].every(Number.isFinite) || b.x < -1 || b.y < -1 ||
-            b.x + b.width > width + 1 || b.y + b.height > height + 1) {
+        if (
+          ![b.x, b.y, b.width, b.height].every(Number.isFinite) ||
+          b.x < -1 ||
+          b.y < -1 ||
+          b.x + b.width > width + 1 ||
+          b.y + b.height > height + 1
+        ) {
           row.errors.push('Initial force node clipped: ' + node.id);
         }
       }
-    } catch(error) { row.errors.push(error.stack || String(error)); }
-    finally { app.dispose(); }
+    } catch (error) {
+      row.errors.push(error.stack || String(error));
+    } finally {
+      app.dispose();
+    }
     row.status = row.errors.length ? 'FAIL' : 'PASS';
     results.push(row);
+  }
+
+  const overview = makeHarness(800, 460, 37);
+  try {
+    overview.c.view.value = 'browse';
+    await overview.c.render();
+    overview.c.setCamera({ zoom: 0.3, center: [360, 230] });
+    await settle(overview);
+    await overview.c.render();
+    await settle(overview);
+    assert.equal(overview.c.snapshot().nodes.length, 37);
+    assert.ok(!overview.c.svg().includes('Entity 12'), 'Dense overview does not draw every label');
+    overview.c.pick({ id: '12', label: 'Entity 12', type: 'type' }, 'node');
+    await settle(overview);
+    assert.ok(overview.c.svg().includes('Entity 12'), 'Selected entity is named in the actual renderer');
+    assert.equal(overview.c.snapshot().zoom, 0.3, 'Selecting a label preserves the overview camera');
+    for (const zoom of [0.7, 0.745, 0.9, 0.755, 0.749, 0.7]) {
+      overview.c.setCamera({ zoom, center: [360, 230] });
+      await settle(overview);
+      assert.deepEqual(
+        overview.c.snapshot().nodes.find((node) => node.id === '8').symbolSize,
+        zoom >= 0.75 ? [120, 56] : 32,
+        `Detail follows the real zoom at ${zoom}, including rounded percentage boundaries`,
+      );
+    }
+    results.push({
+      name: '37 real rendered nodes keep a quiet overview and reveal the selected label',
+      status: 'PASS',
+    });
+    console.log('PASS Dense overview and selected entity label');
+  } catch (error) {
+    results.push({ name: 'Dense overview labels', status: 'FAIL', errors: [error.stack || String(error)] });
+  } finally {
+    overview.dispose();
   }
 
   for (const [width, height, count] of [

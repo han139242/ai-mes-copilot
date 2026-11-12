@@ -9,11 +9,16 @@ const props = defineProps({
   field: { type: Object, required: true },
   options: { type: Array, default: () => [] },
   compact: { type: Boolean, default: false },
+  inputId: { type: String, default: undefined },
 });
 const keyword = ref('');
 const filteredOptions = computed(() => {
   const query = keyword.value.trim().toLocaleLowerCase();
-  return props.options.filter((item) => String(item.searchLabel || item.label).toLocaleLowerCase().includes(query));
+  return props.options.filter((item) =>
+    String(item.searchLabel || item.label)
+      .toLocaleLowerCase()
+      .includes(query),
+  );
 });
 function filterOptions(query) {
   keyword.value = query;
@@ -30,6 +35,8 @@ function resetSearch(visible) {
   <el-select
     v-if="field.type === 'select' || field.type === 'reference'"
     v-model="model"
+    :id="inputId"
+    :aria-label="field.label"
     :multiple="field.multiple"
     :collapse-tags="field.multiple"
     :max-collapse-tags="2"
@@ -54,6 +61,8 @@ function resetSearch(visible) {
   <el-input-number
     v-else-if="field.type === 'number'"
     v-model="model"
+    :id="inputId"
+    :aria-label="field.label"
     :min="field.min"
     :max="field.max"
     :precision="field.precision"
@@ -68,6 +77,8 @@ function resetSearch(visible) {
   <el-date-picker
     v-else-if="field.type === 'date'"
     v-model="model"
+    :id="inputId"
+    :aria-label="field.label"
     type="date"
     value-format="YYYY-MM-DD"
     format="YYYY-MM-DD"
@@ -79,6 +90,8 @@ function resetSearch(visible) {
   <el-date-picker
     v-else-if="field.type === 'datetime'"
     v-model="model"
+    :id="inputId"
+    :aria-label="field.label"
     type="datetime"
     value-format="YYYY-MM-DDTHH:mm:ss"
     format="YYYY-MM-DD HH:mm"
@@ -90,6 +103,8 @@ function resetSearch(visible) {
   <el-time-picker
     v-else-if="field.type === 'time'"
     v-model="model"
+    :id="inputId"
+    :aria-label="field.label"
     value-format="HH:mm:ss"
     format="HH:mm"
     :placeholder="field.placeholder || `请选择${field.label}`"
@@ -100,6 +115,8 @@ function resetSearch(visible) {
   <el-input
     v-else-if="field.type === 'textarea'"
     v-model="model"
+    :id="inputId"
+    :aria-label="field.label"
     type="textarea"
     :rows="compact ? 2 : 3"
     :maxlength="field.maxLength || 500"
@@ -113,6 +130,8 @@ function resetSearch(visible) {
   <el-input
     v-else
     v-model="model"
+    :id="inputId"
+    :aria-label="field.label"
     :type="field.type === 'password' ? 'password' : field.type === 'tel' ? 'tel' : 'text'"
     :show-password="field.type === 'password'"
     :maxlength="field.maxLength || 255"

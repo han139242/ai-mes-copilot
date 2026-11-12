@@ -13,6 +13,7 @@ import { hasPermission, resourcePermission } from '@/utils/permission';
 import { firstAccessiblePath, isNavigationPathAccessible } from '@/config/navigation';
 import { restoreSessionUser } from '@/utils/session-recovery';
 import { appName } from '@/config/branding';
+import { installPopRollbackRecovery } from '@/utils/navigation-rollback';
 
 // routes 是整个系统的“路径 -> 页面组件”映射表。
 const routes = [
@@ -169,6 +170,10 @@ const router = createRouter({
   // 每次进入新页面时让页面滚动条回到顶部。
   scrollBehavior: () => ({ top: 0 }),
 });
+if (typeof window !== 'undefined') {
+  const removeRollbackRecovery = installPopRollbackRecovery(router);
+  if (import.meta.hot) import.meta.hot.dispose(removeRollbackRecovery);
+}
 
 // beforeEach 是全局前置路由守卫，每一次页面跳转前都会执行。
 router.beforeEach(async (to) => {
@@ -219,7 +224,8 @@ router.beforeEach(async (to) => {
 });
 
 // afterEach 是后置守卫：页面跳转完成后更新浏览器标签标题。
-router.afterEach((to) => {
+router.afterEach((to, from, failure) => {
+  if (failure) return;
   const appTitle = import.meta.env.VITE_APP_TITLE || appName;
   const title = to.meta.title ? `${to.meta.title} - ${appTitle}` : appTitle;
   document.title = title;

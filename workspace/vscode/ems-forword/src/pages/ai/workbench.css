@@ -62,6 +62,84 @@
 }
 
 /* ---------- 左侧栏 ---------- */
+.sidebar-sections {
+  display: flex;
+  gap: 4px;
+  padding: 0 14px 10px;
+}
+.sidebar-sections button {
+  min-height: 36px;
+  flex: 1;
+  padding: 6px 8px;
+  color: var(--wb-text-2);
+  border: 0;
+  border-radius: var(--wb-radius-sm);
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+.sidebar-sections button[aria-pressed='true'] {
+  color: var(--mes-primary);
+  background: var(--wb-selected);
+  font-weight: 600;
+}
+.catalog-search {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 9px;
+  margin-bottom: 12px;
+  color: var(--wb-text-2);
+  border: 1px solid var(--wb-line);
+  border-radius: var(--wb-radius-sm);
+}
+.catalog-search:focus-within {
+  outline: 2px solid var(--mes-primary);
+  outline-offset: 2px;
+}
+.catalog-search input {
+  width: 100%;
+  min-width: 0;
+  padding: 0;
+  color: var(--wb-text);
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 13px;
+}
+.catalog-search input::placeholder {
+  color: var(--wb-text-2);
+}
+.text-button {
+  min-height: 32px;
+  padding: 2px 0;
+  color: var(--mes-primary);
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+.catalog-message .text-button {
+  display: block;
+}
+.wb-foot > summary {
+  min-height: 32px;
+  color: var(--wb-text-2);
+  font-size: 12px;
+  cursor: pointer;
+}
+.wb-foot[open] > summary {
+  margin-bottom: 8px;
+}
+.session-main:disabled,
+.session-actions button:disabled {
+  opacity: 0.5;
+  cursor: wait;
+}
 
 /* 侧栏自身不滚动：中部 wb-body 才是滚动容器，品牌/新建/用量区固定不动。 */
 .wb-sidebar {
@@ -723,8 +801,11 @@
 .welcome {
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  padding: 8px 0 12px;
+  width: 100%;
+  max-width: 640px;
+  gap: 24px;
+  margin: auto;
+  padding: 28px 0;
 }
 
 .welcome-head h2 {
@@ -767,40 +848,21 @@
   background: var(--mes-primary-soft);
   font-weight: 600;
 }
-.welcome-focus {
-  border-top: 1px solid var(--wb-line);
-  padding: 22px 0 8px;
-}
-.welcome-focus-heading {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-  color: var(--mes-primary);
-}
-.welcome-focus h3 {
-  margin: 0;
-  font-size: 18px;
-  color: var(--wb-text);
-}
-.welcome-focus > p {
-  margin: 12px 0 18px;
-  color: var(--wb-text-2);
-  font-size: 14px;
-  line-height: 1.9;
-}
 .welcome-focus-prompts {
   display: grid;
   gap: 4px;
 }
 .welcome-focus-prompts button {
   display: flex;
-  align-items: flex-start;
+  align-items: center;
+  justify-content: space-between;
   gap: 12px;
   text-align: left;
-  padding: 12px 0;
+  padding: 14px 0;
   min-height: 44px;
   background: transparent;
   border: 0;
+  border-bottom: 1px solid var(--wb-line);
   color: var(--wb-text-2);
   font: inherit;
   font-size: 14px;
@@ -812,7 +874,6 @@
 }
 .welcome-focus-prompts button svg {
   flex: none;
-  margin-top: 7px;
 }
 
 /* 「你可以这样问」：横向胶囊，覆盖更宽的提问口径。 */
@@ -834,6 +895,7 @@
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
+  margin-top: 14px;
 }
 
 .welcome-pills button {
@@ -1291,6 +1353,7 @@
   width: 36px;
   height: 36px;
   flex: none;
+  margin-left: auto;
   align-items: center;
   justify-content: center;
   color: #fff;
@@ -1353,6 +1416,29 @@
 
 /* 780px 以下：侧栏变抽屉，靠左上角按钮展开；能力选项自动换行。 */
 @media (max-width: 780px) {
+  .wb-brand {
+    min-height: 64px;
+    padding-left: 64px;
+  }
+  .brand-mark {
+    display: none;
+  }
+  .new-conversation {
+    min-height: var(--mes-touch-target);
+  }
+  .sidebar-sections button,
+  .catalog-search,
+  .compose-capability,
+  .compose-undo {
+    min-height: var(--mes-touch-target);
+  }
+  .session-actions {
+    opacity: 1;
+  }
+  .session-actions button {
+    min-height: var(--mes-touch-target);
+    min-width: 32px;
+  }
   .service-notice > div {
     align-items: flex-start;
     flex-direction: column;

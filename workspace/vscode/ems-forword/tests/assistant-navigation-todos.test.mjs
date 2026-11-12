@@ -62,12 +62,17 @@ await test('assistant shortcut ownership and real todo panel state', async () =>
       state.calls.push('navigation-open');
     };
     const dock = new Function(
-      'dockOpen',
+      'panelVisible',
       'document',
       'openDock',
       'closeDock',
       fn(sources[paths[0]], 'onGlobalKeydown') + '\nreturn onGlobalKeydown;',
-    )(dockOpen, document, openDock, closeDock);
+    )(
+      vue.computed(() => dockOpen.value),
+      document,
+      openDock,
+      closeDock,
+    );
     const nav = new Function(
       'searchOpen',
       'document',

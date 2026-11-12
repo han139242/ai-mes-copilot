@@ -8,7 +8,7 @@ services:
     ports:
       - "127.0.0.1:55432:5432"
     volumes:
-      - ${PRIVATE_PG_DATA:?Set an isolated data folder}:/var/lib/postgresql/data
+      - private-pgdata:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U postgres"]
       interval: 5s
@@ -16,3 +16,8 @@ services:
       retries: 20
     mem_limit: 1200m
     restart: unless-stopped
+    stop_grace_period: 2m
+volumes:
+  private-pgdata:
+    external: true
+    name: ${PRIVATE_PG_VOLUME:?Create or migrate and verify a native PostgreSQL volume first}

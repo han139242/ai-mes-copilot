@@ -17,6 +17,7 @@ from .answers import business_intent, generate, graph_citations, merge_citations
 from .parsing import parse_file
 from .vectors import VectorIndex
 from .ontology import contains_target, graph_profile, identifier_tokens
+from .job_policy import load_policy, save_policy, assert_sources
 
 WORKERS = BoundedSemaphore(1)
 logger = logging.getLogger(__name__)
@@ -78,7 +79,7 @@ class Knowledge:
             raise ValueError("任务已结束，不能再次取消")
         return {"jobId": job, "cancelled": True}
 
-    def upload(self, uid, name, content, document_id=None):
+    def upload(self, uid, name, content, document_id=None, *, validation_policy=None):
         if not isinstance(name,str) or not name.strip():
             raise ValueError("请选择有效文件")
         try:
@@ -91,6 +92,8 @@ class Knowledge:
             raise ValueError("文件无法解析，请检查格式、完整性以及是否加密") from None
         name = re.split(r"[/\\]", name)[-1][:160]
         digest = hashlib.sha256(content).hexdigest()
+        if validation_policy is not None and validation_policy["sources"].get(name) != digest:
+            raise ValueError("文件不在本轮批准的合成资料清单中")
         with self.dbs.locked(uid) as db:
             previous = None
             if document_id:
@@ -133,6 +136,10 @@ class Knowledge:
             db.execute("UPDATE private_state SET revision=revision+1,blocked=true WHERE id=1")
             db.execute("UPDATE history SET valid=false WHERE valid")
             job = self.queue(db)
+            if validation_policy is not None:
+                # A partial import may survive a crash. Bind every committed
+                # upload job, before exposing it to the resident worker.
+                save_policy(self.s, uid, job, validation_policy["sources"], validation_policy["ceiling"])
         return {"id": document_id, "version": version, "jobId": job}
 
     def delete(self, uid, document_id):
@@ -278,9 +285,10 @@ class Knowledge:
                 db.execute("UPDATE jobs SET state='superseded',finished=now() WHERE id=%s",(job,))
                 return
             revision = state["revision"]
+            docs = db.execute("SELECT * FROM documents WHERE NOT deleted ORDER BY id").fetchall()
+            assert_sources(load_policy(self.s,uid,job),docs)
             db.execute("UPDATE jobs SET state='running',vector_state='running',attempts=attempts+1,generation=%s,started=now() WHERE id=%s",
                        (generation,job))
-            docs = db.execute("SELECT * FROM documents WHERE NOT deleted ORDER BY id").fetchall()
         vector_errors = []
         for doc in docs:
             if doc["vector_state"]=="ready" and doc["vector_version"]==doc["version"]:
@@ -474,6 +482,11 @@ class Knowledge:
             except RuntimeError:
                 actual, reason = "rag","图检索暂不可用，本次使用文档原文"
         citations = merge_citations(remote,local) if actual!="rag" else merge_citations(local)
+        if actual != "rag" and not contains_target(effective, citations):
+            # A packed graph chunk can expand past the citation limit. Preserve
+            # already-validated target evidence before applying that same limit.
+            target_sources = [source for source in remote if contains_target(effective, [source])]
+            citations = merge_citations(target_sources, remote, local)
         if not contains_target(effective,citations):
             citations,graph_data = [],{}
             actual,reason = "rag","当前资料没有目标编号的有效依据，未改用相近编号"
@@ -499,9 +512,9 @@ class Knowledge:
             latest = db.execute("SELECT * FROM private_state WHERE id=1").fetchone()
             if latest["revision"]!=state["revision"] or latest["answer_revision"]!=state["answer_revision"] or latest["model_consent"]!=state["model_consent"]:
                 raise ValueError("提问期间资料或处理授权已变化，请重新提问")
-            db.execute("""INSERT INTO history(question,response,generation,revision,session_id)
-                VALUES(%s,%s,%s,%s,%s)""",(question,Jsonb(result),state["generation"],state["answer_revision"],session))
-        return result
+            saved = db.execute("""INSERT INTO history(question,response,generation,revision,session_id)
+                VALUES(%s,%s,%s,%s,%s) RETURNING id""",(question,Jsonb(result),state["generation"],state["answer_revision"],session)).fetchone()
+        return {**result, "historyId": saved["id"]}
 
     def graph(self, uid, search=""):
         with self.dbs.connect(uid) as db:

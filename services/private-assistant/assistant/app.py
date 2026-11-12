@@ -15,6 +15,7 @@ from .knowledge import Knowledge
 from .index_queue import IndexQueue
 from .model_proxy import proxy
 from .security import Journal
+from .review_notes import ReviewNotes
 
 settings = Settings()
 databases = Databases(settings)
@@ -60,6 +61,10 @@ def dispatch(uid, action, p):
     if type(uid) is int and uid == 0 and action in FaceIdentification.ACTIONS:
         return identification.dispatch(action, p)
     databases.ensure(uid)
+    if action in {'notes.list','notes.add','notes.update','notes.delete'}:
+        notes = ReviewNotes(databases)
+        return {'notes.list': lambda: notes.listing(uid), 'notes.add': lambda: notes.add(uid,p),
+                'notes.update': lambda: notes.update(uid,p), 'notes.delete': lambda: notes.delete(uid,p)}[action]()
     if action == "status":
         return {"ready": True, "database": databases.identity(uid)[0],
                 "budget": Journal(settings.root/"requests.sqlite3").status(settings.llm_limit, include_calls=False)}

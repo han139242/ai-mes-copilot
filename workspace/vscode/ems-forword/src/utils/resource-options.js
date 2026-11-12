@@ -3,12 +3,15 @@
  * 本项目为课程实训作品，版权说明按 CodeArts 文件头注释规范补充。
  */
 import dayjs from 'dayjs';
-import { getResourceList, getResourcePage } from '@/api/resource';
+import { getResourceDetail, getResourceList, getResourcePage } from '@/api/resource';
 import { getResourceConfig } from '@/config/resources';
 import { referencePresentation } from '@/config/resources/helpers';
+import { authRevision } from '@/utils/auth';
 
 // 缓存已经加载过的关联选项，避免一个页面中的多个 productId 下拉框反复请求同一接口。
 const cache = new Map();
+const detailCache = new Map();
+let cacheRevision = authRevision.value;
 
 // 递归展开树形接口数据，让父节点和所有children都能成为下拉选项。
 function flatten(items) {
@@ -48,10 +51,15 @@ export function canUseResourceMockFallback() {
 // 加载某类关联资源并转换为value/label选项，同一模式和资源的并发请求共用缓存Promise。
 // 缓存域：预览模式独占一份，其余按是否走本地兜底数据区分，避免串用缓存。
 function resolveCacheScope(previewMode, mockFallback) {
+  if (cacheRevision !== authRevision.value) {
+    cache.clear();
+    detailCache.clear();
+    cacheRevision = authRevision.value;
+  }
   if (previewMode) {
     return 'preview';
   }
-  return mockFallback ? 'mock-fallback' : 'live';
+  return `${mockFallback ? 'mock-fallback' : 'live'}:${cacheRevision}`;
 }
 
 export async function loadReferenceOptions(resourceKey, previewMode = false) {
@@ -102,17 +110,57 @@ export async function loadReferenceOptions(resourceKey, previewMode = false) {
   try {
     return await promise;
   } catch (error) {
-    cache.delete(cacheKey);
+    if (cache.get(cacheKey) === promise) cache.delete(cacheKey);
     throw error;
   }
+}
+
+// 首屏选项只加载200条；较旧单据的关联对象按ID读取，避免全量拉取主数据。
+export async function loadReferenceRecords(resourceKey, ids, previewMode = false, isCurrent = () => true) {
+  const config = getResourceConfig(resourceKey);
+  if (!config || !isCurrent()) return [];
+  const revision = authRevision.value;
+  const cacheScope = resolveCacheScope(previewMode, canUseResourceMockFallback());
+  const options = await loadReferenceOptions(resourceKey, previewMode);
+  if (revision !== authRevision.value || !isCurrent()) return [];
+  if (previewMode) return options;
+  const known = new Set(options.map((item) => String(item.value)));
+  const missing = [...new Set(ids.map(String))].filter((id) => /^[1-9]\d*$/.test(id) && !known.has(id));
+  const extra = [];
+  // 同类旧记录最多同时读取6条；失败不冒充名称，下次重试重新读取。
+  for (let index = 0; index < missing.length; index += 6) {
+    if (revision !== authRevision.value || !isCurrent()) break;
+    const batch = missing.slice(index, index + 6).map((id) => {
+      const key = `${cacheScope}:${resourceKey}:${id}`;
+      if (!detailCache.has(key)) {
+        const request = getResourceDetail(config.baseUrl, id).then((result) => {
+          const row = result?.data;
+          if (!row || String(row[config.idField]) !== id) throw new Error('关联记录未取得');
+          const label = labelFor(config, row);
+          return { value: row[config.idField], label, searchLabel: label, row };
+        });
+        detailCache.set(key, request);
+        request.catch(() => {
+          if (detailCache.get(key) === request) detailCache.delete(key);
+        });
+      }
+      return detailCache.get(key);
+    });
+    const results = await Promise.allSettled(batch);
+    extra.push(...results.filter((item) => item.status === 'fulfilled').map((item) => item.value));
+  }
+  return revision === authRevision.value && isCurrent() ? [...options, ...extra] : [];
 }
 
 // 新增或修改资源后清除它在三种数据模式下的选项缓存。
 export function clearReferenceOptions(resourceKey) {
   // 新增或修改关联资源后清掉缓存，下次打开下拉框时才能看到最新数据。
-  cache.delete(`live:${resourceKey}`);
   cache.delete(`preview:${resourceKey}`);
-  cache.delete(`mock-fallback:${resourceKey}`);
+  cache.delete(`live:${cacheRevision}:${resourceKey}`);
+  cache.delete(`mock-fallback:${cacheRevision}:${resourceKey}`);
+  for (const key of detailCache.keys()) {
+    if (key.includes(`:${resourceKey}:`)) detailCache.delete(key);
+  }
 }
 
 // 按字段类型、名称和业务含义生成一条合理的预览值。

@@ -6,9 +6,12 @@ import { ElMessage, ElMessageBox } from 'element-plus';
 import AppIcon from '@/components/common/AppIcon.vue';
 import GroundedAnswer from '@/components/ai/GroundedAnswer.vue';
 import KnowledgeGraph from '@/components/ai/KnowledgeGraph.vue';
+import ReviewNotebook from '@/components/ai/ReviewNotebook.vue';
+import { sliceUtf16 } from '@/utils/text';
 import { privateAction as dispatchPrivate, uploadPrivateFile } from '@/api/ai/private';
 import {
   historySessions,
+  orderedAnswerCitations,
   knowledgeModes,
   knowledgeGenerationState,
   knowledgePreferencesSnapshot,
@@ -26,6 +29,9 @@ const tab = ref('ask'),
   filter = ref(''),
   sourcePanel = ref(null);
 const filesCollapsed = ref(true);
+const notebook = ref(),
+  notesOpened = ref(false);
+const expandedSources = ref(new Set());
 const dragDepth = ref(0);
 const filesInput = ref(),
   replaceInput = ref(),
@@ -41,6 +47,7 @@ const documents = ref([]),
 const loading = ref(false),
   uploading = ref(false),
   sending = ref(false),
+  historyClearing = ref(false),
   graphLoading = ref(false),
   prefsBusy = ref(false);
 const serviceError = ref(''),
@@ -52,6 +59,11 @@ const messages = ref([]),
   question = ref(''),
   mode = ref('auto'),
   session = ref(crypto.randomUUID());
+const replacedQuestion = ref(null),
+  previousConversation = ref(null);
+const canReturnPrevious = computed(
+  () => Boolean(previousConversation.value) && !messages.value.length && !question.value.trim() && !sending.value,
+);
 const graph = ref({ nodes: [], edges: [], ready: false }),
   usedRelationships = ref([]);
 const prefs = reactive({
@@ -67,9 +79,13 @@ let syncPrefs = false,
   timer,
   queryController,
   refreshSequence = 0,
+  historySequence = 0,
   querySequence = 0,
   graphSequence = 0,
   mounted = true;
+let graphChain = Promise.resolve(),
+  graphRequestedSearch,
+  graphRequestedRevision;
 let idleTicks = 0;
 const initialToken = getToken();
 function privateAction(action, payload = {}, options = {}) {
@@ -77,9 +93,16 @@ function privateAction(action, payload = {}, options = {}) {
 }
 function checkSession() {
   if (getToken() === initialToken) return;
+  historySequence++;
+  notebook.value?.clearForAuthChange();
+  notesOpened.value = false;
+  expandedSources.value = new Set();
   queryController?.abort();
   documents.value = [];
   messages.value = [];
+  question.value = '';
+  replacedQuestion.value = null;
+  previousConversation.value = null;
   histories.value = [];
   closeSource();
   graph.value = { nodes: [], edges: [], ready: false };
@@ -141,56 +164,106 @@ async function refresh(quiet = false) {
 }
 async function loadHistory() {
   if (preview) return;
+  const sequence = ++historySequence;
   try {
-    histories.value = await privateAction('history');
+    const result = await privateAction('history');
+    if (mounted && sequence === historySequence) histories.value = result;
   } catch (failure) {
-    actionError.value = failureText(failure, '历史问答暂不可用，请重试。');
+    if (mounted && sequence === historySequence) actionError.value = failureText(failure, '历史问答暂不可用，请重试。');
   }
 }
 function newConversation() {
   if (sending.value) stopWaiting();
+  if (messages.value.length || question.value.trim()) {
+    previousConversation.value = {
+      id: session.value,
+      messages: [...messages.value],
+      question: question.value,
+      mode: mode.value,
+      replacedQuestion: replacedQuestion.value,
+      revision: service.value?.revision,
+      answerRevision: service.value?.answer_revision,
+    };
+  }
   session.value = crypto.randomUUID();
   messages.value = [];
   question.value = '';
+  replacedQuestion.value = null;
   closeSource();
-  nextTick(() => questionInput.value?.focus());
+  scrollThread();
+  nextTick(() => questionInput.value?.focus({ preventScroll: true }));
+}
+function returnPreviousConversation() {
+  if (!canReturnPrevious.value) return;
+  const previous = previousConversation.value;
+  const fresh =
+    previous.revision === service.value?.revision && previous.answerRevision === service.value?.answer_revision;
+  previousConversation.value = null;
+  session.value = previous.id;
+  messages.value = previous.messages.map((message) =>
+    message.role === 'assistant' && !fresh ? { ...message, valid: false } : message,
+  );
+  question.value = previous.question;
+  mode.value = previous.mode;
+  replacedQuestion.value = previous.replacedQuestion;
+  closeSource();
+  scrollThread();
+  nextTick(() => questionInput.value?.focus({ preventScroll: true }));
 }
 function openConversation(value) {
   if (sending.value) stopWaiting();
+  previousConversation.value = null;
   session.value = value.id;
   messages.value = [...value.rows].reverse().flatMap((row) => [
     { role: 'user', text: row.question, key: 'q-' + row.id },
-    { role: 'assistant', ...row.response, question: row.question, valid: row.valid, key: 'a-' + row.id },
+    {
+      role: 'assistant',
+      ...row.response,
+      historyId: row.id,
+      question: row.question,
+      valid: row.valid,
+      key: 'a-' + row.id,
+    },
   ]);
   tab.value = 'ask';
   closeSource();
   scrollThread();
 }
 async function clearHistory() {
+  if (historyClearing.value || sending.value) return;
+  historyClearing.value = true;
   try {
-    await ElMessageBox.confirm('清除你保存的全部知识问答历史，不会删除资料。', '清除问答历史', {
-      confirmButtonText: '清除历史',
-      cancelButtonText: '保留',
-    });
-  } catch {
-    return;
-  }
-  try {
+    try {
+      await ElMessageBox.confirm('清除已保存的知识问答，保留正在编辑的问题和资料。', '清除问答历史', {
+        confirmButtonText: '清除历史',
+        cancelButtonText: '保留',
+      });
+    } catch {
+      return;
+    }
     await privateAction('history.clear');
+    if (!mounted || getToken() !== initialToken) return;
+    historySequence++;
     histories.value = [];
-    newConversation();
+    previousConversation.value = null;
+    session.value = crypto.randomUUID();
+    messages.value = [];
+    closeSource();
+    scrollThread();
     ElMessage.success('历史问答已清除');
   } catch (failure) {
     actionError.value = failureText(failure, '清除失败，请重试。');
+  } finally {
+    historyClearing.value = false;
   }
 }
 async function scrollThread() {
   await nextTick();
-  thread.value?.scrollTo({ top: thread.value.scrollHeight, behavior: 'auto' });
+  thread.value?.scrollTo({ top: messages.value.length ? thread.value.scrollHeight : 0, behavior: 'auto' });
 }
 async function sendQuestion(text) {
   const value = (typeof text === 'string' ? text : question.value).trim();
-  if (!value || sending.value || preview || !service.value || serviceError.value) return;
+  if (!value || sending.value || historyClearing.value || preview || !service.value || serviceError.value) return;
   if (value.length < 2) {
     actionError.value = '问题至少需要 2 个字';
     return;
@@ -200,7 +273,11 @@ async function sendQuestion(text) {
     currentSession = session.value;
   queryController = new AbortController();
   messages.value.push({ role: 'user', text: value, key: crypto.randomUUID() });
-  question.value = '';
+  previousConversation.value = null;
+  if (typeof text !== 'string') {
+    question.value = '';
+    replacedQuestion.value = null;
+  }
   sending.value = true;
   scrollThread();
   try {
@@ -389,8 +466,12 @@ async function savePreferences() {
     const result = await privateAction('preferences.save', { ...prefs });
     syncPrefs = true;
     // The POST result is authoritative even if the following background refresh fails.
-    service.value = { ...service.value, preferences: result.preferences,
-      model_consent: result.modelConsent, graph_enabled: result.graphEnabled };
+    service.value = {
+      ...service.value,
+      preferences: result.preferences,
+      model_consent: result.modelConsent,
+      graph_enabled: result.graphEnabled,
+    };
     Object.assign(prefs, result.preferences, { modelConsent: result.modelConsent, graphEnabled: result.graphEnabled });
     prefsDirty.value = false;
     syncPrefs = false;
@@ -410,25 +491,36 @@ function resetPreferences() {
   syncPrefs = false;
 }
 async function loadGraph(search = '') {
-  if (preview) return;
+  if (preview || !mounted) return;
+  const revision = service.value?.revision;
+  if (graphLoading.value && search === graphRequestedSearch && revision === graphRequestedRevision) return graphChain;
   const sequence = ++graphSequence;
+  graphRequestedSearch = search;
+  graphRequestedRevision = revision;
   graphLoading.value = true;
   graphError.value = '';
-  try {
-    const value = await privateAction('graph', { search });
+  const request = graphChain.then(async () => {
     if (!mounted || sequence !== graphSequence) return;
-    if (value.ready && value.revision !== service.value?.revision) {
-      graph.value = { nodes: [], edges: [], ready: false };
-      graphError.value = '资料已变化，请刷新后查看最新图谱。';
-      return;
+    try {
+      const value = await privateAction('graph', { search });
+      if (!mounted || sequence !== graphSequence) return;
+      if (value.ready && value.revision !== service.value?.revision) {
+        graph.value = { nodes: [], edges: [], ready: false };
+        graphError.value = '资料已变化，请刷新后查看最新图谱。';
+        return;
+      }
+      graph.value = value;
+    } catch (failure) {
+      if (mounted && sequence === graphSequence)
+        graphError.value = failureText(failure, '图谱暂时无法读取，请稍后重试。');
+    } finally {
+      if (sequence === graphSequence) graphLoading.value = false;
     }
-    graph.value = value;
-  } catch (failure) {
-    if (mounted && sequence === graphSequence)
-      graphError.value = failureText(failure, '图谱暂时无法读取，请稍后重试。');
-  } finally {
-    if (sequence === graphSequence) graphLoading.value = false;
-  }
+  });
+  // The backend intentionally runs one graph worker. Let it finish instead of
+  // overlapping requests; skipped intermediate searches never reach the API.
+  graphChain = request.catch(() => {});
+  return request;
 }
 async function buildGraph() {
   if (!service.value?.model_consent) {
@@ -450,16 +542,51 @@ function showRelationships(message) {
   loadGraph();
 }
 function toBusiness(text) {
-  router.push({ path: '/ai/workbench', query: text ? { prefill: String(text).slice(0, 1000) } : {} });
+  if (String(text || '').length > 500) ElMessage.info('问题较长，已带入前500字，可在业务助手中调整后发送。');
+  router.push({ path: '/ai/workbench', query: text ? { prefill: sliceUtf16(text, 500) } : {} });
 }
-function useGraphQuestion(text) {
-  question.value = String(text).slice(0, 1000);
-  mode.value = 'fusion';
-  tab.value = 'ask';
+async function saveReview(message) {
+  if (!message.historyId || message.valid === false) return;
+  notesOpened.value = true;
+  tab.value = 'notes';
   closeSource();
+  await nextTick();
+  await notebook.value?.capture(message.historyId);
+}
+function toggleSources(key) {
+  const value = new Set(expandedSources.value);
+  if (value.has(key)) value.delete(key);
+  else value.add(key);
+  expandedSources.value = value;
+}
+function fillQuestion(text, retrieval = mode.value) {
+  const value = sliceUtf16(String(text || ''), 1000);
+  if (value !== question.value || retrieval !== mode.value) {
+    replacedQuestion.value =
+      question.value.trim() || retrieval !== mode.value ? { text: question.value, mode: mode.value } : null;
+    question.value = value;
+    mode.value = retrieval;
+  }
   nextTick(() => questionInput.value?.focus());
 }
+function undoQuestionReplacement() {
+  const previous = replacedQuestion.value;
+  if (!previous) return;
+  replacedQuestion.value = null;
+  question.value = previous.text;
+  mode.value = previous.mode;
+  nextTick(() => questionInput.value?.focus());
+}
+function useGraphQuestion(text) {
+  fillQuestion(text, 'fusion');
+  tab.value = 'ask';
+  closeSource();
+}
+watch(question, (value) => {
+  if (!value) replacedQuestion.value = null;
+});
 watch(tab, (value) => {
+  if (value === 'notes') notesOpened.value = true;
   if (value === 'graph') loadGraph();
   if (value === 'ask') scrollThread();
 });
@@ -543,6 +670,7 @@ onBeforeUnmount(() => {
           v-for="item in [
             { value: 'ask', label: '资料与问答' },
             { value: 'graph', label: '知识图谱' },
+            { value: 'notes', label: '研判工作单' },
             { value: 'settings', label: '偏好设置' },
           ]"
           :key="item.value"
@@ -554,16 +682,16 @@ onBeforeUnmount(() => {
           {{ item.label }}
         </button>
       </nav>
-      <span
-        class="knowledge-connection"
-        :class="{ warning: serviceError }"
-        :title="stageLabel"
-        role="status"
-        >{{ preview ? '登录后使用' : stageLabel }}</span
-      >
+      <span class="knowledge-connection" :class="{ warning: serviceError }" :title="stageLabel" role="status">{{
+        preview ? '登录后使用' : stageLabel
+      }}</span>
       <div class="knowledge-toolbar-actions">
         <el-button @click="toBusiness()"><AppIcon name="bot" :size="16" />业务助手</el-button
-        ><el-button type="primary" :disabled="preview || uploading" :loading="uploading" @click="filesInput?.click()"
+        ><el-button
+          type="primary"
+          :disabled="preview || uploading || !service || !!serviceError"
+          :loading="uploading"
+          @click="filesInput?.click()"
           ><AppIcon name="plus" :size="16" />上传资料</el-button
         >
       </div>
@@ -600,7 +728,9 @@ onBeforeUnmount(() => {
       :aria-expanded="!filesCollapsed"
       @click="filesCollapsed = !filesCollapsed"
     >
-      <span>{{ filesCollapsed ? '查看资料与历史' : '收起资料，回到问答' }} · {{ documents.length }} 份资料</span
+      <span
+        >{{ filesCollapsed ? '查看资料与历史' : '收起资料，回到问答' }} ·
+        {{ service ? `${documents.length} 份资料` : '连接待恢复' }}</span
       ><AppIcon name="chevron" :size="15" />
     </button>
     <div
@@ -611,7 +741,7 @@ onBeforeUnmount(() => {
       <aside id="private-files" class="knowledge-files">
         <div class="files-switch" role="group" aria-label="私有资料与历史问答">
           <button type="button" :class="{ active: sideTab === 'documents' }" @click="sideTab = 'documents'">
-            我的资料 <span>{{ documents.length }}</span></button
+            我的资料 <span>{{ service ? documents.length : '—' }}</span></button
           ><button type="button" :class="{ active: sideTab === 'history' }" @click="sideTab = 'history'">
             历史问答
           </button>
@@ -621,10 +751,13 @@ onBeforeUnmount(() => {
             ><template #prefix><AppIcon name="search" :size="15" /></template
           ></el-input>
           <div class="files-list" :aria-busy="loading">
-            <p v-if="!documents.length && !loading" class="files-empty">
+            <p v-if="!service && serviceError" class="files-empty">资料连接待恢复。重新连接后可查看你的文件。</p>
+            <p v-else-if="!documents.length && !loading && service" class="files-empty">
               还没有私有资料。上传 PDF、Word、Excel 或文本后，即可检索原文。
             </p>
-            <p v-else-if="!visibleDocs.length && !loading" class="files-empty">没有匹配的文件，请换个名称。</p>
+            <p v-else-if="!visibleDocs.length && !loading" class="files-empty" role="status">
+              没有匹配的文件。<button class="text-action" type="button" @click="filter = ''">清除搜索</button>
+            </p>
             <article v-for="doc in visibleDocs" :key="doc.id" class="private-file">
               <button type="button" class="file-open" @click="openSource(doc)">
                 <AppIcon name="clipboard" :size="17" /><span
@@ -682,7 +815,9 @@ onBeforeUnmount(() => {
         <template v-else>
           <div class="history-tools">
             <span>最近问答</span
-            ><button type="button" :disabled="!histories.length" @click="clearHistory">清除历史</button>
+            ><button type="button" :disabled="!histories.length || historyClearing || sending" @click="clearHistory">
+              {{ historyClearing ? '正在清除…' : '清除历史' }}
+            </button>
           </div>
           <p v-if="!sessions.length" class="files-empty">还没有保存的问答。你可以先上传资料，再提出一个问题。</p>
           <button
@@ -703,11 +838,19 @@ onBeforeUnmount(() => {
         <header class="knowledge-chat-head">
           <div>
             <h2>资料问答</h2>
-            <span>{{ readyCount }} 份文档可用<span v-if="service?.graphReady"> · 图谱已就绪</span></span>
+            <span
+              >{{ service ? `${readyCount} 份文档可用` : '正在连接资料'
+              }}<span v-if="service?.graphReady"> · 图谱已就绪</span></span
+            >
           </div>
-          <button type="button" class="text-action" :disabled="preview" @click="newConversation">
-            <AppIcon name="plus" :size="15" />新对话
-          </button>
+          <div class="knowledge-chat-actions">
+            <button v-if="canReturnPrevious" type="button" class="text-action" @click="returnPreviousConversation">
+              返回上一会话
+            </button>
+            <button type="button" class="text-action" :disabled="preview" @click="newConversation">
+              <AppIcon name="plus" :size="15" />新对话
+            </button>
+          </div>
         </header>
         <div
           ref="thread"
@@ -721,9 +864,11 @@ onBeforeUnmount(() => {
             <h3>
               {{
                 !service && !preview
-                  ? '正在读取你的资料'
+                  ? serviceError
+                    ? '资料连接待恢复'
+                    : '正在读取你的资料'
                   : readyCount
-                    ? '向资料提问'
+                    ? '今天，你想核对什么？'
                     : documents.length
                       ? pending
                         ? '资料正在处理中'
@@ -734,7 +879,9 @@ onBeforeUnmount(() => {
             <p v-if="!readyCount">
               {{
                 !service && !preview
-                  ? '正在核对文件、版本和索引状态。'
+                  ? serviceError
+                    ? '可先使用原业务工作台，连接恢复后再查看资料。'
+                    : '正在核对文件、版本和索引状态。'
                   : readyCount
                     ? '查询参数、整理步骤，或追查跨文件关系。每条引用都能打开原文核对。'
                     : documents.length
@@ -744,22 +891,27 @@ onBeforeUnmount(() => {
                       : '说明书、SOP、检验标准都可以。资料就绪后，在这里直接提问。'
               }}
             </p>
+            <p v-if="readyCount" class="knowledge-welcome-intro">从作业步骤到变更影响，让每个结论都有出处。</p>
             <div v-if="readyCount" class="knowledge-suggestions">
               <button
                 v-for="item in [
                   { title: '整理操作步骤', text: '请整理这些资料中的关键操作步骤，并给出依据。' },
                   { title: '追查资料关联', text: '资料中的产品、物料、工序和检验标准有哪些关联？' },
+                  {
+                    title: '核对变更影响',
+                    text: '我想核对一项物料变更是否已经批准，以及影响哪些工序和检验规范。请先告诉我需要补充哪些信息。',
+                  },
                 ]"
                 :key="item.title"
                 type="button"
-                @click="
-                  question = item.text;
-                  questionInput?.focus();
-                "
+                @click="fillQuestion(item.text)"
               >
-                <span><strong>{{ item.title }}</strong></span><AppIcon name="arrow" :size="15" />
+                <span
+                  ><strong>{{ item.title }}</strong></span
+                ><AppIcon name="arrow" :size="15" />
               </button>
             </div>
+            <el-button v-else-if="serviceError" :loading="loading" @click="refresh()">重新连接</el-button>
             <el-button v-else-if="documents.length" @click="showProcessing">查看处理任务</el-button>
             <el-button v-else-if="service || preview" :disabled="preview || uploading" @click="filesInput?.click()"
               >上传第一份资料</el-button
@@ -790,7 +942,9 @@ onBeforeUnmount(() => {
               <p v-if="message.notice" class="message-notice">{{ message.notice }}</p>
               <div v-if="message.citations?.length" class="message-sources">
                 <button
-                  v-for="citation in message.citations"
+                  v-for="citation in expandedSources.has(message.key)
+                    ? orderedAnswerCitations(message.answer, message.citations)
+                    : orderedAnswerCitations(message.answer, message.citations).slice(0, 3)"
                   :key="citation.id"
                   type="button"
                   @click="openSource(citation)"
@@ -799,7 +953,16 @@ onBeforeUnmount(() => {
                   >{{ citation.name }}<small>{{ citation.locator }} · v{{ citation.version }}</small>
                 </button>
               </div>
-              <div class="message-route">
+              <button
+                v-if="message.citations?.length > 3"
+                type="button"
+                class="text-action more-sources"
+                @click="toggleSources(message.key)"
+              >
+                {{ expandedSources.has(message.key) ? '收起依据' : `查看全部 ${message.citations.length} 处依据` }}
+              </button>
+              <details class="message-route">
+                <summary>检索方式与关系线索</summary>
                 <span>{{ message.routeReason }}</span
                 ><button
                   v-if="message.graphEvidence?.relationships?.length"
@@ -808,10 +971,20 @@ onBeforeUnmount(() => {
                 >
                   查看本次关系线索
                 </button>
+              </details>
+              <div class="message-next-actions">
+                <button
+                  v-if="message.historyId && message.citations?.length && message.valid !== false"
+                  type="button"
+                  class="message-save-note"
+                  @click="saveReview(message)"
+                >
+                  <AppIcon name="clipboard" :size="15" />存为工作单</button
+                ><button type="button" class="message-business" @click="toBusiness(message.question)">
+                  转到业务助手<AppIcon name="arrow" :size="14" />
+                </button>
               </div>
-              <button type="button" class="message-business" @click="toBusiness(message.question)">
-                需要查询实时业务或办理任务？转到业务助手<AppIcon name="arrow" :size="14" /></button
-            ></template>
+            </template>
             <template v-else
               ><p :role="message.role === 'error' ? 'alert' : 'status'">{{ message.text }}</p>
               <button v-if="message.retry" type="button" class="text-action" @click="sendQuestion(message.retry)">
@@ -849,11 +1022,11 @@ onBeforeUnmount(() => {
                 {{ item.label }}
               </button>
             </div>
-            <span class="composer-count">{{ question.length }}/1000</span
+            <span v-if="question.length" class="composer-count">{{ question.length }}/1000</span
             ><button
               type="submit"
               class="knowledge-send"
-              :disabled="preview || !service || !question.trim() || sending || !!serviceError"
+              :disabled="preview || !service || !question.trim() || sending || historyClearing || !!serviceError"
               aria-label="发送知识问题"
             >
               <AppIcon name="arrow" :size="18" />
@@ -863,6 +1036,9 @@ onBeforeUnmount(() => {
             <button type="button" class="generation-entry" :title="generation.detail" @click="tab = 'settings'">
               <AppIcon :name="generation.available ? 'bot' : 'search'" :size="13" />{{ generation.label }}
               <AppIcon name="chevron" :size="12" />
+            </button>
+            <button v-if="replacedQuestion" type="button" class="text-action" @click="undoQuestionReplacement">
+              撤销填入
             </button>
             <span>Enter 发送 · Shift+Enter 换行</span>
           </div>
@@ -878,12 +1054,7 @@ onBeforeUnmount(() => {
               ><template v-else-if="sourcePanel.active === false"> · 历史版本</template></span
             >
           </div>
-          <button
-            type="button"
-            class="icon-action"
-            aria-label="关闭原文预览"
-            @click="closeSource"
-          >
+          <button type="button" class="icon-action" aria-label="关闭原文预览" @click="closeSource">
             <AppIcon name="close" :size="16" />
           </button>
         </header>
@@ -902,7 +1073,21 @@ onBeforeUnmount(() => {
       </aside>
     </div>
 
-    <section v-else-if="tab === 'graph'" class="knowledge-graph-panel">
+    <ReviewNotebook
+      v-if="notesOpened"
+      v-show="tab === 'notes'"
+      ref="notebook"
+      :active="tab === 'notes'"
+      :request="privateAction"
+      @source="
+        (source) => {
+          tab = 'ask';
+          openSource(source);
+        }
+      "
+      @business="toBusiness"
+    />
+    <section v-if="tab === 'graph'" class="knowledge-graph-panel">
       <header>
         <div>
           <h2>知识图谱</h2>
@@ -935,13 +1120,20 @@ onBeforeUnmount(() => {
       />
     </section>
 
-    <section v-else class="knowledge-settings">
+    <section v-if="tab === 'settings'" class="knowledge-settings">
       <div class="settings-copy">
         <h2>回答偏好</h2>
-        <span v-if="service && !prefsDirty && !prefsBusy" class="settings-saved" role="status"><AppIcon name="check" :size="15" />已保存</span>
+        <span v-if="service && !prefsDirty && !prefsBusy" class="settings-saved" role="status"
+          ><AppIcon name="check" :size="15" />已保存</span
+        >
         <span v-else-if="prefsDirty" class="settings-pending" role="status">未保存</span>
       </div>
-      <el-form label-position="top" class="knowledge-preferences" :disabled="preview || prefsBusy || !service" @submit.prevent="savePreferences">
+      <el-form
+        label-position="top"
+        class="knowledge-preferences"
+        :disabled="preview || prefsBusy || !service"
+        @submit.prevent="savePreferences"
+      >
         <div class="preference-columns">
           <el-form-item label="岗位偏好"
             ><el-select v-model="prefs.role" filterable allow-create default-first-option
@@ -973,13 +1165,22 @@ onBeforeUnmount(() => {
           </div>
           <div class="processing-option">
             <label for="knowledge-auto-graph">资料更新后自动建图</label>
-            <el-switch id="knowledge-auto-graph" v-model="prefs.graphEnabled" :disabled="!prefs.modelConsent" aria-label="资料更新后自动建图" />
+            <el-switch
+              id="knowledge-auto-graph"
+              v-model="prefs.graphEnabled"
+              :disabled="!prefs.modelConsent"
+              aria-label="资料更新后自动建图"
+            />
           </div>
           <details class="settings-help">
             <summary>资料如何处理</summary>
-            <p>原件与向量保存在本地私有库。开启云模型后，问答发送命中片段，建图发送待抽取片段；请求按模型平台额度计费。关闭自动建图时仍会建立本地索引，可手动建图。</p>
+            <p>
+              原件与向量保存在本地私有库。开启云模型后，问答发送命中片段，建图发送待抽取片段；请求按模型平台额度计费。关闭自动建图时仍会建立本地索引，可手动建图。
+            </p>
             <p>岗位偏好只改变回答方式，不改变账号权限。</p>
-            <p v-if="budget">累计请求 {{ budget.used }} 次<span v-if="budget.limit > 0"> · 本地上限 {{ budget.limit }} 次</span>。</p>
+            <p v-if="budget">
+              累计请求 {{ budget.used }} 次<span v-if="budget.limit > 0"> · 本地上限 {{ budget.limit }} 次</span>。
+            </p>
           </details>
           <p v-if="service && !service.modelConfigured" class="settings-warning">
             模型服务尚未配置，本地原文检索仍可使用。
@@ -988,7 +1189,8 @@ onBeforeUnmount(() => {
         <div v-if="prefsDirty || prefsBusy" class="settings-save">
           <el-button :disabled="prefsBusy" @click="resetPreferences">撤销更改</el-button>
           <el-button native-type="submit" type="primary" :loading="prefsBusy" :disabled="preview || !!serviceError"
-            >保存更改</el-button>
+            >保存更改</el-button
+          >
         </div>
       </el-form>
       <div class="settings-security">

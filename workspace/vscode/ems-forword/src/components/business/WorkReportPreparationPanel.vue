@@ -19,7 +19,7 @@ let requestId = 0;
 let timer;
 const quantity = computed(() => Number(props.qualifiedQuantity || 0) + Number(props.defectQuantity || 0));
 
-async function load(fill = false) {
+async function load(fill = false, userInitiated = false) {
   const current = ++requestId;
   emit('preparation', null);
   if (!props.taskId) {
@@ -54,6 +54,7 @@ async function load(fill = false) {
             remark: '按本工序及本工单已领批次建议，请核对实际消耗',
             _clientId: crypto.randomUUID(),
           })),
+        userInitiated,
       );
     }
   } catch (e) {
@@ -111,7 +112,7 @@ onBeforeUnmount(() => {
           合格数量 +
           不良数量不得超过剩余可报数量。填写产量后自动带出本工序用料，修改产量会重新计算；保存前请核对实际消耗。
         </p>
-        <el-button size="small" :disabled="quantity <= 0" @click="load(true)">重新带出本次用料</el-button>
+        <el-button size="small" :disabled="quantity <= 0" @click="load(true, true)">重新带出本次用料</el-button>
         <el-collapse>
           <el-collapse-item :title="`查看本工序物料与可用领料（${data.materials.length} 个批次）`">
             <el-table :data="data.materials" size="small" border empty-text="本工序没有直接投料">

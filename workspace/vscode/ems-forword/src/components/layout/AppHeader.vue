@@ -1,12 +1,12 @@
 <script setup>
 import { appName } from '@/config/branding';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 import { ElNotification } from 'element-plus';
 import AppIcon from '@/components/common/AppIcon.vue';
 import ThemeDrawer from '@/components/layout/ThemeDrawer.vue';
-import { clearAuth, getCurrentUser, isFrameworkPreview } from '@/utils/auth';
+import { authRevision, clearAuth, getCurrentUser, isFrameworkPreview } from '@/utils/auth';
 import { firstAccessiblePath, getModuleDefinition, getNavigationItems } from '@/config/navigation';
 import { openAiAssistant } from '@/utils/app-events';
 import { activeTheme } from '@/utils/theme';
@@ -15,6 +15,7 @@ import { getNotificationPage, getNotificationUnreadCount, markNotificationRead }
 import { alertStreamUrl, getAlertPending } from '@/api/ai/alert';
 import { setCurrentUser } from '@/utils/auth';
 import { hasPermission } from '@/utils/permission';
+import { navigationResults, safeRecentPaths } from '@/utils/navigation-search';
 
 // 顶部栏负责菜单开关、全局搜索、通知、全屏、主题和用户退出。
 defineProps({
@@ -27,6 +28,9 @@ const route = useRoute();
 const router = useRouter();
 const searchOpen = ref(false);
 const searchKeyword = ref('');
+const searchInput = ref();
+const activeSearchIndex = ref(0);
+const recentPaths = ref([]);
 const themeOpen = ref(false);
 const fullscreenActive = ref(Boolean(document.fullscreenElement));
 const fullscreenPending = ref(false);
@@ -89,27 +93,60 @@ const breadcrumbTitle = computed(() => {
   return route.meta.title || '首页';
 });
 
-// 根据关键词从当前用户可见菜单中筛选顶部全局搜索结果。
-const searchResults = computed(() => {
-  // 未输入关键词时展示常用入口，输入后在当前账号可见菜单中搜索。
-  const keyword = searchKeyword.value.trim().toLowerCase();
-  const items = getNavigationItems();
-  if (!keyword) {
-    return items.slice(0, 7);
-  }
-  return items
-    .filter((item) =>
-      [item.label, item.description].some((value) =>
-        String(value || '')
-          .toLowerCase()
-          .includes(keyword),
-      ),
-    )
-    .slice(0, 8);
+const searchResults = computed(() => navigationResults(getNavigationItems(), searchKeyword.value, recentPaths.value));
+const activeSearchId = computed(() =>
+  searchResults.value.length ? `mes-navigation-result-${activeSearchIndex.value}` : undefined,
+);
+watch(searchResults, () => {
+  activeSearchIndex.value = 0;
 });
+
+// Store static module paths only, separated by account and app instance. Query
+// strings, business IDs, question text and inaccessible entries never enter it.
+function rememberNavigation() {
+  authRevision.value;
+  const user = getCurrentUser(),
+    owner = user.userId || user.username;
+  if (!owner) {
+    recentPaths.value = [];
+    return;
+  }
+  const key = `mes_navigation_recent:${import.meta.env.VITE_APP_SCOPE || 'default'}:${owner}`;
+  let stored = [];
+  try {
+    stored = JSON.parse(localStorage.getItem(key) || '[]');
+  } catch {
+    /* optional preference */
+  }
+  recentPaths.value = safeRecentPaths([route.path, ...(Array.isArray(stored) ? stored : [])], getNavigationItems());
+  try {
+    localStorage.setItem(key, JSON.stringify(recentPaths.value));
+  } catch {
+    /* navigation remains available */
+  }
+}
+watch([() => route.path, authRevision], rememberNavigation, { immediate: true });
+
+async function focusSearch() {
+  await nextTick();
+  searchInput.value?.focus();
+}
+function handleSearchKeydown(event) {
+  if (event.isComposing || event.keyCode === 229) return;
+  const count = searchResults.value.length;
+  if ((event.key === 'ArrowDown' || event.key === 'ArrowUp') && count) {
+    event.preventDefault();
+    activeSearchIndex.value = (activeSearchIndex.value + (event.key === 'ArrowDown' ? 1 : -1) + count) % count;
+    nextTick(() => document.getElementById(activeSearchId.value)?.scrollIntoView({ block: 'nearest' }));
+  } else if (event.key === 'Enter' && count) {
+    event.preventDefault();
+    navigateTo(searchResults.value[activeSearchIndex.value]);
+  }
+}
 
 // 打开全局搜索对话框。
 function openSearch() {
+  activeSearchIndex.value = 0;
   searchOpen.value = true;
 }
 
@@ -471,6 +508,8 @@ function handleShortcut(event) {
 onMounted(async () => {
   syncFullscreen();
   document.addEventListener('fullscreenchange', syncFullscreen);
+  // Navigation should be usable while notification/network requests are pending.
+  window.addEventListener('keydown', handleShortcut);
   // 进入后台后刷新当前用户信息，并启动时钟和通知轮询。
   if (!previewMode) {
     try {
@@ -498,7 +537,6 @@ onMounted(async () => {
     }
     loadAlertPending();
   }, NOTIFICATION_INTERVAL);
-  window.addEventListener('keydown', handleShortcut);
 });
 
 // 卸载前释放定时器、通知实例和键盘事件。
@@ -525,7 +563,8 @@ onBeforeUnmount(() => {
         </el-button>
       </el-tooltip>
 
-      <div class="breadcrumb">
+      <div v-if="$slots.navigation" v-show="!mobile" class="header-navigation"><slot name="navigation" /></div>
+      <div v-if="mobile || !$slots.navigation" class="breadcrumb">
         <span>{{ appName }}</span>
         <AppIcon name="right" :size="14" />
         <strong>{{ breadcrumbTitle }}</strong>
@@ -661,18 +700,54 @@ onBeforeUnmount(() => {
       </el-dropdown>
     </div>
 
-    <el-dialog v-model="searchOpen" class="search-dialog" title="快速导航" width="520px" append-to-body>
-      <el-input v-model="searchKeyword" size="large" placeholder="输入模块名称" autofocus>
-        <template #prefix><AppIcon name="search" :size="18" /></template>
-      </el-input>
-      <div class="search-results">
-        <button v-for="item in searchResults" :key="item.path || item.action" type="button" @click="navigateTo(item)">
+    <el-dialog
+      v-model="searchOpen"
+      class="search-dialog"
+      title="模块导航"
+      width="min(560px, 94vw)"
+      append-to-body
+      @opened="focusSearch"
+    >
+      <div class="navigation-search-input">
+        <AppIcon name="search" :size="18" /><input
+          ref="searchInput"
+          v-model="searchKeyword"
+          type="search"
+          autocomplete="off"
+          placeholder="搜索模块名称或英文路径"
+          role="combobox"
+          aria-label="搜索模块"
+          aria-autocomplete="list"
+          aria-controls="mes-navigation-results"
+          :aria-expanded="searchOpen"
+          :aria-activedescendant="activeSearchId"
+          @keydown="handleSearchKeydown"
+        />
+      </div>
+      <p v-if="!searchKeyword.trim()" class="search-section-label">最近访问与常用模块</p>
+      <div id="mes-navigation-results" class="search-results" role="listbox" aria-label="可访问模块">
+        <button
+          v-for="(item, index) in searchResults"
+          :id="`mes-navigation-result-${index}`"
+          :key="item.path || item.action"
+          type="button"
+          role="option"
+          :aria-selected="index === activeSearchIndex"
+          :class="{ 'is-current': index === activeSearchIndex }"
+          tabindex="-1"
+          @mouseenter="activeSearchIndex = index"
+          @click="navigateTo(item)"
+        >
           <span class="search-result-icon"><AppIcon :name="item.icon" :size="18" /></span>
-          <span>{{ item.label }}</span>
+          <span class="search-result-copy"
+            ><strong>{{ item.label }}</strong
+            ><small v-if="item.description">{{ item.description }}</small></span
+          >
           <AppIcon name="right" :size="15" />
         </button>
-        <div v-if="!searchResults.length" class="search-empty">没有匹配的模块</div>
       </div>
+      <div v-if="!searchResults.length" class="search-empty" role="status">未找到可访问模块，试试更短的名称</div>
+      <footer class="search-keyboard-hint"><span>↑ ↓ 选择 · Enter 打开 · Esc 关闭</span><kbd>Ctrl Shift K</kbd></footer>
     </el-dialog>
 
     <ThemeDrawer v-model="themeOpen" />
@@ -708,7 +783,12 @@ onBeforeUnmount(() => {
 
 .header-left {
   min-width: 0;
+  flex: 1;
   gap: 10px;
+}
+.header-navigation {
+  min-width: 0;
+  flex: 1;
 }
 
 .header-actions {
@@ -964,10 +1044,40 @@ onBeforeUnmount(() => {
 
 .search-results {
   display: flex;
-  min-height: 150px;
+  max-height: min(56vh, 480px);
   flex-direction: column;
   gap: 4px;
   margin-top: 14px;
+  overflow-y: auto;
+}
+.navigation-search-input {
+  display: flex;
+  min-height: 46px;
+  align-items: center;
+  gap: 10px;
+  padding: 0 12px;
+  color: var(--mes-text-secondary);
+  border: 1px solid var(--mes-border);
+  border-radius: var(--mes-radius-sm);
+  background: var(--mes-surface);
+}
+.navigation-search-input:focus-within {
+  border-color: var(--mes-primary);
+  outline: 2px solid var(--mes-primary-soft);
+}
+.navigation-search-input input {
+  width: 100%;
+  min-width: 0;
+  min-height: 44px;
+  padding: 0;
+  color: var(--mes-text);
+  border: 0;
+  outline: none;
+  background: transparent;
+  font: inherit;
+}
+.navigation-search-input input::placeholder {
+  color: var(--mes-text-secondary);
 }
 
 .search-results button {
@@ -985,9 +1095,51 @@ onBeforeUnmount(() => {
   cursor: pointer;
 }
 
-.search-results button:hover {
+.search-results button:hover,
+.search-results button.is-current {
   color: var(--mes-primary);
   background: var(--mes-primary-soft);
+}
+
+.search-section-label {
+  margin-top: 14px;
+  color: var(--mes-text-secondary);
+  font-size: 12px;
+}
+.search-result-copy {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 3px;
+}
+.search-result-copy strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.search-result-copy small {
+  overflow: hidden;
+  color: var(--mes-text-secondary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.search-keyboard-hint {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px solid var(--mes-border);
+  color: var(--mes-text-secondary);
+  font-size: 12px;
+}
+.search-keyboard-hint kbd {
+  font: inherit;
+}
+@media (max-width: 640px) {
+  .search-keyboard-hint {
+    display: none;
+  }
 }
 
 .search-result-icon {
@@ -1007,6 +1159,11 @@ onBeforeUnmount(() => {
   text-align: center;
 }
 
+@media (max-width: 1500px) {
+  .header-clock {
+    display: none;
+  }
+}
 @media (max-width: 1180px) {
   .global-search,
   .header-clock,

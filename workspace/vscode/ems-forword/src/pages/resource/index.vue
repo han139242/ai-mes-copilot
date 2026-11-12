@@ -1,6 +1,6 @@
 <script setup>
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
+import { onBeforeRouteLeave, onBeforeRouteUpdate, useRoute, useRouter } from 'vue-router';
 import dayjs from 'dayjs';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppIcon from '@/components/common/AppIcon.vue';
@@ -28,10 +28,13 @@ import {
   canUseResourceMockFallback,
   clearReferenceOptions,
   createPreviewRows,
+  loadReferenceRecords,
   loadReferenceOptions,
 } from '@/utils/resource-options';
-import { getCurrentUser, isFrameworkPreview } from '@/utils/auth';
+import { authRevision, getCurrentUser, hasAuthenticatedSession, isFrameworkPreview } from '@/utils/auth';
 import { hasPermission, hasRequestPermission, resourcePermission } from '@/utils/permission';
+import { draftFingerprint } from '@/utils/draft-fingerprint';
+import { registerPageRefreshGuard } from '@/utils/app-events';
 
 // 这是约 80 个配置化 CRUD 页面共用的“通用资源页”。路由只传入 resourceKey，
 // 页面再读取对应配置，统一完成查询、分页、表格、表单、权限、明细和业务动作。
@@ -48,7 +51,16 @@ const previewMode = isFrameworkPreview();
 const mockFallbackEnabled = canUseResourceMockFallback();
 const loading = ref(false);
 const loadError = ref('');
+const hasLoaded = ref(false);
+const appliedFilters = ref({});
+const appliedPagination = ref({ current: 1, size: 20 });
+let failedQuery = null,
+  masterRequestId = 0,
+  alertRequestId = 0,
+  pageActive = true;
 const submitting = ref(false);
+const formSubmitPending = ref(false),
+  actionSubmitPending = ref(false);
 const exporting = ref(false);
 const rows = ref([]);
 const total = ref(0);
@@ -59,16 +71,21 @@ const detailRows = ref([]);
 const detailCounts = reactive({});
 const detailLoading = ref(false);
 const detailError = ref('');
+const detailExpanded = ref(false);
 const dataMode = ref(previewMode ? 'preview' : 'live');
 const filters = reactive({});
 const columnVisibility = reactive({});
 const pagination = reactive({ current: 1, size: 20 });
 const filterExpanded = ref(false);
+const mobileFiltersOpen = ref(false);
 const referenceOptions = reactive({});
+const referenceNamesLoading = ref(false);
+let referenceRequestId = 0;
 const formOpen = ref(false);
 const formMode = ref('create');
 const formModel = ref({});
 const formRef = ref();
+const formError = ref('');
 const childRows = ref([]);
 const reportPreparationBlocked = ref(false);
 const reportPlanReference = ref(null);
@@ -77,7 +94,7 @@ const reportPlanTimeText = computed(() => {
   if (!plan) {
     return '计划参考加载中或暂不可用';
   }
-  const format = (value) => value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : '未设置';
+  const format = (value) => (value && dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : '未设置');
   const hours = plan.taskStandardWorkHours;
   const duration = hours == null ? '本任务工艺参考工时暂无可靠依据。' : `本任务工艺参考：${Number(hours)} 小时。`;
   return `工单计划：${format(plan.workOrderPlannedStartTime)} ～ ${format(plan.workOrderPlannedEndTime)}。${duration}`;
@@ -90,6 +107,7 @@ const currentAction = ref(null);
 const actionRow = ref(null);
 const actionModel = ref({});
 const actionFormRef = ref();
+const actionError = ref('');
 const traceOpen = ref(false);
 const traceTitle = ref('追溯结果');
 const traceData = ref(null);
@@ -106,6 +124,175 @@ const uploadOpen = ref(false);
 const uploadFile = ref(null);
 const uploadMeta = reactive({ bizType: '', bizId: null });
 const alertCounts = reactive({});
+const formTouched = ref(false),
+  actionTouched = ref(false);
+const formBaseline = ref(''),
+  actionBaseline = ref('');
+let discardCheck = null,
+  cancelDiscardCheck = null;
+const owner = getCurrentUser()?.userId || getCurrentUser()?.username;
+
+function formDraftValue() {
+  return {
+    fields: Object.fromEntries(
+      formFields.value.filter((field) => !field.disabled).map((field) => [field.prop, formModel.value[field.prop]]),
+    ),
+    children: childRows.value.map((row) =>
+      Object.fromEntries(
+        childFields.value.filter((field) => !field.disabled).map((field) => [field.prop, row[field.prop]]),
+      ),
+    ),
+  };
+}
+const formDirty = computed(
+  () =>
+    formOpen.value &&
+    formMode.value !== 'view' &&
+    formTouched.value &&
+    draftFingerprint(formDraftValue()) !== formBaseline.value,
+);
+const actionDirty = computed(
+  () => actionOpen.value && actionTouched.value && draftFingerprint(actionModel.value) !== actionBaseline.value,
+);
+const uploadDirty = computed(
+  () =>
+    uploadOpen.value &&
+    (Boolean(uploadFile.value) ||
+      Boolean(String(uploadMeta.bizType || '').trim()) ||
+      (uploadMeta.bizId !== null && uploadMeta.bizId !== undefined && uploadMeta.bizId !== '')),
+);
+const pendingDraft = computed(() => formDirty.value || actionDirty.value || uploadDirty.value);
+function beginFormInteraction() {
+  if (!formTouched.value) formBaseline.value = draftFingerprint(formDraftValue());
+  formTouched.value = true;
+}
+function changeFormField(field, value) {
+  beginFormInteraction();
+  formModel.value[field.prop] = value;
+}
+function changeChildField(field, row, value) {
+  beginFormInteraction();
+  row[field.prop] = value;
+  handleChildFieldChange(field, row);
+}
+function handlePreparedMaterials(value, userInitiated = false) {
+  if (userInitiated) beginFormInteraction();
+  childRows.value = value;
+}
+function changeActionField(field, value) {
+  if (!actionTouched.value) actionBaseline.value = draftFingerprint(actionModel.value);
+  actionTouched.value = true;
+  actionModel.value[field.prop] = value;
+}
+function ownsCurrentSession() {
+  return hasAuthenticatedSession() && owner === (getCurrentUser()?.userId || getCurrentUser()?.username);
+}
+function clearOpenDrafts() {
+  formOpen.value = actionOpen.value = uploadOpen.value = false;
+  formModel.value = {};
+  actionModel.value = {};
+  childRows.value = [];
+  uploadFile.value = null;
+  formTouched.value = actionTouched.value = false;
+}
+async function confirmDiscard(dirty = pendingDraft.value) {
+  if (!ownsCurrentSession()) return true;
+  if ((submitting.value && (formOpen.value || actionOpen.value || uploadOpen.value)) || batchDeleting.value) {
+    ElMessage.info('正在提交，请等待结果');
+    return false;
+  }
+  if (!dirty) return true;
+  if (!discardCheck) {
+    const confirmation = ElMessageBox.confirm('当前内容还未保存，离开后将丢失修改。', '保留当前修改？', {
+      confirmButtonText: '放弃修改并继续',
+      cancelButtonText: '继续编辑',
+      type: 'warning',
+      distinguishCancelAndClose: true,
+      closeOnClickModal: false,
+      closeOnHashChange: false,
+    }).then(
+      () => true,
+      () => !ownsCurrentSession(),
+    );
+    discardCheck = Promise.race([
+      confirmation,
+      new Promise((resolve) => {
+        cancelDiscardCheck = () => resolve(true);
+      }),
+    ]).finally(() => {
+      discardCheck = null;
+      cancelDiscardCheck = null;
+    });
+  }
+  return discardCheck;
+}
+async function closeForm(done) {
+  if (!(await confirmDiscard(formDirty.value))) return;
+  formOpen.value = false;
+  if (typeof done === 'function') done();
+}
+async function closeAction(done) {
+  if (!(await confirmDiscard(actionDirty.value))) return;
+  actionOpen.value = false;
+  if (typeof done === 'function') done();
+}
+async function closeUpload(done) {
+  if (!(await confirmDiscard(uploadDirty.value))) return;
+  uploadOpen.value = false;
+  if (typeof done === 'function') done();
+}
+async function canLeavePage() {
+  return confirmDiscard();
+}
+function beforeUnload(event) {
+  if (
+    !ownsCurrentSession() ||
+    (!pendingDraft.value && !(submitting.value && (formOpen.value || actionOpen.value || uploadOpen.value)))
+  )
+    return;
+  event.preventDefault();
+  event.returnValue = '';
+}
+watch(authRevision, () => {
+  if (!pageActive) return;
+  referenceRequestId++;
+  referenceNamesLoading.value = false;
+  Object.keys(referenceOptions).forEach((key) => delete referenceOptions[key]);
+  if (!ownsCurrentSession()) {
+    clearOpenDrafts();
+    if (discardCheck) {
+      cancelDiscardCheck?.();
+      ElMessageBox.close();
+    }
+    return;
+  }
+  // Header profile refreshes also update permissions. Re-read under the new
+  // revision instead of leaving valid responses discarded with empty options.
+  void loadReferences();
+  void hydrateReferenceLabels();
+  if (actionOpen.value && currentAction.value) {
+    void loadActionReferences(currentAction.value).catch(() => {
+      if (pageActive && ownsCurrentSession()) ElMessage.warning('关联数据加载失败，请重新打开办理窗口');
+    });
+  }
+});
+onBeforeRouteLeave(canLeavePage);
+onBeforeRouteUpdate(canLeavePage);
+const removeRefreshGuard = registerPageRefreshGuard(canLeavePage);
+window.addEventListener('beforeunload', beforeUnload);
+onBeforeUnmount(() => {
+  if (discardCheck) {
+    cancelDiscardCheck?.();
+    ElMessageBox.close();
+  }
+  pageActive = false;
+  masterRequestId++;
+  alertRequestId++;
+  detailRequestId++;
+  detailCountRequestId++;
+  removeRefreshGuard();
+  window.removeEventListener('beforeunload', beforeUnload);
+});
 
 // 配置先决定该资源是否支持增删改导出，再结合当前用户权限决定按钮是否真正显示。
 const permissions = computed(() => {
@@ -174,6 +361,44 @@ const formRules = computed(() => rulesFor(formFields.value, formMode.value));
 const activeFilterCount = computed(
   () => Object.values(filters).filter((value) => value !== '' && value !== null && value !== undefined).length,
 );
+const filtersChanged = computed(
+  () => hasLoaded.value && draftFingerprint(cleanParams(filters)) !== draftFingerprint(appliedFilters.value),
+);
+const appliedFilterItems = computed(() =>
+  config.value.filters
+    .filter((field) => {
+      const value = appliedFilters.value[field.prop];
+      return value !== '' && value !== null && value !== undefined;
+    })
+    .map((field) => ({
+      prop: field.prop,
+      label: field.label,
+      value: formatValue(field, appliedFilters.value[field.prop]),
+    })),
+);
+const resultCountLabel = computed(() =>
+  hasLoaded.value ? `${total.value} 条` : loading.value ? '正在读取…' : '尚未读取',
+);
+const showMasterDetail = computed(() =>
+  Boolean(detailConfig.value && detailViewAllowed.value && selectedRow.value && detailExpanded.value),
+);
+
+function removeAppliedFilter(prop) {
+  filters[prop] = '';
+  handleSearch();
+}
+function clearBatchSelection() {
+  mainTableRef.value?.clearSelection();
+  selectedBatchRows.value = [];
+}
+function isCurrentMaster(requestId) {
+  return pageActive && requestId === masterRequestId;
+}
+function retryQuery() {
+  if (failedQuery && draftFingerprint(cleanParams(filters)) === draftFingerprint(failedQuery.filters))
+    Object.assign(pagination, failedQuery.pagination);
+  loadData();
+}
 // 将追溯接口返回的对象转换为模板可循环的键值对数组。
 const traceEntries = computed(() => {
   if (!traceData.value || typeof traceData.value !== 'object') {
@@ -325,9 +550,11 @@ function formatValue(field, value, row) {
     return field.formatter(value, row);
   }
   const matched = optionFor(field, value);
-  // 关联字段的选项标签是“名称 · 编码”，表格里只留名称，避免列被撑宽截断；下拉框仍显示完整标签。
   if (matched) {
-    return field.type === 'reference' ? String(matched.label).split(' · ')[0] : matched.label;
+    return matched.label;
+  }
+  if (field.type === 'reference') {
+    return `${field.label} #${value} · 名称未取得`;
   }
   if (field.type === 'datetime') {
     return dayjs(value).isValid() ? dayjs(value).format('YYYY-MM-DD HH:mm') : value;
@@ -490,7 +717,11 @@ function initColumns() {
 
 // 将当前列显示设置保存到浏览器，不同资源使用独立的存储键。
 function saveColumns() {
-  localStorage.setItem(`mes_resource_columns:${config.value.key}`, JSON.stringify(columnVisibility));
+  try {
+    localStorage.setItem(`mes_resource_columns:${config.value.key}`, JSON.stringify(columnVisibility));
+  } catch {
+    /* optional display preference */
+  }
 }
 
 // 恢复资源配置规定的默认列，并立即保存新的列设置。
@@ -539,6 +770,7 @@ function collectReferenceFields() {
 }
 
 async function loadActionReferences(action) {
+  const revision = authRevision.value;
   const keys = [
     ...new Set(
       (action.fields || []).filter((item) => item.type === 'reference' && item.reference).map((item) => item.reference),
@@ -547,7 +779,8 @@ async function loadActionReferences(action) {
   await Promise.all(
     keys.map(async (key) => {
       clearReferenceOptions(key);
-      referenceOptions[key] = await loadReferenceOptions(key, previewMode);
+      const options = await loadReferenceOptions(key, previewMode);
+      if (pageActive && revision === authRevision.value) mergeReferenceOptions(key, options);
     }),
   );
 }
@@ -568,6 +801,7 @@ function clearMasterDetail() {
   Object.keys(detailCounts).forEach((key) => delete detailCounts[key]);
   detailError.value = '';
   detailLoading.value = false;
+  detailExpanded.value = false;
   mainTableRef.value?.setCurrentRow();
 }
 
@@ -595,6 +829,7 @@ async function loadMasterDetail(row) {
       return;
     }
     applyDetailResult(result);
+    void hydrateReferenceLabels();
   } catch (error) {
     if (isStaleDetailRequest(requestId)) {
       return;
@@ -666,17 +901,28 @@ async function loadOtherDetailCounts(row) {
 
 // 主表当前行发生变化时，保存选中记录并加载它的明细和各明细数量。
 function handleCurrentRowChange(row) {
-  if (!detailConfig.value || !detailViewAllowed.value || syncingCurrentRow) {
+  if (!detailConfig.value || !detailViewAllowed.value || syncingCurrentRow || loading.value) {
     return;
   }
   selectedRow.value = row || null;
   if (!row) {
-    detailRows.value = [];
-    detailError.value = '';
+    clearMasterDetail();
     return;
   }
+  detailExpanded.value = true;
   loadMasterDetail(row);
   loadOtherDetailCounts(row);
+}
+function openRelatedDetail(row) {
+  if (loading.value || loadError.value) return;
+  if (selectedRow.value?.[config.value.idField] === row[config.value.idField]) {
+    detailExpanded.value = true;
+    return;
+  }
+  syncingCurrentRow = true;
+  mainTableRef.value?.setCurrentRow(row);
+  syncingCurrentRow = false;
+  handleCurrentRowChange(row);
 }
 
 // 切换明细标签时清空旧明细，再按新配置重新请求。
@@ -703,15 +949,18 @@ function isLegacyFocusQuery(resourceConfig, query) {
 }
 
 // 主表刷新后根据主键重新找到原选中行，保持用户的主从查看上下文。
-async function repairLegacyFocus() {
+async function repairLegacyFocus(isCurrent = () => true) {
   const originalPath = route.fullPath;
   const query = { ...route.query };
   delete query.focus;
   if (isLegacyFocusQuery(config.value, query)) {
     try {
       const response = await getResourceList('/api/qms/nonconforming-order/page', {
-        current: 1, size: 20, keyword: query.from,
+        current: 1,
+        size: 20,
+        keyword: query.from,
       });
+      if (!isCurrent()) return;
       const source = response?.data?.records?.find((row) => row.ncrNo === query.from);
       const candidates = source ? rows.value.filter((row) => String(row.sourceNcrId) === String(source.ncrId)) : [];
       candidates.sort((left, right) => Number(left.taskId) - Number(right.taskId));
@@ -722,14 +971,15 @@ async function repairLegacyFocus() {
       // 请求层负责显示真实错误；来源无法恢复时只清除非法焦点，保留当前筛选。
     }
   }
-  if (route.fullPath === originalPath) {
+  if (isCurrent() && route.fullPath === originalPath) {
     await router.replace({ path: route.path, query });
   }
 }
 
-async function restoreMasterSelection(selectedId) {
+async function restoreMasterSelection(selectedId, requestId = masterRequestId) {
+  if (!isCurrentMaster(requestId)) return;
   if (selectedId !== null && selectedId !== undefined && !isResourceFocusId(selectedId)) {
-    await repairLegacyFocus();
+    await repairLegacyFocus(() => isCurrentMaster(requestId));
     return;
   }
   let matched =
@@ -742,6 +992,7 @@ async function restoreMasterSelection(selectedId) {
   if (shouldFetchFocused) {
     try {
       const response = await getResourceDetail(config.value.baseUrl, selectedId);
+      if (!isCurrentMaster(requestId)) return;
       matched = response?.data || null;
       if (matched) {
         rows.value = [matched, ...rows.value.filter((row) => String(row[config.value.idField]) !== String(selectedId))];
@@ -749,6 +1000,7 @@ async function restoreMasterSelection(selectedId) {
         ElMessage.warning('目标单据不存在或已删除，请核对来源单据');
       }
     } catch (error) {
+      if (!isCurrentMaster(requestId)) return;
       if (!error.displayMessage) {
         ElMessage.warning('目标单据加载失败，请稍后重试');
       }
@@ -759,7 +1011,9 @@ async function restoreMasterSelection(selectedId) {
     return;
   }
   selectedRow.value = matched;
+  detailExpanded.value = true;
   await nextTick();
+  if (!isCurrentMaster(requestId)) return;
   syncingCurrentRow = true;
   mainTableRef.value?.setCurrentRow(matched);
   syncingCurrentRow = false;
@@ -772,19 +1026,88 @@ async function restoreMasterSelection(selectedId) {
 async function loadReferences() {
   // 一次收集当前页面所有 reference 字段，并行加载它们的下拉选项。
   const keys = [...new Set(collectReferenceFields().map((item) => item.reference))];
+  const revision = authRevision.value;
   const results = await Promise.allSettled(
     keys.map(async (key) => {
-      referenceOptions[key] = await loadReferenceOptions(key, previewMode);
+      const options = await loadReferenceOptions(key, previewMode);
+      if (pageActive && revision === authRevision.value) mergeReferenceOptions(key, options);
     }),
   );
   const failed = results.filter((item) => item.status === 'rejected').length;
-  if (failed && !previewMode) {
+  if (failed && !previewMode && pageActive && revision === authRevision.value) {
     ElMessage.warning(`${failed} 组关联数据暂未加载，仍可使用编号操作`);
+  }
+}
+
+function mergeReferenceOptions(key, options) {
+  referenceOptions[key] = [
+    ...new Map([...(referenceOptions[key] || []), ...options].map((item) => [String(item.value), item])).values(),
+  ];
+}
+
+function referenceRows() {
+  return [
+    [config.value.fields, flattenTree(rows.value)],
+    [detailTableFields.value, detailRows.value],
+  ];
+}
+
+const missingReferenceCount = computed(() => {
+  const missing = new Set();
+  for (const [fields, records] of referenceRows()) {
+    for (const field of fields.filter((item) => item.type === 'reference')) {
+      for (const row of records) {
+        const value = row[field.prop];
+        if (/^[1-9]\d*$/.test(String(value)) && !optionFor(field, value)) missing.add(`${field.reference}:${value}`);
+      }
+    }
+  }
+  return missing.size;
+});
+const canRetryReferenceNames = computed(() => {
+  const allowed = new Set(collectReferenceFields().map((field) => field.reference));
+  return referenceRows().some(([fields, records]) =>
+    fields.some(
+      (field) =>
+        allowed.has(field.reference) &&
+        records.some((row) => /^[1-9]\d*$/.test(String(row[field.prop])) && !optionFor(field, row[field.prop])),
+    ),
+  );
+});
+
+async function hydrateReferenceLabels(requestId = masterRequestId) {
+  const ownRequest = ++referenceRequestId;
+  const revision = authRevision.value;
+  const isCurrent = () =>
+    isCurrentMaster(requestId) && ownRequest === referenceRequestId && revision === authRevision.value;
+  const allowed = new Set(collectReferenceFields().map((item) => item.reference));
+  const groups = new Map();
+  for (const [fields, records] of referenceRows()) {
+    for (const field of fields.filter((item) => item.type === 'reference' && allowed.has(item.reference))) {
+      if (!groups.has(field.reference)) groups.set(field.reference, new Set());
+      for (const row of records) groups.get(field.reference).add(row[field.prop]);
+    }
+  }
+  referenceNamesLoading.value = true;
+  try {
+    await Promise.allSettled(
+      [...groups].map(async ([key, ids]) => {
+        const options = await loadReferenceRecords(key, [...ids], previewMode, isCurrent);
+        if (isCurrent()) {
+          mergeReferenceOptions(key, options);
+        }
+      }),
+    );
+  } finally {
+    if (ownRequest === referenceRequestId && pageActive) referenceNamesLoading.value = false;
   }
 }
 
 // 查询主表数据，兼容树接口、分页接口、预览数据和开发mock回退。
 async function loadData() {
+  const requestId = ++masterRequestId;
+  const queryFilters = cleanParams({ ...filters });
+  const queryPagination = { ...pagination };
   selectedBatchRows.value = [];
   mainTableRef.value?.clearSelection();
   savePageState();
@@ -792,37 +1115,46 @@ async function loadData() {
   const selectedId = selectedRow.value?.[config.value.idField] ?? route.query.focus;
   loading.value = true;
   loadError.value = '';
-  dataMode.value = previewMode ? 'preview' : 'live';
   try {
     if (previewMode) {
       applyLocalRows('preview');
-      await restoreMasterSelection(selectedId);
-      return;
+    } else {
+      const result = await requestMasterRows({ ...queryPagination, ...queryFilters });
+      if (!isCurrentMaster(requestId)) return false;
+      applyMasterRows(result);
+      dataMode.value = 'live';
+      if (total.value === 0 && mockFallbackEnabled) applyLocalRows('mock');
     }
-    const result = await requestMasterRows();
-    applyMasterRows(result);
-    if (total.value === 0 && mockFallbackEnabled) {
-      applyLocalRows('mock');
-    }
-    await restoreMasterSelection(selectedId);
+    hasLoaded.value = true;
+    appliedFilters.value = queryFilters;
+    appliedPagination.value = { ...pagination };
+    failedQuery = null;
+    await restoreMasterSelection(selectedId, requestId);
+    if (isCurrentMaster(requestId)) void hydrateReferenceLabels(requestId);
+    return isCurrentMaster(requestId);
   } catch (error) {
+    if (!isCurrentMaster(requestId)) return false;
     if (mockFallbackEnabled) {
       applyLocalRows('mock');
-      await restoreMasterSelection(selectedId);
-      return;
+      hasLoaded.value = true;
+      appliedFilters.value = queryFilters;
+      appliedPagination.value = { ...pagination };
+      await restoreMasterSelection(selectedId, requestId);
+      return isCurrentMaster(requestId);
     }
-    rows.value = [];
-    total.value = 0;
-    clearMasterDetail();
+    failedQuery = { filters: queryFilters, pagination: queryPagination };
+    if (hasLoaded.value) Object.assign(pagination, appliedPagination.value);
     loadError.value = error?.displayMessage || error?.message || '数据加载失败';
+    return false;
   } finally {
-    loading.value = false;
+    if (isCurrentMaster(requestId)) loading.value = false;
   }
 }
 
 // 按当前分页与筛选条件请求主表数据，树接口与普通分页接口二选一。
-async function requestMasterRows() {
-  const params = cleanParams({ current: pagination.current, size: pagination.size, ...filters });
+async function requestMasterRows(
+  params = cleanParams({ current: pagination.current, size: pagination.size, ...filters }),
+) {
   return config.value.treeEndpoint
     ? getResourceList(config.value.treeEndpoint, params)
     : getResourcePage(config.value.baseUrl, params);
@@ -844,6 +1176,7 @@ function applyMasterRows(result) {
 
 // 根据资源alerts配置查询各类风险数量，供页面顶部提醒条使用。
 async function loadAlerts() {
+  const requestId = ++alertRequestId;
   Object.keys(alertCounts).forEach((key) => delete alertCounts[key]);
   if (!alertRules.value.length) {
     return;
@@ -868,6 +1201,7 @@ async function loadAlerts() {
       return [rule.key, Number(result?.data?.total || 0)];
     }),
   );
+  if (!pageActive || requestId !== alertRequestId) return;
   results.forEach((result) => {
     if (result.status === 'fulfilled') {
       const [key, count] = result.value;
@@ -878,8 +1212,7 @@ async function loadAlerts() {
 
 // 完整刷新由主表查询和风险统计两步组成。
 async function refreshData() {
-  await loadData();
-  await loadAlerts();
+  if (await loadData()) await loadAlerts();
 }
 
 // 点击某条风险提醒时，将它的固定条件写入筛选表单并重新查询第一页。
@@ -907,6 +1240,9 @@ function resetSearch() {
 
 // 打开新增弹窗，可接收路由或关联跳转提供的预填字段。
 async function openCreate(prefill = {}) {
+  if (submitting.value) return;
+  formTouched.value = false;
+  formError.value = '';
   reportPreparationBlocked.value = config.value.key === 'mfg-work-report';
   formMode.value = 'create';
   initForm(prefill);
@@ -958,9 +1294,7 @@ async function fillAvailableChildren() {
 
 // 编辑态：按来源领料明细把名称与可退上限合并回已有的明细行。
 function mergeAvailableChildren(available) {
-  const sources = new Map(
-    available.map((item) => [String(item.outboundDetailId), item]),
-  );
+  const sources = new Map(available.map((item) => [String(item.outboundDetailId), item]));
   childRows.value = childRows.value.map((row) => {
     const source = sources.get(String(row.outboundDetailId));
     if (!source) {
@@ -1087,6 +1421,9 @@ async function loadChildren(row) {
 
 // 查询完整记录和子表后打开编辑弹窗，并清除上一次校验提示。
 async function openEdit(row) {
+  if (submitting.value) return;
+  formTouched.value = false;
+  formError.value = '';
   formMode.value = 'edit';
   submitting.value = true;
   try {
@@ -1094,6 +1431,7 @@ async function openEdit(row) {
     await loadChildren(row);
     // 明细接口只返回实体字段，名称与可退上限要从可退清单补齐，否则这几列是空的。
     await fillAvailableChildren();
+    if (!pageActive) return;
     formOpen.value = true;
     await nextTick();
     formRef.value?.clearValidate();
@@ -1122,6 +1460,7 @@ async function openDetail(row) {
 
 // 在主从一体表单中添加一条仅存在于前端的新子表记录。
 function addChild() {
+  beginFormInteraction();
   const child = { ...childConfig.value.defaults, _clientId: crypto.randomUUID() };
   childConfig.value.fields.forEach((item) => {
     if (item.defaultValue !== undefined) {
@@ -1138,32 +1477,42 @@ function handleChildFieldChange(field, row) {
   }
 }
 
-watch(() => formModel.value.warehouseId, (value, previous) => {
-  if (config.value.key === 'wms-inbound-order' && value !== previous && formOpen.value) {
-    childRows.value.forEach((row) => {
-      row.locationId = null;
-    });
-  }
-});
+watch(
+  () => formModel.value.warehouseId,
+  (value, previous) => {
+    if (config.value.key === 'wms-inbound-order' && value !== previous && formOpen.value) {
+      childRows.value.forEach((row) => {
+        row.locationId = null;
+      });
+    }
+  },
+);
 
 // 表头退料类型切换时，把明细里还是默认文案的原因一起换掉，避免演示时要逐条改。
-watch(() => formModel.value.returnType, (value, previous) => {
-  if (config.value.fullChild?.reasonDefaults?.field !== 'returnType') {
-    return;
-  }
-  if (value !== previous && formOpen.value) {
-    syncChildReasonDefaults();
-  }
-});
+watch(
+  () => formModel.value.returnType,
+  (value, previous) => {
+    if (config.value.fullChild?.reasonDefaults?.field !== 'returnType') {
+      return;
+    }
+    if (value !== previous && formOpen.value) {
+      syncChildReasonDefaults();
+    }
+  },
+);
 
-watch(() => actionModel.value.warehouseId, (value, previous) => {
-  if (currentAction.value?.key === 'generate-inbound' && value !== previous) {
-    actionModel.value.locationId = null;
-  }
-});
+watch(
+  () => actionModel.value.warehouseId,
+  (value, previous) => {
+    if (currentAction.value?.key === 'generate-inbound' && value !== previous) {
+      actionModel.value.locationId = null;
+    }
+  },
+);
 
 // 根据数组下标删除尚未提交或正在编辑的子表记录。
 function removeChild(index) {
+  beginFormInteraction();
   childRows.value.splice(index, 1);
 }
 
@@ -1245,15 +1594,29 @@ function childPayloadRows(fullChild) {
 
 // 校验并提交新增或编辑表单，根据模式调用POST或PUT接口。
 function validateReportDefectDescription() {
-  if (config.value.key !== 'mfg-work-report' || Number(formModel.value.defectQuantity) <= 0
-      || String(formModel.value.defectDescription || '').trim()) {
-        return true;
-      }
+  if (
+    config.value.key !== 'mfg-work-report' ||
+    Number(formModel.value.defectQuantity) <= 0 ||
+    String(formModel.value.defectDescription || '').trim()
+  ) {
+    return true;
+  }
   ElMessage.warning('请填写不良情况，说明不良现象、原因及数量');
   return false;
 }
 
 async function submitForm() {
+  if (formSubmitPending.value) return;
+  formSubmitPending.value = true;
+  try {
+    return await submitFormAttempt();
+  } finally {
+    formSubmitPending.value = false;
+  }
+}
+async function submitFormAttempt() {
+  if (submitting.value || !formOpen.value) return;
+  const sourceModel = formModel.value;
   if (!validateReportDefectDescription()) {
     return;
   }
@@ -1270,6 +1633,7 @@ async function submitForm() {
   } catch {
     return;
   }
+  if (submitting.value || !pageActive || !formOpen.value || sourceModel !== formModel.value) return;
   if (config.value.fullChild && !config.value.fullChild.allowEmpty && !childRows.value.length) {
     ElMessage.warning(`请至少添加一条${config.value.fullChild.title}`);
     return;
@@ -1278,6 +1642,7 @@ async function submitForm() {
     return;
   }
   submitting.value = true;
+  formError.value = '';
   try {
     const payload = submitPayload();
     if (localDataMode.value) {
@@ -1295,14 +1660,16 @@ async function submitForm() {
     } else {
       await updateResource(config.value.baseUrl, payload, config.value.updatePath || '');
     }
+    if (!pageActive || !ownsCurrentSession()) return;
     clearReferenceOptions(config.value.key);
     ElMessage.success(`${formMode.value === 'create' ? '新增' : '保存'}成功`);
     formOpen.value = false;
     if (!localDataMode.value) {
       await refreshData();
     }
-  } catch {
-    // 请求层已经给出具体错误提示。
+  } catch (error) {
+    if (pageActive && ownsCurrentSession())
+      formError.value = error?.displayMessage || error?.message || '保存失败，填写内容已保留，请重试';
   } finally {
     submitting.value = false;
   }
@@ -1347,9 +1714,15 @@ async function handleBatchDelete() {
     return;
   }
   try {
-    await ElMessageBox.confirm(`确认删除选中的 ${selected.length} 张草稿工单吗？关联的物料预留会释放；任一工单不符合条件时整批不删除。`, '批量删除确认', {
-      type: 'warning', confirmButtonText: '删除所选工单', cancelButtonText: '取消',
-    });
+    await ElMessageBox.confirm(
+      `确认删除选中的 ${selected.length} 张草稿工单吗？关联的物料预留会释放；任一工单不符合条件时整批不删除。`,
+      '批量删除确认',
+      {
+        type: 'warning',
+        confirmButtonText: '删除所选工单',
+        cancelButtonText: '取消',
+      },
+    );
   } catch {
     return;
   }
@@ -1383,13 +1756,14 @@ async function handleBatchDelete() {
 
 // 按当前筛选条件请求Excel二进制数据，并触发浏览器下载。
 async function handleExport() {
+  if (exporting.value || loading.value || !hasLoaded.value || loadError.value) return;
   if (localDataMode.value) {
     ElMessage.info('本地测试数据不生成真实导出文件');
     return;
   }
   exporting.value = true;
   try {
-    const response = await exportResource(config.value.baseUrl, cleanParams(filters));
+    const response = await exportResource(config.value.baseUrl, appliedFilters.value);
     saveBlob(response, `${config.value.title}-${dayjs().format('YYYYMMDD-HHmm')}.xlsx`);
     ElMessage.success('导出任务已完成');
   } catch {
@@ -1458,6 +1832,7 @@ function visibleRelations(row) {
 
 // 根据动作类型检查目标资源权限或具体HTTP请求权限。
 function canUseAction(action, row = null) {
+  if (row && (loading.value || loadError.value)) return false;
   if (action.kind === 'navigate') {
     return hasPermission(resourcePermission(action.targetResource, action.permissionAction || 'view'));
   }
@@ -1468,16 +1843,24 @@ function canUseAction(action, row = null) {
 
 // 同时检查资源编辑权限和当前业务状态是否允许编辑。
 function canEditRow(row) {
-  return permissions.value.edit && (!config.value.canEdit || config.value.canEdit(row));
+  return (
+    !loading.value && !loadError.value && permissions.value.edit && (!config.value.canEdit || config.value.canEdit(row))
+  );
 }
 
 // 同时检查资源删除权限和当前业务状态是否允许删除。
 function canDeleteRow(row) {
-  return permissions.value.delete && (!config.value.canDelete || config.value.canDelete(row));
+  return (
+    !loading.value &&
+    !loadError.value &&
+    permissions.value.delete &&
+    (!config.value.canDelete || config.value.canDelete(row))
+  );
 }
 
 // 返回配置提供的锁定原因，未配置时生成统一的不可编辑/删除提示。
 function rowLockReason(row, action) {
+  if (loading.value || loadError.value) return '请先刷新数据，核对最新状态后再办理';
   if (typeof config.value.lockedReason === 'function') {
     return config.value.lockedReason(row, action);
   }
@@ -1503,8 +1886,11 @@ async function ensureActionState(action, row) {
     }
     if (action.visible && !action.visible(latest)) {
       actionOpen.value = false;
-      ElMessage.info(typeof action.staleMessage === 'function' ? action.staleMessage(latest)
-        : '单据状态已更新，页面已刷新，请按最新状态操作');
+      ElMessage.info(
+        typeof action.staleMessage === 'function'
+          ? action.staleMessage(latest)
+          : '单据状态已更新，页面已刷新，请按最新状态操作',
+      );
       await refreshData();
       return false;
     }
@@ -1516,6 +1902,9 @@ async function ensureActionState(action, row) {
 }
 
 async function openAction(action, row = null) {
+  if (submitting.value) return;
+  actionTouched.value = false;
+  actionError.value = '';
   // 配置中的 action 可以表示跳转、下载、追溯、上传或普通业务状态操作。
   // 此处先校验权限，再根据 kind 决定打开弹窗还是直接执行。
   if (!canUseAction(action, row)) {
@@ -1662,15 +2051,26 @@ function actionReturnResource(action) {
   return typeof target === 'function' ? target(actionRow.value, route.query) : target;
 }
 
-async function refreshStaleActionFailure() {
-  if (currentAction.value?.revalidateBeforeAction && !localDataMode.value) {
-    actionOpen.value = false;
+async function refreshStaleActionFailure(error) {
+  if (currentAction.value?.revalidateBeforeAction && !localDataMode.value && error?.response?.status === 409) {
     await refreshData();
   }
 }
 
 // 校验动作表单、整理payload并调用动态业务接口，成功后刷新或跳转下一页面。
 async function submitAction() {
+  if (actionSubmitPending.value) return;
+  actionSubmitPending.value = true;
+  try {
+    return await submitActionAttempt();
+  } finally {
+    actionSubmitPending.value = false;
+  }
+}
+async function submitActionAttempt() {
+  if (submitting.value || !currentAction.value) return;
+  const sourceAction = currentAction.value,
+    sourceModel = actionModel.value;
   if (!(await ensureActionState(currentAction.value, actionRow.value))) {
     return;
   }
@@ -1685,11 +2085,21 @@ async function submitAction() {
       return;
     }
   }
+  if (
+    submitting.value ||
+    !pageActive ||
+    sourceAction !== currentAction.value ||
+    sourceModel !== actionModel.value ||
+    (sourceAction.fields?.length && !actionOpen.value)
+  )
+    return;
   submitting.value = true;
+  actionError.value = '';
   try {
     const action = currentAction.value;
     const returnResource = actionReturnResource(action);
     const actionResult = await executeActionRequest(action);
+    if (!pageActive || !ownsCurrentSession()) return;
     clearReferenceOptions(config.value.key);
     if (action.successNavigate) {
       clearReferenceOptions(returnResource);
@@ -1701,16 +2111,17 @@ async function submitAction() {
       const target = getResourceConfig(returnResource);
       await router.push({
         path: target.routePath,
-        query: action.successNavigate.query?.(
-          actionResult?.data, actionRow.value, actionModel.value, route.query,
-        ) || {},
+        query:
+          action.successNavigate.query?.(actionResult?.data, actionRow.value, actionModel.value, route.query) || {},
       });
     } else if (!localDataMode.value) {
       await refreshData();
     }
-  } catch {
-    // 校验后仍可能发生并发状态变化；失败后同步列表，避免重复提交旧操作。
-    await refreshStaleActionFailure();
+  } catch (error) {
+    if (pageActive && ownsCurrentSession()) {
+      actionError.value = error?.displayMessage || error?.message || '操作失败，填写内容已保留，请重试';
+      await refreshStaleActionFailure(error);
+    }
   } finally {
     submitting.value = false;
   }
@@ -1734,6 +2145,7 @@ async function executeActionRequest(action) {
 
 // 将用户选择的文件和业务关联信息组装为FormData后上传。
 async function submitUpload() {
+  if (submitting.value) return;
   if (!uploadFile.value) {
     ElMessage.warning('请选择需要上传的文件');
     return;
@@ -1860,7 +2272,6 @@ function runProgressAction(action) {
 }
 
 function openDispatchSchedules() {
-  actionOpen.value = false;
   runProgressAction({ targetResource: 'org-team-schedule' });
 }
 

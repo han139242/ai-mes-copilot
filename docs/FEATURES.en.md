@@ -1,8 +1,22 @@
-# AI business capabilities
+# AI capabilities: business actions, private knowledge and graphs
 
 [简体中文](FEATURES.md) · English · [Project overview](../README.en.md)
 
 AI-MES Copilot maps natural-language requests to registered business capabilities and executes them through existing domain services. The model interprets intent and organizes a plan; business code performs inventory calculations, state transitions, permission checks, and database writes.
+
+See the [AI architecture](AI_ARCHITECTURE.md) and [classroom walkthrough](TEACHER_DEMO.md) (Chinese). The 39 business capabilities below are separate from these extensions:
+
+| Capability | Behavior |
+|---|---|
+| File lifecycle | PDF, DOCX, XLSX, TXT and Markdown upload/update/download/delete with versioned source locations. |
+| Document RAG | Local 512-dimensional Chinese embeddings, pgvector retrieval, identifier checks and cited answers or excerpts. |
+| GraphRAG / fusion | LightRAG extraction and AGE storage; automatic, document, graph and fusion show actual routing and fallback. |
+| Graph exploration | Actual data, search, filters, zoom, neighbors, paths up to six edges in the visible graph, sources and a text list. |
+| Private context | Separate database, role and directory per user, private history and editable presentation preferences. |
+| Review worksheets | Save server-side evidence, human notes and checks; detect edit conflicts and revalidate sources before export or handoff. |
+| Business handoff | Prepare a draft; execution still follows the original permission and confirmation flow. |
+
+Ready document retrieval remains usable when graph indexing fails. Missing configuration, consent or evidence is explicit. Source and citation-ID validation does not establish sentence-level semantic correctness. Human-camera checks are described in the [face guide](FACE_AUTO_CAPTURE.md).
 
 ## Queries and analysis
 

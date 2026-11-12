@@ -5,11 +5,26 @@ import os
 import sys
 from pathlib import Path
 from contextlib import contextmanager
+from functools import partial
 
 from .config import Settings
 from .llm import complete
 from .chunking import located_chunks
-from .ontology import normalize_graph
+from .ontology import normalize_graph, identifier_tokens
+from .job_policy import load_policy, assert_sources, bounded_settings
+
+
+def graph_chunker(embedding_tokenizer):
+    # LightRAG supplies its six standard chunking arguments positionally.
+    return partial(located_chunks, embedding_tokenizer=embedding_tokenizer)
+
+
+def exact_query_keywords(question):
+    """Explicit identifiers need no model to rediscover the user's own keywords."""
+    identifiers=list(dict.fromkeys(identifier_tokens(question)))
+    if not identifiers:return {}
+    terms=[word for word in ('驱动板','物料','工序','检验','故障','设备','变更','影响','关系','关联') if word in question]
+    return {'ll_keywords':identifiers, 'hl_keywords':terms or [question]}
 
 
 @contextmanager
@@ -24,6 +39,9 @@ def authorize_model(settings, payload):
             if (not job or job["state"] != "running" or job['generation'] != payload['generation']
                     or not current["graph_enabled"]):
                 raise RuntimeError("索引任务已取消，停止后续模型请求")
+            policy=load_policy(settings,payload['uid'],payload['jobId'])
+            if policy:
+                assert_sources(policy,db.execute('SELECT name,hash FROM documents WHERE NOT deleted').fetchall())
         yield
 
 
@@ -34,11 +52,18 @@ async def run(payload):
     import numpy as np
 
     settings = Settings()
+    settings = bounded_settings(settings,load_policy(settings,payload['uid'],payload.get('jobId')))
     user_dir = settings.user_dir(payload["uid"])
     generation = payload["generation"]
     model = TextEmbedding(model_name=settings.embedding_model,
                           cache_dir=str(settings.root.parent / "models" / "embedding"),
                           threads=2, local_files_only=True)
+    from tokenizers import Tokenizer
+    # Count against the actual embedding vocabulary, without its inference-time
+    # truncation hiding overflow. Leave the inference tokenizer unmodified.
+    embedding_tokenizer = Tokenizer.from_str(model.model.tokenizer.to_str())
+    embedding_tokenizer.no_truncation()
+    embedding_tokenizer.no_padding()
 
     async def embed(texts, **kwargs):
         return np.array(list(model.embed(texts)), dtype=np.float32)
@@ -55,8 +80,8 @@ async def run(payload):
         doc_status_storage="PGDocStatusStorage", llm_model_func=llm,
         embedding_func=EmbeddingFunc(embedding_dim=512, max_token_size=512, func=embed,
                                      model_name=settings.embedding_model),
-        chunk_token_size=240, chunk_overlap_token_size=30, entity_extract_max_gleaning=0,
-        chunking_func=located_chunks,
+        chunk_token_size=480, chunk_overlap_token_size=30, entity_extract_max_gleaning=0,
+        chunking_func=graph_chunker(embedding_tokenizer),
         llm_model_max_async=1, embedding_func_max_async=1, max_parallel_insert=1,
         addon_params={"language": "Chinese", "entity_types_guidance":
             "按台灯制造领域对原文明示的实体分类，类型使用下列中文名称："
@@ -91,7 +116,7 @@ async def run(payload):
         mode = modes[payload["mode"]]
         retrieved = await rag.aquery_data(payload["question"], QueryParam(mode=mode, top_k=8,
             chunk_top_k=5, max_entity_tokens=1800, max_relation_tokens=1800, max_total_tokens=5500,
-            enable_rerank=False))
+            enable_rerank=False, **exact_query_keywords(payload['question'])))
         data = retrieved.get("data", {})
         if payload["action"] == "retrieve":
             return {"data": data, "mode": mode}

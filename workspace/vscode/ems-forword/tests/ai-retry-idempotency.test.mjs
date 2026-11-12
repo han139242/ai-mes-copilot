@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
 import { registerHooks } from 'node:module';
+import { ref } from 'vue';
 import { businessResultHistory, commandPreviewHistory, orderResultHistory } from '../src/utils/ai-order-context.js';
 
 // 同一套真实 store 依赖，只替换浏览器存储、当前用户和 HTTP 边界。
@@ -17,12 +18,15 @@ async function fixture(t) {
       setItem: (name, value) => stored.set(name, String(value)),
       removeItem: (name) => stored.delete(name),
       key: (index) => [...stored.keys()][index] ?? null,
-      get length() { return stored.size; },
+      get length() {
+        return stored.size;
+      },
     },
   });
   const payloads = [];
   let chatBehavior = () => Promise.resolve({ data: { answer: '回答' } });
   const api = {
+    authRevision: ref(0),
     getCurrentUser: () => ({ userId: 7 }),
     listConversations: async () => ({ data: { records: [] } }),
     getConversationDetail: async () => ({ data: { messages: [] } }),
@@ -48,10 +52,14 @@ async function fixture(t) {
   const aliases = {
     '@/api/ai': ['chatWithAi'],
     '@/api/ai/conversations': [
-      'createConversation', 'deleteConversation', 'getConversationDetail',
-      'listConversations', 'renameConversation', 'setConversationArchived',
+      'createConversation',
+      'deleteConversation',
+      'getConversationDetail',
+      'listConversations',
+      'renameConversation',
+      'setConversationArchived',
     ],
-    '@/utils/auth': ['getCurrentUser'],
+    '@/utils/auth': ['getCurrentUser', 'authRevision'],
     '@/utils/ai-order-context': ['businessResultHistory', 'orderResultHistory', 'commandPreviewHistory'],
   };
   const storeUrl = new URL('../src/stores/aiConversation.js', import.meta.url);
@@ -60,9 +68,13 @@ async function fixture(t) {
     resolve(specifier, context, nextResolve) {
       const names = context.parentURL === storeUrl.href && aliases[specifier];
       if (!names) return nextResolve(specifier, context);
-      const source = names.map((name) =>
-        `export const ${name} = (...args) => globalThis[${JSON.stringify(key)}].${name}(...args);`,
-      ).join('\n');
+      const source = names
+        .map((name) =>
+          name === 'authRevision'
+            ? `export const authRevision = globalThis[${JSON.stringify(key)}].authRevision;`
+            : `export const ${name} = (...args) => globalThis[${JSON.stringify(key)}].${name}(...args);`,
+        )
+        .join('\n');
       return { shortCircuit: true, url: `data:text/javascript,${encodeURIComponent(source)}` };
     },
   });
@@ -73,9 +85,14 @@ async function fixture(t) {
     hooks.deregister();
   }
   return {
-    store, payloads,
-    fail: () => { chatBehavior = () => Promise.reject(Object.assign(new Error('连接中断'), { code: 500 })); },
-    succeed: () => { chatBehavior = () => Promise.resolve({ data: { answer: '回答' } }); },
+    store,
+    payloads,
+    fail: () => {
+      chatBehavior = () => Promise.reject(Object.assign(new Error('连接中断'), { code: 500 }));
+    },
+    succeed: () => {
+      chatBehavior = () => Promise.resolve({ data: { answer: '回答' } });
+    },
   };
 }
 
@@ -90,16 +107,24 @@ test('每次提问都带 clientMessageId，且同一次提问只带一个', asyn
 test('页面线索随请求传递，重试不因切换页面而悄悄换成别的工单', async (t) => {
   const f = await fixture(t);
   f.fail();
-  await f.store.sendMessage('这张工单先做什么', { source: 'ai-dock', context: {
-    workOrderNo: 'C1-WO-20261101-008', pagePath: '/mfg/work-orders', token: 'private', source: 'override',
-  } });
+  await f.store.sendMessage('这张工单先做什么', {
+    source: 'ai-dock',
+    context: {
+      workOrderNo: 'C1-WO-20261101-008',
+      pagePath: '/mfg/work-orders',
+      token: 'private',
+      source: 'override',
+    },
+  });
   assert.equal(f.payloads[0].context.workOrderNo, 'C1-WO-20261101-008');
   assert.equal(f.payloads[0].context.source, 'ai-dock');
   assert.equal('token' in f.payloads[0].context, false);
   const failed = f.store.activeMessages.value.find((message) => message.retryQuestion);
   f.succeed();
-  await f.store.sendMessage(failed.retryQuestion, { clientMessageId: failed.retryClientMessageId,
-    context: { workOrderNo: 'C1-WO-20261101-009' } });
+  await f.store.sendMessage(failed.retryQuestion, {
+    clientMessageId: failed.retryClientMessageId,
+    context: { workOrderNo: 'C1-WO-20261101-009' },
+  });
   assert.equal(f.payloads[1].context.workOrderNo, 'C1-WO-20261101-008');
   assert.equal(f.payloads[1].context.pagePath, '/mfg/work-orders');
 });
@@ -130,9 +155,13 @@ test('两次独立提问的 clientMessageId 不同，不会被后端误判成重
 
 test('追问补料时会把未通过的领料预览和缺口传入历史', async (t) => {
   const f = await fixture(t);
-  f.store.appendCommandMessage({ action: 'GENERATE_MATERIAL_ISSUE', actionLabel: '生成领料单',
-    targetNo: 'C1-WO-20261031-006', canExecute: false,
-    preconditions: [{ passed: false, label: '用料缺口', detail: '物料 19 缺 1；物料 20 缺 1' }] });
+  f.store.appendCommandMessage({
+    action: 'GENERATE_MATERIAL_ISSUE',
+    actionLabel: '生成领料单',
+    targetNo: 'C1-WO-20261031-006',
+    canExecute: false,
+    preconditions: [{ passed: false, label: '用料缺口', detail: '物料 19 缺 1；物料 20 缺 1' }],
+  });
   await f.store.sendMessage('补上面缺的');
   const history = f.payloads[0].messages.map((message) => message.content).join('\n');
   assert.match(history, /C1-WO-20261031-006/);

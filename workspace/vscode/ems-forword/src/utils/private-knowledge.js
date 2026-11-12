@@ -7,7 +7,8 @@ export const knowledgeModes = [
 
 export function knowledgeGenerationState(service, budget) {
   if (!service) return { available: false, label: '正在连接', detail: '正在读取资料处理设置。' };
-  if (!service.model_consent) return { available: false, label: '本地检索', detail: '仅检索本地原文。点击设置AI回答。' };
+  if (!service.model_consent)
+    return { available: false, label: '本地检索', detail: '仅检索本地原文。点击设置AI回答。' };
   if (!service.modelConfigured) return { available: false, label: '本地检索', detail: '模型未配置，仍可检索原文。' };
   if (Number(budget?.limit) > 0 && budget?.remaining === 0)
     return { available: false, label: '本地检索', detail: '本地调用上限已到，仍可检索原文。' };
@@ -62,6 +63,76 @@ export function answerTokens(value) {
       if (text.startsWith('**') && text.endsWith('**')) return { kind: 'strong', text: text.slice(2, -2) };
       return { kind: 'text', text };
     });
+}
+
+export function answerBlocks(value) {
+  const lines = String(value || '').split(/\r?\n/),
+    blocks = [];
+  const cells = (line) =>
+    line
+      .trim()
+      .replace(/^\|/, '')
+      .replace(/\|$/, '')
+      .split('|')
+      .map((v) => v.trim());
+  const item = (line) => line.match(/^\s*(?:(\d+)[.)、]|([-*]))\s+(.+)$/);
+  for (let i = 0; i < lines.length;) {
+    const line = lines[i];
+    if (!line.trim()) {
+      i++;
+      continue;
+    }
+    if (/^```/.test(line)) {
+      const body = [];
+      i++;
+      while (i < lines.length && !/^```/.test(lines[i])) body.push(lines[i++]);
+      if (i < lines.length) i++;
+      blocks.push({ kind: 'code', text: body.join('\n') });
+      continue;
+    }
+    const heading = line.match(/^#{1,6}\s+(.+)$/);
+    if (heading) {
+      blocks.push({ kind: 'heading', text: heading[1] });
+      i++;
+      continue;
+    }
+    if (
+      line.includes('|') &&
+      i + 1 < lines.length &&
+      cells(lines[i + 1]).every((c) => /^:?-{3,}:?$/.test(c)) &&
+      cells(line).length > 1
+    ) {
+      const headers = cells(line),
+        rows = [];
+      i += 2;
+      while (i < lines.length && lines[i].includes('|') && lines[i].trim()) rows.push(cells(lines[i++]));
+      blocks.push({ kind: 'table', headers, rows });
+      continue;
+    }
+    const first = item(line);
+    if (first) {
+      const ordered = !!first[1],
+        items = [];
+      const start = ordered ? Number(first[1]) : 1;
+      while (i < lines.length) {
+        const match = item(lines[i]);
+        if (!match || !!match[1] !== ordered) break;
+        items.push(match[3]);
+        i++;
+      }
+      blocks.push({ kind: ordered ? 'ordered' : 'list', items, start });
+      continue;
+    }
+    const paragraph = [line];
+    i++;
+    while (i < lines.length && lines[i].trim() && !/^#{1,6}\s|^```/.test(lines[i]) && !item(lines[i])) {
+      if (lines[i].includes('|') && i + 1 < lines.length && cells(lines[i + 1]).every((c) => /^:?-{3,}:?$/.test(c)))
+        break;
+      paragraph.push(lines[i++]);
+    }
+    blocks.push({ kind: 'paragraph', text: paragraph.join('\n') });
+  }
+  return blocks;
 }
 
 export function graphSources(properties, documents) {
@@ -122,6 +193,18 @@ export function normalizeKnowledgeGraph(value, documents = []) {
     edges,
     truncated: Boolean(value?.is_truncated || value?.nodes?.length > 160 || value?.edges?.length > 600),
   };
+}
+
+export function orderedAnswerCitations(answer, citations = []) {
+  const byId = new Map(citations.map((source) => [source.id, source]));
+  const ordered = [],
+    seen = new Set();
+  for (const match of String(answer || '').matchAll(/\[(S\d+)\]/g)) {
+    if (!byId.has(match[1]) || seen.has(match[1])) continue;
+    seen.add(match[1]);
+    ordered.push(byId.get(match[1]));
+  }
+  return [...ordered, ...citations.filter((source) => !seen.has(source.id))];
 }
 
 export function historySessions(rows) {

@@ -8,6 +8,15 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 class PrivateAssistantControllerTest {
+    @Test void reviewSheetsAlwaysUseAuthenticatedIdentity() {
+        PrivateAssistantClient client=mock(PrivateAssistantClient.class);
+        PrivateAssistantController controller=new PrivateAssistantController(client);
+        for(String action: new String[]{"notes.list","notes.add","notes.update","notes.delete"}) {
+            Map<String,Object> body=Map.of("uid",999,"historyId",7);
+            controller.dispatch(12L,new PrivateAssistantController.Dispatch(action,body));
+            verify(client).call(12L,action,body);
+        }
+    }
     @Test void authenticatedIdentityOverridesBodyIdentity() {
         PrivateAssistantClient client = mock(PrivateAssistantClient.class);
         PrivateAssistantController controller = new PrivateAssistantController(client);

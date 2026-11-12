@@ -19,7 +19,8 @@ import java.util.Set;
 public class PrivateAssistantController {
     private static final Set<String> ACTIONS = Set.of("status", "documents.list", "documents.download",
             "documents.delete", "documents.preview", "jobs.retry", "jobs.cancel", "preferences.save",
-            "question", "graph", "graph.build", "history", "history.clear");
+            "question", "graph", "graph.build", "history", "history.clear",
+            "notes.list", "notes.add", "notes.update", "notes.delete");
     private final PrivateAssistantClient client;
     public PrivateAssistantController(PrivateAssistantClient client) { this.client = client; }
 

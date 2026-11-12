@@ -4,6 +4,8 @@
 
 阶段2功能与本轮教师要求复核见[发布验收](../../docs/STAGE2_FINAL_RELEASE.md)；详细设计见[实施说明](../../docs/STAGE2_IMPLEMENTATION.md)，历史测量见[验收记录](../../docs/STAGE2_ACCEPTANCE.md)，现场顺序见[演示步骤](../../docs/STAGE2_DEMO.md)。已有本人录入及维护者反馈的免账号登录成功；最新真人总耗时、第二位参与者和错误脸仍需现场核验。
 
+11月10日新增[私有研判工作单与体验完善](../../docs/EXPERIENCE_REFINEMENT_20261110.md)：从本人有效历史保存原答复与来源，人工补备注/清单，版本冲突保留草稿，导出和转业务前重新检查来源。`notes.list/add/update/delete`由原网关绑定身份，工作单表在本人库按需创建；原资料和历史不被改写。
+
 人脸界面现使用[自动动作引导](../../docs/FACE_AUTO_CAPTURE.md)：连续合格后采集，三步后自动提交，可关闭语音；不要求每步点拍照。已有本人模板保留，维护者反馈免账号登录成功；最新体感及反例待现场确认。当前不检测眨眼。
 
 ## 组成
@@ -19,6 +21,8 @@
 
 上传支持 PDF、DOCX、XLSX、TXT、MD。扫描件没有可提取文字时明确提示先做 OCR；本轮没有接入付费 OCR。
 
+课堂演示可使用[10份关联台灯资料](examples/lamp-showcase/README.md)，包含五格式构建、24题本地验收、带来源的实际建图/回答，以及明确的未批准变更与缺失阈值案例。运行事实和本轮边界见[展示完善记录](../../docs/STAGE2_SHOWCASE.md)，原两份最小样例继续保留。
+
 ## 当前环境直接启动
 
 已有 `D:\AI-MES-Stage2\private-env.ps1`、`mes-runtime.clixml` 和模型缓存时，不要重新初始化或替换密钥：
@@ -30,11 +34,13 @@ docker compose -f .\services\private-assistant\deploy\compose.yaml up -d
 .\scripts\start-stage2.ps1
 ```
 
+PostgreSQL现在使用Docker原生命名卷，数据留在Docker自己的Linux文件系统中。`PRIVATE_PG_VOLUME`必须指向已创建或迁移核验的卷；缺失时Compose停止，避免把旧Windows绑定目录误当成新空库。旧配置若只有`PRIVATE_PG_DATA`，应先停机迁移并核对文件/原件/模板，再切换，不能直接新建空卷替代。`docker compose down`不会删除外部命名卷；不要把正式卷当缓存清理。本机Docker磁盘仍位于D盘。
+
 只做本地检索或无外部模型测试时，使用`.\scripts\start-stage2.ps1 -NoCloud`；该开关会传给所有新启动的子进程。启动器先检查相应数据库端口，缺失时停止并指出依赖，不再仅留下一个能打开但无法登录的前端。已占用的服务不被替换，切换运行模式前须正常停止对应旧进程。
 
 本机新版前端为 `http://127.0.0.1:5181/#/ai/knowledge`，后端 8089，私有服务 8091，专用 PostgreSQL 55432。已有 5180 / 8088 实例独立保留；启动脚本遇到端口占用只报告，不终止其他程序。
 
-2026-11-08维护者明确取消验证阶段20次上限，默认`PRIVATE_LLM_LIMIT=0`，表示无本地次数上限；正整数是部署者可选限额，负数无效。所有请求仍写入原日志，不清空旧记录。本人后续问答或已允许的自动/手动建图按模型平台额度使用；处理同意和原权限保持。本轮维护没有新增收费请求。[交互与策略变更](../../docs/INTERACTION_REFINEMENT.md)是当前规则，旧限额描述作为历史验证记录保留。
+2026-11-08维护者明确取消验证阶段20次上限，默认`PRIVATE_LLM_LIMIT=0`，表示无本地次数上限；正整数是部署者可选限额，负数无效。所有请求仍写入原日志，不清空旧记录。11月10日本轮验证按新授权新增5次真实生成，累计40→45；本人后续问答或已允许的建图按模型平台额度使用，处理同意和原权限保持。验证脚本默认0为无限，旧有限签名任务仍按原授权上限执行。[交互与策略变更](../../docs/INTERACTION_REFINEMENT.md)保留早期记录。
 
 ## 新机器准备
 
@@ -56,6 +62,7 @@ $env:PRIVATE_RUNTIME_ENV='D:/AI-MES-Stage2/private-env.ps1'
 $principal=[Security.Principal.WindowsIdentity]::GetCurrent().Name
 icacls.exe 'D:\AI-MES-Stage2\private-env.ps1' /inheritance:r /grant:r ($principal + ':(F)') '*S-1-5-18:(F)' '*S-1-5-32-544:(F)'
 . .\scripts\load-stage2-environment.ps1 -NoCloud
+docker volume create $env:PRIVATE_PG_VOLUME
 docker compose -f .\services\private-assistant\deploy\compose.yaml up -d --build
 & 'D:\AI-MES-Stage2\.venv\Scripts\python.exe' .\services\private-assistant\scripts\prepare_models.py
 ```
