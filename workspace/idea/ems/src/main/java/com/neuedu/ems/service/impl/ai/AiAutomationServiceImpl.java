@@ -800,9 +800,12 @@ public class AiAutomationServiceImpl implements AiAutomationService {
     /* ==================== 规则解析与缺口计算 ==================== */
 
     private List<Shortage> detectShortages(AiAutomationRule rule) {
+        List<MaterialTarget> targets = resolveMaterialTargets(rule);
+        Map<Long, BigDecimal> availableByMaterial = availableQuantities(
+                targets.stream().map(MaterialTarget::materialId).toList(), ruleWarehouseType(rule));
         List<Shortage> matched = new ArrayList<>();
-        for (MaterialTarget target : resolveMaterialTargets(rule)) {
-            BigDecimal available = availableQuantity(target.materialId(), ruleWarehouseType(rule));
+        for (MaterialTarget target : targets) {
+            BigDecimal available = availableByMaterial.getOrDefault(target.materialId(), BigDecimal.ZERO);
             if (available.compareTo(target.threshold()) >= 0) {
                 continue;
             }
@@ -908,22 +911,32 @@ public class AiAutomationServiceImpl implements AiAutomationService {
     }
 
     private BigDecimal availableQuantity(Long materialId, String warehouseType) {
+        return availableQuantities(List.of(materialId), warehouseType).getOrDefault(materialId, BigDecimal.ZERO);
+    }
+
+    private Map<Long, BigDecimal> availableQuantities(List<Long> materialIds, String warehouseType) {
+        if (materialIds.isEmpty()) {
+            return Map.of();
+        }
         List<WmsWarehouse> warehouses = warehouseMapper.selectList(new LambdaQueryWrapper<WmsWarehouse>()
                 .eq(WmsWarehouse::getDeletedFlag, 0)
                 .eq(StringUtils.hasText(warehouseType), WmsWarehouse::getWarehouseType, warehouseType));
         if (warehouses.isEmpty()) {
-            return BigDecimal.ZERO;
+            return Map.of();
         }
         List<Long> warehouseIds = warehouses.stream().map(WmsWarehouse::getWarehouseId).toList();
         List<WmsInventory> rows = inventoryMapper.selectList(new LambdaQueryWrapper<WmsInventory>()
                 .eq(WmsInventory::getDeletedFlag, 0)
-                .eq(WmsInventory::getMaterialId, materialId)
+                .in(WmsInventory::getMaterialId, materialIds)
                 .in(WmsInventory::getWarehouseId, warehouseIds));
-        BigDecimal total = BigDecimal.ZERO;
+        Map<Long, BigDecimal> totals = new LinkedHashMap<>();
         for (WmsInventory row : rows) {
-            total = total.add(row.getAvailableQuantity() == null ? BigDecimal.ZERO : row.getAvailableQuantity());
+            BigDecimal available = row.getAvailableQuantity();
+            if (available != null) {
+                totals.merge(row.getMaterialId(), available, BigDecimal::add);
+            }
         }
-        return total;
+        return totals;
     }
 
     /**

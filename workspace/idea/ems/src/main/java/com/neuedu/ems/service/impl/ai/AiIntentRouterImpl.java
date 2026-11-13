@@ -84,6 +84,11 @@ public class AiIntentRouterImpl implements AiIntentRouter {
             "仓库", "原料仓", "原材料仓", "原材料库", "线边仓", "半成品仓", "成品仓", "隔离仓", "不合格仓",
             "里", "中", "内", "的", "了", "吗", "呢", "啊", "请", "帮我", "麻烦");
 
+    private static final Pattern LOW_STOCK_QUERY_WORDS = Pattern.compile(
+            "是否低于|低于安全库存|低于库存下限|低于阈值|低于下限|库存不足预警|安全库存|"
+                    + "缺料预警|补货建议|补货预警|库存预警|低库存|哪些物料|哪几种物料|什么物料|"
+                    + "所有物料|全部物料|各自缺多少|缺口(?:是)?多少|缺口|清单|低于|阈值");
+
     private static final List<String> WAREHOUSE_HINTS = List.of(
             "原料仓", "原材料仓", "原材料库", "线边仓", "半成品仓", "成品仓", "隔离仓", "不合格仓");
 
@@ -398,7 +403,15 @@ public class AiIntentRouterImpl implements AiIntentRouter {
             return null;
         }
         params.put("warehouseType", extractWarehouseType(text));
-        params.put("materialKeyword", extractMaterialKeyword(text, recentHistory));
+        String materialQuestion = LOW_STOCK_QUERY_WORDS.matcher(text).replaceAll(" ").trim();
+        boolean overview = containsAny(text, "哪些", "哪几种", "什么物料", "所有物料", "全部物料", "清单");
+        String keyword = materialKeywordFrom(materialQuestion);
+        if (!StringUtils.hasText(keyword) && !overview) {
+            List<String> materialHistory = recentHistory.stream()
+                    .map(question -> LOW_STOCK_QUERY_WORDS.matcher(question).replaceAll(" ")).toList();
+            keyword = extractMaterialKeyword(materialQuestion, materialHistory);
+        }
+        params.put("materialKeyword", keyword);
         return new RouteResult(INTENT_INVENTORY_BELOW_SAFETY, params, true);
     }
 

@@ -64,6 +64,19 @@ class AiIntentRouterTest {
         assertEquals("inventory_below_safety", route.intent());
         assertEquals("LINE_SIDE", route.params().get("warehouseType"));
     }
+    @Test void lowStockOverviewDoesNotFilterByTheQuestionOrPreviousMaterial() {
+        var route = router.route("哪些物料低于安全库存？缺口是多少？",
+                List.of("LAMP-M01 的库存还有多少"), null);
+        assertEquals("inventory_below_safety", route.intent());
+        assertNull(route.params().get("materialKeyword"));
+    }
+    @Test void lowStockQuestionKeepsExplicitMaterialAndSupportsFollowup() {
+        var route = router.route("线边仓 LAMP-M01 是否低于安全库存？缺口是多少？", List.of(), null);
+        assertEquals("LINE_SIDE", route.params().get("warehouseType"));
+        assertEquals("LAMP-M01", route.params().get("materialKeyword"));
+        var next = router.route("那低于安全库存吗", List.of("LAMP-M01 的库存还有多少"), null);
+        assertEquals("LAMP-M01", next.params().get("materialKeyword"));
+    }
     @Test void plainStockQuestionStaysOnInventoryStock() {
         var route = router.route("L200 现在库存还有多少", List.of(), null);
         assertEquals("inventory_stock", route.intent());

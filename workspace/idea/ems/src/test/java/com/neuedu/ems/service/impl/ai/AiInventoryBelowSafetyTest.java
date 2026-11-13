@@ -1,8 +1,15 @@
 package com.neuedu.ems.service.impl.ai;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.neuedu.ems.entity.ai.AiAutomationRule;
+import com.neuedu.ems.entity.mdm.MdmMaterial;
+import com.neuedu.ems.entity.wms.WmsInventory;
+import com.neuedu.ems.entity.wms.WmsWarehouse;
+import com.neuedu.ems.mapper.ai.AiAutomationRuleMapper;
 import com.neuedu.ems.mapper.ai.AiDataQueryMapper;
 import com.neuedu.ems.mapper.mdm.MdmMaterialMapper;
 import com.neuedu.ems.mapper.mdm.MdmProductMapper;
+import com.neuedu.ems.mapper.wms.WmsInventoryMapper;
 import com.neuedu.ems.mapper.wms.WmsWarehouseMapper;
 import com.neuedu.ems.service.ai.AiAutomationService;
 import com.neuedu.ems.exception.AiServiceException;
@@ -19,12 +26,54 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
  * 低于安全库存的 AI 侧渲染：阈值与缺口都来自自动化规则的同一套口径，不在这里另算。
  */
 class AiInventoryBelowSafetyTest {
+
+    @Test
+    void readsInventoryInOneBatchAndCountsMissingBalancesAsZero() {
+        var rules = mock(AiAutomationRuleMapper.class);
+        var materials = mock(MdmMaterialMapper.class);
+        var inventory = mock(WmsInventoryMapper.class);
+        var warehouses = mock(WmsWarehouseMapper.class);
+        var rule = new AiAutomationRule();
+        rule.setRuleType("INVENTORY_BELOW_SAFETY");
+        rule.setStatus("ENABLED");
+        rule.setDefaultThreshold(BigDecimal.TEN);
+        when(rules.selectList(any())).thenReturn(List.of(rule));
+        var first = new MdmMaterial();
+        first.setMaterialId(1L);
+        first.setMaterialCode("M01");
+        var second = new MdmMaterial();
+        second.setMaterialId(2L);
+        second.setMaterialCode("M02");
+        when(materials.selectList(any())).thenReturn(List.of(first, second));
+        var warehouse = new WmsWarehouse();
+        warehouse.setWarehouseId(1L);
+        when(warehouses.selectList(any())).thenReturn(List.of(warehouse));
+        var balance = new WmsInventory();
+        balance.setMaterialId(1L);
+        balance.setAvailableQuantity(BigDecimal.valueOf(3));
+        var extraBalance = new WmsInventory();
+        extraBalance.setMaterialId(1L);
+        extraBalance.setAvailableQuantity(BigDecimal.valueOf(4));
+        when(inventory.selectList(any())).thenReturn(List.of(balance, extraBalance));
+
+        var service = new AiAutomationServiceImpl(rules, null, null, null, materials,
+                inventory, warehouses, null, new ObjectMapper());
+        var shortages = service.lowStockMaterials("RAW", null);
+
+        assertEquals(List.of("M01", "M02"), shortages.stream().map(row -> row.get("materialCode")).toList());
+        assertEquals(List.of(BigDecimal.valueOf(3), BigDecimal.TEN),
+                shortages.stream().map(row -> row.get("shortageQuantity")).toList());
+        verify(warehouses).selectList(any());
+        verify(inventory).selectList(any());
+    }
 
     private AiDataQueryServiceImpl newService(AiAutomationService automationService) throws Exception {
         AiDataQueryServiceImpl service = new AiDataQueryServiceImpl(mock(AiDataQueryMapper.class),
