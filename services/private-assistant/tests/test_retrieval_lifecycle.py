@@ -19,6 +19,41 @@ def test_locator_survives_every_local_chunk():
     assert all(c["locator"]=="检验!A4:C4" and len(c["text"])<=240 for c in chunks)
 
 
+@pytest.mark.skipif(os.environ.get("PRIVATE_INTEGRATION") != "1", reason="requires dedicated PostgreSQL")
+def test_exact_identifier_recovers_past_dense_limit_and_excludes_stale_chunks(monkeypatch):
+    import numpy as np
+    from assistant import vectors
+
+    settings = Settings(llm_url="", llm_key="", llm_model="")
+    dbs = Databases(settings)
+    uid = 215_000_000_000 + int(uuid.uuid4().hex[:8], 16)
+    dbs.ensure(uid)
+    kb = Knowledge(settings, dbs)
+    active = kb.upload(uid, "合成编号.txt", "DRV-07 精确目标".encode())
+    stale = kb.upload(uid, "旧版合成编号.txt", "DRV-07 已撤销".encode())
+    decoy = kb.upload(uid, "近似编号.txt", "DRV-070 干扰编号".encode())
+    model = settings.embedding_model
+    close = "[" + ",".join(["1", "0"] + ["0"] * (settings.embedding_dim - 2)) + "]"
+    distant = "[" + ",".join(["0", "1"] + ["0"] * (settings.embedding_dim - 2)) + "]"
+    monkeypatch.setattr(vectors, "embed", lambda *args, **kwargs: np.array([[1] + [0] * (settings.embedding_dim - 1)]))
+    with dbs.connect(uid) as db:
+        for item, texts, embedding, current in (
+            (active, ["DRV-07 精确目标"], distant, True),
+            (stale, ["DRV-07 已撤销"], close, False),
+            (decoy, ["DRV-070 干扰编号"] * 41, close, True),
+        ):
+            doc = db.execute("SELECT hash,name FROM documents WHERE id=%s", (item["id"],)).fetchone()
+            db.execute("UPDATE documents SET vector_version=1,active_hash=hash,active_name=name,deleted=%s WHERE id=%s",
+                       (not current, item["id"]))
+            for i, value in enumerate(texts):
+                db.execute("""INSERT INTO knowledge_chunks
+                    (id,document_id,document_version,document_hash,locator,content,embedding,model)
+                    VALUES (%s,%s,1,%s,%s,%s,%s::vector,%s)""",
+                    (f"{item['id']}-{i}", item["id"], doc["hash"], "行 1", value, embedding, model))
+    result = kb.vectors.retrieve(uid, "DRV-07 是什么？", limit=1)
+    assert [(row["documentId"], row.get("retrieval")) for row in result] == [(active["id"], "identifier")]
+
+
 def test_explicit_mode_and_visible_fallback():
     assert route("为什么有影响","rag",True)[0]=="rag"
     assert route("驱动板换版影响哪道工序","auto",True)[0]=="fusion"
@@ -33,6 +68,8 @@ def test_live_business_handoff_preserves_document_help_and_explicit_read_only():
     assert business_intent("资料中库存管理的定义是什么") is None
     assert business_intent("SOP 里如何查询设备预警") is None
     assert business_intent("不要执行，只解释创建工单需要哪些资料") is None
+    assert business_intent("反查成品批次 C3-LP-20261030-001 用了哪些原料批") == "read"
+    assert business_intent("文档中怎么查询成品批次 C3-LP-20261030-001 的来源") is None
 
 
 def test_graph_reference_must_match_active_source_and_real_locator():

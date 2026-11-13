@@ -81,6 +81,41 @@ class AiIntentRouterTest {
         var route = router.route("L200 现在库存还有多少", List.of(), null);
         assertEquals("inventory_stock", route.intent());
     }
+    @Test void currentEquipmentImpactDoesNotUseUnrelatedHistoryDates() {
+        var route = router.route("当前设备故障影响哪些任务", List.of("上月有哪些订单"), null);
+        assertEquals("equipment_impact", route.intent());
+        assertNull(route.date("dateFrom"));
+        assertNull(route.date("dateTo"));
+    }
+    @Test void equipmentReportKeepsExplicitDatesInAnEllipsisFollowup() {
+        String question = "2026-10-12 有哪些设备报修";
+        var route = router.route(question, List.of(), null);
+        var next = router.route("再看第一条", List.of(question), null);
+        assertEquals("equipment_impact", route.intent());
+        assertEquals(java.time.LocalDate.of(2026, 10, 12), route.date("dateFrom"));
+        assertEquals(route.date("dateFrom"), next.date("dateFrom"));
+    }
+    @Test void equipmentReportCanReturnToTheCurrentView() {
+        String question = "查看上周设备维修记录";
+        var past = router.route(question, List.of(), null);
+        var now = router.route("那现在呢", List.of(question), null);
+        assertEquals("equipment_impact", past.intent());
+        assertNotNull(past.date("dateFrom"));
+        assertEquals("equipment_impact", now.intent());
+        assertNull(now.date("dateFrom"));
+    }
+    @Test void batchTraceRecognizesProductionAndInventoryNumbersWithoutCarryingIntoAnotherTopic() {
+        var past = "追溯产品批次 C3-LP-20261030-001 用了哪些物料批次";
+        var product = router.route(past, List.of(), null);
+        var material = router.route("原料批次 LAMP-REH-20261025-M3 的去向", List.of(past), null);
+        assertEquals("batch_trace", product.intent());
+        assertEquals("C3-LP-20261030-001", product.string("batchNo"));
+        assertEquals("batch_trace", material.intent());
+        assertEquals("LAMP-REH-20261025-M3", material.string("batchNo"));
+        assertNotEquals("batch_trace", router.route("设备故障影响哪些任务", List.of(past), null).intent());
+        assertNotEquals("batch_trace", router.route("为产品批次 C3-LP-20261030-001 生成成品入库单",
+                List.of(), null).intent());
+    }
     @Test void flowQuestionIsNotStolenByLowStockRoute() {
         var route = router.route("这个月控制板收发存", List.of(), null);
         assertEquals("inventory_flow", route.intent());

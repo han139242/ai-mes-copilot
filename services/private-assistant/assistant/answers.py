@@ -13,8 +13,13 @@ def business_intent(question):
     negative = re.search(r"不要|不需要|不执行|别.{0,4}(?:创建|执行|提交)|只查|仅查询",question)
     if write and not negative and re.search(objects,question):
         return "write"
+    documentation = re.search(r"资料中|文档中|定义|是什么意思|如何查询|怎么查询", question)
+    if (not documentation and re.search(r"批次|成品批|原料批|物料批", question)
+            and re.search(r"追溯|反查|正查|流向|去向|来源|用了|用到|投入|产出", question)
+            and re.search(r"(?<![A-Za-z0-9_-])[A-Za-z0-9]+(?:-[A-Za-z0-9_]+){2,}(?![A-Za-z0-9_-])", question)):
+        return "read"
     if re.search(objects,question) and re.search(r"实时|今天|现在|当前|还剩|剩多少|库存.*多少|查.{0,8}(?:订单|工单|库存|预警)|(?:订单|工单).{0,12}(?:进度|状态)",question):
-        if not re.search(r"资料中|文档中|定义|是什么意思|如何查询|怎么查询",question):
+        if not documentation:
             return "read"
     return None
 

@@ -13,10 +13,10 @@ from contextlib import contextmanager
 
 from psycopg.types.json import Jsonb
 
-from .answers import business_intent, generate, graph_citations, merge_citations, route
+from .answers import business_intent, excerpt_answer, generate, graph_citations, merge_citations, route
 from .parsing import parse_file
 from .vectors import VectorIndex
-from .ontology import contains_target, graph_profile, identifier_tokens
+from .ontology import graph_profile, has_query_evidence, identifier_tokens, is_comparison, missing_identifiers
 from .job_policy import load_policy, save_policy, assert_sources
 
 WORKERS = BoundedSemaphore(1)
@@ -476,18 +476,32 @@ class Knowledge:
                                       revision=state["revision"])
                 graph_data = queried.get("data",{})
                 remote = graph_citations(graph_data,docs)
-                if not remote or not contains_target(effective,remote):
+                if not remote or not has_query_evidence(effective, remote):
                     actual, reason = "rag","图检索未形成可追溯依据，本次使用文档原文"
                     graph_data,remote = {},[]
             except RuntimeError:
                 actual, reason = "rag","图检索暂不可用，本次使用文档原文"
-        citations = merge_citations(remote,local) if actual!="rag" else merge_citations(local)
-        if actual != "rag" and not contains_target(effective, citations):
-            # A packed graph chunk can expand past the citation limit. Preserve
-            # already-validated target evidence before applying that same limit.
-            target_sources = [source for source in remote if contains_target(effective, [source])]
-            citations = merge_citations(target_sources, remote, local)
-        if not contains_target(effective,citations):
+        # Preserve the most relevant excerpts, with a slot for graph evidence.
+        if actual == "fusion":
+            local_documents = {row["documentId"] for row in local[:3]}
+            graph_source = next((row for row in remote if row["documentId"] not in local_documents), None)
+            if graph_source is None and remote:
+                graph_source = remote[0]
+            citations = merge_citations(local[:3], [graph_source] if graph_source else [], local[3:], remote)
+        else:
+            citations = merge_citations(remote, local)
+        if actual != "rag" and missing_identifiers(effective, citations):
+            sources = remote + local
+            reserved = []
+            for token in missing_identifiers(effective, [])[:4]:
+                if not missing_identifiers(token, reserved):
+                    continue
+                source = next((row for row in sources if not missing_identifiers(token, [row])), None)
+                if source:
+                    reserved.append(source)
+            if reserved:
+                citations = merge_citations(reserved, citations, remote, local)
+        if not has_query_evidence(effective, citations):
             citations,graph_data = [],{}
             actual,reason = "rag","当前资料没有目标编号的有效依据，未改用相近编号"
         @contextmanager
@@ -499,10 +513,19 @@ class Knowledge:
                 if not latest["model_consent"] or latest["revision"]!=state["revision"] or latest["answer_revision"]!=state["answer_revision"]:
                     raise ValueError("资料或云处理授权已变化，未发起新的模型请求")
                 yield
-        generated = generate(self.s,uid,question,citations,state,history,graph_data,
-                             {key:str(value)[:500] for key,value in (context or {}).items()
-                              if key in {"route","pageTitle","product","recordNumber"}},authorize=authorize)
+        missing = missing_identifiers(effective, citations)
+        coverage_notice = "当前引用未覆盖编号：" + "、".join(missing) if missing else ""
+        if citations and missing and is_comparison(effective):
+            generated = {"answer": excerpt_answer(citations), "generated": False,
+                         "notice": coverage_notice + "。先展示已找到的原文，暂不生成对比结论。"}
+        else:
+            generated = generate(self.s,uid,question,citations,state,history,graph_data,
+                                 {key:str(value)[:500] for key,value in (context or {}).items()
+                                  if key in {"route","pageTitle","product","recordNumber"}},authorize=authorize)
+            if citations and coverage_notice:
+                generated["notice"] = "。".join(filter(None, [coverage_notice, generated["notice"]]))
         result = {**generated,"citations":citations,"mode":actual,"requestedMode":mode,"routeReason":reason,
+                  "missingIdentifiers":missing,
                   "generation":state["generation"],"revision":state["answer_revision"],"sourceRevision":state["revision"],
                   "graphEvidence":{key:graph_data.get(key,[]) for key in ("entities","relationships")}}
         return self.remember(uid,question,session,state,result)

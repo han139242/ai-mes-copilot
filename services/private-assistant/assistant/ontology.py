@@ -20,11 +20,31 @@ def identifier_tokens(text):
             if any(c.isdigit() for c in m[0]) or m[0].split("-",1)[0].upper() in DOMAIN_PREFIXES]
 
 
+def identifier_pattern(token):
+    return r"(?<![A-Za-z0-9_-])" + re.escape(token) + r"(?![A-Za-z0-9_-])"
+
+
+def missing_identifiers(question, citations):
+    tokens = list(dict.fromkeys(token.upper() for token in identifier_tokens(question)))
+    source_text = "\n".join(row["text"] for row in citations)
+    return [token for token in tokens if not re.search(identifier_pattern(token), source_text, re.IGNORECASE)]
+
+
 def contains_target(question, citations):
-    tokens=identifier_tokens(question)
-    if not tokens: return True
-    anchor=re.compile(r"(?<![A-Za-z0-9_-])"+re.escape(tokens[0])+r"(?![A-Za-z0-9_-])",re.IGNORECASE)
-    return any(anchor.search(row["text"]) for row in citations)
+    tokens = identifier_tokens(question)
+    return not tokens or not missing_identifiers(tokens[0], citations)
+
+
+def is_comparison(question):
+    return (len({token.upper() for token in identifier_tokens(question)}) > 1
+            and bool(re.search(r"对比|比较|区别|差异|不同|分别|\bcompare\b|\bdifferences?\b", question, re.IGNORECASE)))
+
+
+def has_query_evidence(question, citations):
+    tokens = identifier_tokens(question)
+    if is_comparison(question):
+        return any(not missing_identifiers(token, citations) for token in tokens)
+    return contains_target(question, citations)
 
 
 def canonical_entity(name):

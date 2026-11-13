@@ -1,0 +1,9 @@
+{
+  "S05": [{"source":"02-","tokens":["L100","DRV-07","D5=1","PROC-DIM"]}],
+  "S06": [{"source":"03-","tokens":["L100","QC-DIM-01","RIG-21"]},{"source":"04-","tokens":["L100","QC-DIM-01","RIG-21"]}],
+  "S12": [{"source":"08-","tokens":["ECO-L100-02","未批准","DRV-07","DRV-08"]}],
+  "S17": [{"source":"02-","tokens":["L100","DRV-07","PROC-DIM"]},{"source":"03-","tokens":["PROC-DIM","QC-DIM-01"]}],
+  "S18": [{"source":"05-","tokens":["FLICKER-31","QC-DIM-01","重新记录"]},{"source":"06-","tokens":["RIG-21","设备管理员","不自行假定"]},{"source":"04-","tokens":["L100","QC-DIM-01","DRV-07"]}],
+  "S19": [{"source":"01-","tokens":["L200","DRV-09","PROC-L2"]},{"source":"06-","tokens":["RIG-22","L200","PROC-L2"]}],
+  "S24": [{"source":"04-","tokens":["没有定义","色温误差","数值限值"]}]
+}

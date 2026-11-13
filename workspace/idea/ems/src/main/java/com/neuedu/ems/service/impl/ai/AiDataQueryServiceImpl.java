@@ -1276,11 +1276,12 @@ public class AiDataQueryServiceImpl implements AiDataQueryService {
     }
 
     @Override
+    @org.springframework.transaction.annotation.Transactional(readOnly = true)
     public AiQueryResult queryTraceByBatch(String batchNo) {
         if (!StringUtils.hasText(batchNo)) {
             throw new AiServiceException("批次号不能为空");
         }
-        String normalized = batchNo.trim();
+        String normalized = currentDocumentNumber(batchNo);
         Map<String, Object> batch = queryMapper.selectBatchInfo(normalized);
         Map<String, Object> productLot = queryMapper.selectProductLot(normalized);
         if ((batch == null || batch.isEmpty()) && (productLot == null || productLot.isEmpty())) {
@@ -1291,6 +1292,11 @@ public class AiDataQueryServiceImpl implements AiDataQueryService {
 
         Long batchId = batch == null ? null : toLong(batch.get("batchId"));
         Long productLotId = traceProductLotId(productLot, batch);
+        if (batchId != null && productLot != null
+                && !Objects.equals(productLotId, traceProductLotId(null, batch))) {
+            return emptyResult("批次追溯", "批次号「" + normalized
+                    + "」在仓储和生产中指向两个独立批次，请在原台账核对编号。", traceBatchColumns());
+        }
 
         Map<String, Object> mainRow = traceMainRow(batch, productLot);
 
@@ -1301,28 +1307,64 @@ public class AiDataQueryServiceImpl implements AiDataQueryService {
         List<Map<String, Object>> inspectionRows = traceRows.inspection();
         List<Map<String, Object>> finishedBatchRows = traceRows.finishedBatch();
 
+        var upstream = productLotId == null ? List.<Map<String, Object>>of()
+                : queryMapper.selectBatchConsumption(null, productLotId);
+        var downstream = batchId == null ? List.<Map<String, Object>>of()
+                : queryMapper.selectBatchConsumption(batchId, null);
         List<AiBlock> blocks = new ArrayList<>();
+        StringBuilder relationSummary = new StringBuilder();
+        if (productLotId != null) {
+            String lotNo = productLot == null ? text(batch.get("sourceLotNo")) : text(productLot.get("lotNo"));
+            if (batchId != null && StringUtils.hasText(lotNo)) {
+                relationSummary.append("仓储批次的来源生产批为 ").append(lotNo).append("。");
+            }
+            appendConsumption(blocks, relationSummary, "反查来源物料批", upstream, "inputBatchNo", "个来源物料批");
+        }
+        if (batchId != null) {
+            appendConsumption(blocks, relationSummary, "正查关联产品批", downstream, "outputLotNo", "个关联产品批");
+        }
         blocks.add(new AiBlock("来源入库单", traceInboundColumns(), limit(inboundRows), null));
         blocks.add(new AiBlock("领用工单", traceIssueColumns(), limit(issueRows), null));
         blocks.add(new AiBlock("报工消耗", traceReportColumns(), limit(reportRows), null));
         blocks.add(new AiBlock("检验记录", inspectionColumns(), limit(inspectionRows), null));
-        blocks.add(new AiBlock("成品批次", traceFinishedBatchColumns(), limit(finishedBatchRows), null));
+        blocks.add(new AiBlock("来源产品批入库后的仓储批次", traceFinishedBatchColumns(), limit(finishedBatchRows), null));
 
         String summary = traceSummary(normalized, mainRow, inboundRows, issueRows, reportRows,
-                inspectionRows, finishedBatchRows);
+                inspectionRows, finishedBatchRows) + relationSummary;
         return new AiQueryResult("批次追溯 " + normalized, summary, traceBatchColumns(), List.of(mainRow), blocks);
     }
 
     /** 产品批次 ID：先用产品批次自身，取不到时回落到物料批次上记的来源产品批次。 */
     private Long traceProductLotId(Map<String, Object> productLot, Map<String, Object> batch) {
-        Long productLotId = productLot == null ? null : toLong(productLot.get("productLotId"));
-        if (productLotId != null) {
-            return productLotId;
+        Object id = productLot != null ? productLot.get("productLotId")
+                : batch == null ? null : batch.get("sourceProductLotId");
+        return id == null ? null : toLong(id);
+    }
+
+    private void appendConsumption(List<AiBlock> blocks, StringBuilder summary, String title,
+                                   List<Map<String, Object>> rows, String key, String unit) {
+        if (rows.isEmpty()) {
+            summary.append(title).append("未找到有效的直接用料记录。");
+            return;
         }
-        if (batch == null) {
-            return productLotId;
+        var visible = limit(rows);
+        long count = visible.stream().map(row -> row.get(key)).distinct().count();
+        summary.append(title).append(rows.size() > MAX_DETAIL_ROWS ? "当前展示至少 " : "命中 ")
+                .append(count).append(' ').append(unit).append("。");
+        if (rows.size() > MAX_DETAIL_ROWS) {
+            summary.append("明细仅显示前 ").append(MAX_DETAIL_ROWS).append(" 条。");
         }
-        return toLong(batch.get("sourceProductLotId"));
+        blocks.add(new AiBlock(title, List.of(
+                new AiColumn("usageId", "追溯记录 ID"),
+                new AiColumn("inputBatchNo", "投入物料批"),
+                new AiColumn("outputLotNo", "产出产品批"),
+                new AiColumn("materialCode", "物料编码"),
+                new AiColumn("materialName", "物料"),
+                new AiColumn("usedQuantity", "记录用量（含报废）"),
+                new AiColumn("unitName", "物料单位"),
+                new AiColumn("productName", "产出产品"),
+                new AiColumn("workOrderNo", "工单号"),
+                new AiColumn("reportNo", "报工单号")), visible, null));
     }
 
     /** 批次追溯要展示的五组关联数据。 */
@@ -1382,7 +1424,7 @@ public class AiDataQueryServiceImpl implements AiDataQueryService {
                 + "来源入库 " + inboundRows.size() + " 单，被 " + issueRows.size() + " 个工单领用"
                 + orderSuffix
                 + "，报工消耗 " + reportRows.size() + " 条，检验 " + inspectionRows.size() + " 单，"
-                + "形成成品批次 " + finishedBatchRows.size() + " 个。";
+                + "来源产品批关联仓储批次 " + finishedBatchRows.size() + " 个。";
     }
 
     @Override
@@ -1973,13 +2015,20 @@ public class AiDataQueryServiceImpl implements AiDataQueryService {
     @Override
     public AiQueryResult queryEquipmentImpact(String equipmentKeyword, LocalDate dateFrom, LocalDate dateTo) {
         String keyword = StringUtils.hasText(equipmentKeyword) ? equipmentKeyword.trim() : null;
-        List<Map<String, Object>> faultRows = queryMapper.selectEquipmentFaults(keyword);
+        LocalDate[] range = dateFrom == null && dateTo == null ? null : normalizeRange(dateFrom, dateTo, 1);
+        List<Map<String, Object>> faultRows = queryMapper.selectEquipmentFaults(keyword,
+                range == null ? null : range[0].atStartOfDay(),
+                range == null ? null : range[1].plusDays(1).atStartOfDay());
+        // A historical report only proves what was reported in the period. Show
+        // current station associations for the live view, never historical impact.
         List<Long> stationIds = faultRows.stream()
-                .map(row -> toLong(row.get("stationId")))
+                .map(row -> row.get("stationId"))
                 .filter(Objects::nonNull)
+                .map(this::toLong)
                 .distinct()
                 .toList();
-        List<Map<String, Object>> taskRows = queryMapper.selectEquipmentAffectedTasks(stationIds);
+        List<Map<String, Object>> taskRows = range != null || stationIds.isEmpty()
+                ? List.of() : queryMapper.selectEquipmentAffectedTasks(stationIds);
 
         List<Map<String, Object>> rows = new ArrayList<>();
         for (Map<String, Object> raw : faultRows) {
@@ -2016,17 +2065,33 @@ public class AiDataQueryServiceImpl implements AiDataQueryService {
                 .filter(StringUtils::hasText)
                 .distinct()
                 .collect(Collectors.joining("、"));
+        String scope = range == null ? "当前故障和开放报修" : range[0] + " 至 " + range[1] + "的在册设备报修记录";
         String summary;
         if (rows.isEmpty()) {
-            summary = "当前没有匹配的故障设备记录。";
+            summary = scope + "中没有匹配记录。";
         } else {
+            long equipmentCount = faultRows.stream().map(row -> row.get("equipmentId")).distinct().count();
+            long repairCount = faultRows.stream().map(row -> row.get("repairId")).filter(Objects::nonNull).distinct().count();
             String ordersPart = StringUtils.hasText(affectedOrders) ? "，涉及生产订单 " + affectedOrders : "";
-            summary = "匹配到 " + rows.size() + " 台设备记录，受影响未完成任务 " + affected.size() + " 个" + ordersPart + "。";
+            summary = scope + "涉及 " + equipmentCount + " 台设备、" + repairCount + " 张报修单。";
+            if (range == null) {
+                if (!stationIds.isEmpty()) {
+                    summary += "关联工位当前有 " + affected.size() + " 个未完成任务" + ordersPart
+                            + "。请结合排程和现场状态核对影响。";
+                }
+                long unlinked = faultRows.stream().filter(row -> row.get("stationId") == null)
+                        .map(row -> row.get("equipmentId")).distinct().count();
+                if (unlinked > 0) {
+                    summary += "其中 " + unlinked + " 台设备未关联有效工位，无法核对对应任务。";
+                }
+            }
         }
 
-        List<AiBlock> blocks = new ArrayList<>();
-        blocks.add(new AiBlock("受影响任务与订单", equipmentTaskColumns(), limit(affected), null));
-        return new AiQueryResult("设备故障影响", summary, equipmentColumns(), rows, blocks);
+        List<AiBlock> blocks = range == null && !stationIds.isEmpty()
+                ? List.of(new AiBlock("关联工位的当前未完成任务", equipmentTaskColumns(), limit(affected), null))
+                : List.of();
+        return new AiQueryResult(range == null ? "设备故障影响" : "设备报修记录",
+                summary, equipmentColumns(), rows, blocks);
     }
 
     @Override
@@ -3182,8 +3247,8 @@ public class AiDataQueryServiceImpl implements AiDataQueryService {
         return List.of(
                 new AiColumn("equipmentCode", "设备编码"),
                 new AiColumn("equipmentName", "设备名称"),
-                new AiColumn("equipmentStatus", "设备状态"),
-                new AiColumn("stationName", "工位"),
+                new AiColumn("equipmentStatus", "当前设备状态"),
+                new AiColumn("stationName", "当前工位"),
                 new AiColumn("repairNo", "报修单号"),
                 new AiColumn("repairStatus", "报修状态"),
                 new AiColumn("faultDescription", "故障描述"),

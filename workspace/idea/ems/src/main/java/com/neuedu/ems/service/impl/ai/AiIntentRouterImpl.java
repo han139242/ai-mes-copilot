@@ -66,7 +66,9 @@ public class AiIntentRouterImpl implements AiIntentRouter {
     private static final Pattern ORDER_PATTERN = Pattern.compile(
             "(?<![A-Za-z0-9_-])((?:[A-Z][A-Z0-9]{0,7}-)?PO-\\d{8}-\\d{3,}|PO[A-Za-z0-9_-]*)", Pattern.CASE_INSENSITIVE);
     private static final Pattern BATCH_PATTERN = Pattern.compile(
-            "(?<![A-Za-z0-9])((?:LOT|FG|RM|BATCH|PC)[A-Za-z0-9_-]*(?:-[A-Za-z0-9]+){2,})", Pattern.CASE_INSENSITIVE);
+            "(?<![A-Za-z0-9_-])((?:[A-Z][A-Z0-9]{0,7}-)?LP-\\d{8}-\\d{3,}"
+                    + "|(?:LOT|FG|RM|BATCH|PC|PL|LAMP)[A-Za-z0-9_]*(?:-[A-Za-z0-9_]+){2,})(?![A-Za-z0-9_-])",
+            Pattern.CASE_INSENSITIVE);
     private static final Pattern QUANTITY_PATTERN = Pattern.compile("(\\d{2,6})\\s*(?:台|pcs|PCS|件)");
     /** 「再接 500」「追加 500」这类没有单位的口语数量。 */
     private static final Pattern EXTRA_QUANTITY_PATTERN = Pattern.compile("(?:再接|追加|加单|加)\\s*(\\d{2,6})");
@@ -208,13 +210,24 @@ public class AiIntentRouterImpl implements AiIntentRouter {
 
     /** 批次追溯。 */
     private RouteResult routeByBatchTrace(String text, List<String> recentHistory, Map<String, Object> params) {
-        String batchNo = extractBatchNo(text, recentHistory);
-        if (!StringUtils.hasText(batchNo)
-                || !containsAny(text, "追溯", "批次", "哪批", "来源", "影响哪些", "去向")) {
+        if (!containsAny(text, "追溯", "批次", "哪批", "来源", "影响哪些", "去向", "反查", "正查", "流向", "投入", "产出", "用了", "用到")
+                || containsAny(text, "生成成品入库", "生成入库单", "办理入库", "确认入库", "创建出库")) {
+            return null;
+        }
+        String batchNo = batchNoFrom(text);
+        if (!StringUtils.hasText(batchNo) && isEllipsisFollowUp(text)) {
+            batchNo = extractBatchNo(text, recentHistory);
+        }
+        if (!StringUtils.hasText(batchNo)) {
             return null;
         }
         params.put("batchNo", batchNo);
         return new RouteResult(INTENT_TRACE, params, true);
+    }
+
+    static boolean asksDirectBatchTrace(String text) {
+        return BATCH_PATTERN.matcher(text).find() && text.matches(
+                "(?s).*(?:追溯|反查|正查|流向|去向|用了哪|用到哪|用在哪|投入|产出|来源物料|来源批次|来源原料).*");
     }
 
     /** 产能测算：产品 + 追加数量。 */
@@ -314,12 +327,19 @@ public class AiIntentRouterImpl implements AiIntentRouter {
     /** 设备故障影响。 */
     private RouteResult routeByEquipment(String text, List<String> recentHistory, Map<String, Object> params) {
         boolean equipmentWord = containsAny(text, "设备", "老化", "故障", "停机", "报修", "维修");
-        boolean impactWord = containsAny(text, "影响", "哪些", "订单", "延期");
+        boolean impactWord = containsAny(text, "影响", "哪些", "订单", "延期")
+                || (containsAny(text, "报修", "维修", "故障") && containsAny(text, "记录", "情况"));
         if (!equipmentWord || !impactWord) {
             return null;
         }
         params.put("equipmentKeyword", extractEquipmentKeyword(text, recentHistory));
+        putEquipmentDateRange(params, parseExplicitDateRange(text));
         return new RouteResult(INTENT_EQUIPMENT, params, true);
+    }
+
+    private void putEquipmentDateRange(Map<String, Object> params, DateRange explicit) {
+        params.put("dateFrom", explicit == null ? null : explicit.begin());
+        params.put("dateTo", explicit == null ? null : explicit.end());
     }
 
     private RouteResult routeBySchedule(String text, List<String> recentHistory, Map<String, Object> params) {
@@ -514,6 +534,15 @@ public class AiIntentRouterImpl implements AiIntentRouter {
         Map<String, Object> inherited = new LinkedHashMap<>(previous.params());
         inherited.put("dateFrom", range.begin());
         inherited.put("dateTo", range.end());
+        if (INTENT_EQUIPMENT.equals(previous.intent())) {
+            DateRange explicit = parseExplicitDateRange(text);
+            if (explicit != null || containsAny(text, "现在", "当前", "此刻")) {
+                putEquipmentDateRange(inherited, explicit);
+            } else {
+                inherited.put("dateFrom", previous.date("dateFrom"));
+                inherited.put("dateTo", previous.date("dateTo"));
+            }
+        }
         putLineKeyword(inherited, text);
         if (INTENT_SCHEDULE.equals(previous.intent()) && containsAny(text, "延期")) {
             inherited.put("lateOnly", Boolean.TRUE);
@@ -699,9 +728,9 @@ public class AiIntentRouterImpl implements AiIntentRouter {
                     "按工序看不良分布",
                     "本周合格率和产量趋势");
             case INTENT_TRACE -> List.of(
-                    "这批物料还用在哪些工单上",
-                    "这批成品的销售去向",
-                    "这批物料的检验记录");
+                    "这批物料用于哪些产品批次",
+                    "这批成品用了哪些物料批次",
+                    "这批的检验记录");
             case INTENT_SCHEDULE -> List.of(
                     "L200 再接 500 台能不能按期",
                     "按产线看剩余产能",

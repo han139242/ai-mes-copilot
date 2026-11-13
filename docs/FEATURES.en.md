@@ -9,7 +9,7 @@ See the [AI architecture](AI_ARCHITECTURE.md) and [classroom walkthrough](TEACHE
 | Capability | Behavior |
 |---|---|
 | File lifecycle | PDF, DOCX, XLSX, TXT and Markdown upload/update/download/delete with versioned source locations. |
-| Document RAG | Local 512-dimensional Chinese embeddings, pgvector retrieval, identifier checks and cited answers or excerpts. |
+| Document RAG | Local 512-dimensional Chinese embeddings and pgvector retrieval. Ranking uses exact identifiers, requested evidence types and source coverage. |
 | GraphRAG / fusion | LightRAG extraction and AGE storage; automatic, document, graph and fusion show actual routing and fallback. |
 | Graph exploration | Actual data, search, filters, zoom, neighbors, paths up to six edges in the visible graph, sources and a text list. |
 | Private context | Separate database, role and directory per user, private history and editable presentation preferences. |
@@ -68,6 +68,8 @@ The catalog contains 19 actions:
 19. Review a production report.
 
 Definitions are maintained in [`AiCapabilityCatalog.java`](../workspace/idea/ems/src/main/java/com/neuedu/ems/service/ai/AiCapabilityCatalog.java). General query scope is constrained by `AiDataResourceCatalog` and the current account's permissions.
+
+Batch traceability connects recorded input material batches with output production lots in both directions. A warehouse batch linked to its production lot can also be traced upstream. Rows include consumption record IDs, units, work orders and manufacturing reports. The cross-module query requires the corresponding business permissions and full data scope.
 
 ## How an action runs
 

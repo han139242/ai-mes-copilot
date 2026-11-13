@@ -129,3 +129,20 @@ def test_packed_sources_preserve_target_beyond_citation_limit(monkeypatch, tmp_p
     assert 1 <= len(answer['citations']) <= 10
     assert [source['id'] for source in answer['citations']] == [
         f'S{number}' for number in range(1, len(answer['citations'])+1)]
+    for question in ('比较 L100 与 L900 的驱动板', 'L900 与 L100 的驱动板有什么不同？'):
+        comparison = kb.ask(123, question, mode)
+        assert comparison['missingIdentifiers'] == ['L900']
+        assert comparison['citations']
+        assert not comparison['generated']
+        assert '暂不生成对比结论' in comparison['notice']
+    pieces[0]['text'] = 'L100 uses DRV-07.'
+    pieces[-1]['text'] = 'L200 uses DRV-08.'
+    updated = located_chunks(CharacterTokenizer(), json.dumps(pieces), chunk_token_size=480)
+    updated[0].update(chunk_id='packed', file_path=chunks[0]['file_path'])
+    graph_data['chunks'] = updated
+    local[:] = [{**{key: doc[key] for key in ('name', 'version', 'hash')},
+                 'documentId': doc['id'], 'locator': 'paragraph 12',
+                 'text': 'L300 uses DRV-09.', 'retrieval': 'identifier'}]
+    combined = kb.ask(123, '比较 L100、L200 和 L300 的驱动板', mode)
+    assert combined['missingIdentifiers'] == []
+    assert len(combined['citations']) == 10

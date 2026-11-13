@@ -325,6 +325,16 @@ public class AiServiceImpl implements AiService {
             modelUnavailable = true;
             LOG.warn("知识检索的模型改写不可用，本轮继续走规则路由：{}", e.getMessage());
         }
+        if (answer == null && !semanticFirst && intentRouter != null
+                && (question.matches("(?s).*(?:设备|老化).*(?:故障|报修|维修|停机).*")
+                || question.matches("(?s)^那(?:现在|当前|此刻)(?:呢|怎么样)?[？?]?$")
+                || AiIntentRouterImpl.asksDirectBatchTrace(question))) {
+            AiIntentRouter.RouteResult route = intentRouter.route(question, userQuestions(history), null);
+            if (route.matched() && ("equipment_impact".equals(route.intent()) || "batch_trace".equals(route.intent()))) {
+                com.neuedu.ems.service.ai.AiQueryAccessPolicy.requireIntent(authorization, route.intent());
+                return executeDirectDocumentQuery(question, route, authorization, startedAt);
+            }
+        }
         // 带否定、更正或复合目标的表达先完整理解，避免某个关键词截走后半句。
         if (answer == null && semanticFirst) {
             answer = tryPlan(question, history, request, context, authorization, startedAt);
@@ -390,7 +400,11 @@ public class AiServiceImpl implements AiService {
 
     private Map<String, Object> queryUnavailableAnswer(String intent, long startedAt) {
         Map<String, Object> answer = new LinkedHashMap<>();
-        answer.put("answer", "这次没有读到单据当前状态，请稍后重试；本轮没有执行任何业务操作。");
+        answer.put("answer", switch (intent) {
+            case "equipment_impact" -> "这次没有读到设备或报修记录，请稍后重试。";
+            case "batch_trace" -> "这次没有读到批次追溯记录，请稍后重试。";
+            default -> "这次没有读到单据当前状态，请稍后重试，本轮没有执行任何业务操作。";
+        });
         answer.put("intent", intent);
         answer.put("blocks", List.of());
         answer.put("actions", List.of());
@@ -1254,12 +1268,7 @@ public class AiServiceImpl implements AiService {
             return modelOrUnmatchedAnswer(question, history, module, context, dateRange,
                     AiIntentRouter.INTENT_GENERAL, authorization, startedAt, modelUnavailable);
         }
-        List<String> userHistory = history.stream()
-                .filter(message -> "user".equalsIgnoreCase(message.getRole()))
-                .map(AiChatMessage::getContent)
-                .filter(StringUtils::hasText)
-                .toList();
-        AiIntentRouter.RouteResult route = intentRouter.route(question, userHistory,
+        AiIntentRouter.RouteResult route = intentRouter.route(question, userQuestions(history),
                 dateRange == null ? null
                         : new AiIntentRouter.DateRange(dateRange.beginDate(), dateRange.endDate()));
         if (route.matched()) {
@@ -1271,6 +1280,11 @@ public class AiServiceImpl implements AiService {
         }
         return modelOrUnmatchedAnswer(question, history, module, context, dateRange, route.intent(),
                 authorization, startedAt, modelUnavailable);
+    }
+
+    private static List<String> userQuestions(List<AiChatMessage> history) {
+        return history.stream().filter(message -> "user".equalsIgnoreCase(message.getRole()))
+                .map(AiChatMessage::getContent).filter(StringUtils::hasText).toList();
     }
 
     /** 大模型可用时自由问答，否则给规则兜底话术。 */
@@ -1825,7 +1839,7 @@ public class AiServiceImpl implements AiService {
         Map<String, Object> routeParams = toRouterParams(plan.params());
         // 模型只负责判断「问的是哪一类」，具体筛选项仍以用户原话为准：它经常把「线边仓」
         // 「原料仓」这种中文仓库名当成闲聊忽略掉，只给出能力编码，于是查询退化成全库合计。
-        // 规则路由本来就从原话里抽参数，这里把它的抽取结果补进来，不覆盖模型已给的取值。
+        // 从原话补充筛选项。设备查询的明确日期优先，以免查错时间口径。
         mergeRouterExtraction(plan.capability(), question, routeParams);
         AiIntentRouter.RouteResult route = new AiIntentRouter.RouteResult(
                 plan.capability(), routeParams, true);
@@ -1870,6 +1884,15 @@ public class AiServiceImpl implements AiService {
         }
         if (extracted == null || !capability.equals(extracted.intent()) || extracted.params() == null) {
             return;
+        }
+        if ("equipment_impact".equals(capability)) {
+            if (extracted.date("dateFrom") != null || question.matches("(?s).*(?:现在|当前|此刻).*")) {
+                routeParams.put("dateFrom", extracted.date("dateFrom"));
+                routeParams.put("dateTo", extracted.date("dateTo"));
+            }
+            if (extracted.params().get("equipmentKeyword") != null) {
+                routeParams.put("equipmentKeyword", extracted.params().get("equipmentKeyword"));
+            }
         }
         extracted.params().forEach((key, value) -> {
             if (!MERGEABLE_ROUTER_PARAMS.contains(key) || value == null) {

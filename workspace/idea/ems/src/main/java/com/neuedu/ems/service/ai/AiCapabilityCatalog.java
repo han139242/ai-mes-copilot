@@ -117,8 +117,8 @@ public final class AiCapabilityCatalog {
                         optional("dateFrom", "date", "开始日期 yyyy-MM-dd"),
                         optional("dateTo", "date", "结束日期 yyyy-MM-dd"))),
                 new Capability("batch_trace", KIND_QUERY, "批次追溯",
-                        "按批次号正查去向或反查来源物料与工单",
-                        null, List.of(required("batchNo", "string", "批次号"))),
+                        "按投入物料批正查关联产品批，按产品批或入库成品批反查直接来源物料",
+                        null, List.of(required("batchNo", "string", "物料批次号或产品批次号"))),
                 new Capability("schedule_capacity", KIND_QUERY, "排程与产能",
                         "查产线排程与已排负荷，可按产线名称或编码筛选",
                         null, List.of(
@@ -134,7 +134,7 @@ public final class AiCapabilityCatalog {
                                 + "与手工排程共用同一套班次与产能口径；不含排队换型待料，不能当交期承诺",
                         null, List.of(required("orderNo", "string", "生产订单号，形如 PO-..."))),
                 new Capability("equipment_impact", KIND_QUERY, "设备故障影响",
-                        "查设备状态与故障对在制任务的影响",
+                        "不指定日期时查当前故障、开放报修与关联工位的未完成任务。指定日期时查该期间的报修记录",
                         null, List.of(
                         optional("equipmentKeyword", "string", "设备名称或编码关键词"),
                         optional("dateFrom", "date", "开始日期 yyyy-MM-dd"),

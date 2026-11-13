@@ -458,8 +458,10 @@ public interface AiDataQueryMapper {
                    COALESCE(b.supplier_batch_no, '') AS supplierBatchNo,
                    COALESCE(b.source_order_type, '') AS sourceOrderType,
                    b.source_order_id AS sourceOrderId,
-                   b.source_product_lot_id AS sourceProductLotId
+                   l.product_lot_id AS sourceProductLotId,
+                   l.lot_no AS sourceLotNo
             FROM wms_material_batch b
+            LEFT JOIN trace_product_lot l ON l.product_lot_id = b.source_product_lot_id AND l.deleted_flag = 0
             LEFT JOIN mdm_material m ON m.material_id = b.material_id AND m.deleted_flag = 0
             LEFT JOIN mdm_unit u ON u.unit_id = m.unit_id AND u.deleted_flag = 0
             WHERE b.deleted_flag = 0 AND b.batch_no = #{batchNo}
@@ -488,6 +490,36 @@ public interface AiDataQueryMapper {
             LIMIT 1
             """)
     Map<String, Object> selectProductLot(@Param("lotNo") String lotNo);
+
+    /** Direct consumption edges recorded by approved manufacturing reports. */
+    @Select("""
+            <script>
+            SELECT t.usage_id AS usageId, b.batch_no AS inputBatchNo, l.lot_no AS outputLotNo,
+                   m.material_code AS materialCode, m.material_name AS materialName,
+                   u.unit_name AS unitName, t.used_quantity AS usedQuantity,
+                   p.product_name AS productName, wo.work_order_no AS workOrderNo,
+                   wr.report_no AS reportNo
+            FROM trace_material_usage t
+            JOIN wms_material_batch b ON b.batch_id = t.batch_id AND b.deleted_flag = 0
+            JOIN trace_product_lot l ON l.product_lot_id = t.product_lot_id AND l.deleted_flag = 0
+            JOIN mdm_material m ON m.material_id = b.material_id AND m.deleted_flag = 0
+                               AND (t.material_id IS NULL OR t.material_id = m.material_id)
+            LEFT JOIN mdm_unit u ON u.unit_id = m.unit_id AND u.deleted_flag = 0
+            LEFT JOIN mdm_product p ON p.product_id = l.product_id AND p.deleted_flag = 0
+            LEFT JOIN mfg_work_order wo ON wo.work_order_id = COALESCE(t.work_order_id,l.work_order_id) AND wo.deleted_flag = 0
+            LEFT JOIN mfg_work_report wr ON wr.report_id = t.report_id AND wr.deleted_flag = 0
+            WHERE t.deleted_flag = 0 AND t.used_quantity &gt; 0
+              AND NULLIF(TRIM(b.batch_no), '') IS NOT NULL AND NULLIF(TRIM(l.lot_no), '') IS NOT NULL
+              <choose>
+                <when test="batchId != null">AND t.batch_id = #{batchId}</when>
+                <when test="lotId != null">AND t.product_lot_id = #{lotId}</when>
+                <otherwise>AND 1 = 0</otherwise>
+              </choose>
+            ORDER BY l.lot_no,b.batch_no,t.usage_id
+            LIMIT 201
+            </script>
+            """)
+    List<Map<String, Object>> selectBatchConsumption(@Param("batchId") Long batchId, @Param("lotId") Long lotId);
 
     /**
      * 查询批次来源入库单。
@@ -760,15 +792,17 @@ public interface AiDataQueryMapper {
     List<Map<String, Object>> selectOrderShipments(@Param("productionOrderId") Long productionOrderId);
 
     /**
-     * 查询故障设备与未关闭报修单。
+     * 无日期时查当前故障和开放报修，有日期时查区间内的报修记录。
      */
     @Select("""
             <script>
-            SELECT e.equipment_code AS equipmentCode,
+            SELECT e.equipment_id AS equipmentId,
+                   e.equipment_code AS equipmentCode,
                    e.equipment_name AS equipmentName,
                    COALESCE(e.status, '') AS equipmentStatus,
                    COALESCE(st.station_name, '') AS stationName,
                    st.station_id AS stationId,
+                   r.repair_id AS repairId,
                    COALESCE(r.repair_no, '') AS repairNo,
                    COALESCE(r.fault_description, '') AS faultDescription,
                    COALESCE(r.status, '') AS repairStatus,
@@ -776,16 +810,29 @@ public interface AiDataQueryMapper {
             FROM eam_equipment e
             LEFT JOIN factory_station st ON st.station_id = e.station_id AND st.deleted_flag = 0
             LEFT JOIN eam_repair_order r ON r.equipment_id = e.equipment_id AND r.deleted_flag = 0
-                 AND r.status &lt;&gt; 'CLOSED'
+              <if test="from == null">
+                AND r.status IN ('SUBMITTED', 'REPAIRING', 'WAIT_ACCEPTANCE')
+              </if>
             WHERE e.deleted_flag = 0
+              <choose>
+                <when test="from != null">
+                  AND r.reported_time &gt;= #{from}
+                  AND r.reported_time &lt; #{until}
+                </when>
+                <otherwise>
+                  AND (e.status IN ('FAULT', 'REPAIRING') OR r.repair_id IS NOT NULL)
+                </otherwise>
+              </choose>
               <if test="keyword != null and keyword != ''">
                 AND (e.equipment_code LIKE CONCAT('%', #{keyword}, '%')
                      OR e.equipment_name LIKE CONCAT('%', #{keyword}, '%'))
               </if>
-            ORDER BY r.reported_time DESC, e.equipment_code
+            ORDER BY r.reported_time DESC, e.equipment_code, r.repair_id DESC
             </script>
             """)
-    List<Map<String, Object>> selectEquipmentFaults(@Param("keyword") String keyword);
+    List<Map<String, Object>> selectEquipmentFaults(@Param("keyword") String keyword,
+                                                   @Param("from") LocalDateTime from,
+                                                   @Param("until") LocalDateTime until);
 
     /**
      * 查询指定工位上的未完成任务及所属工单。
@@ -810,7 +857,7 @@ public interface AiDataQueryMapper {
             LEFT JOIN mfg_production_plan pl ON pl.plan_id = wo.plan_id AND pl.deleted_flag = 0
             LEFT JOIN mfg_production_order po ON po.production_order_id = pl.production_order_id AND po.deleted_flag = 0
             WHERE t.deleted_flag = 0
-              AND t.status NOT IN ('FINISHED', 'CLOSED')
+              AND t.status NOT IN ('FINISHED', 'CLOSED', 'CANCELLED')
               <if test="stationIds != null and stationIds.size() > 0">
                 AND t.station_id IN
                 <foreach collection="stationIds" item="sid" open="(" separator="," close=")">#{sid}</foreach>

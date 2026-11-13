@@ -23,4 +23,21 @@ class AiQueryAccessPolicyTest {
     @Test void moduleCaseAndWhitespaceCannotBypassBusinessPermission() {
         assertThrows(DataScopeAccessDeniedException.class,()->AiQueryAccessPolicy.requireModule(context("ALL",Set.of("ai:assistant:use"))," INVENTORY "));
     }
+    @Test void equipmentReportRequiresRepairOrderPermission() {
+        assertThrows(DataScopeAccessDeniedException.class, () -> AiQueryAccessPolicy.requireIntent(
+                context("ALL", Set.of("ai:assistant:use", "eam:equipment:view", "mfg:task:view")), "equipment_impact"));
+        assertDoesNotThrow(() -> AiQueryAccessPolicy.requireIntent(
+                context("ALL", Set.of("ai:assistant:use", "eam:equipment:view", "eam:repair-order:view", "mfg:task:view")),
+                "equipment_impact"));
+    }
+    @Test void batchTraceRequiresPermissionsForBothDirectionsAndFullScope() {
+        Set<String> permissions = Set.of("ai:assistant:use", "trace:material-usage:reverse-trace",
+                "trace:product-lot:trace", "wms:material-batch:view", "wms:inbound-order:view",
+                "mfg:work-order:view", "mfg:work-report:view", "qms:inspection-order:view");
+        assertDoesNotThrow(() -> AiQueryAccessPolicy.requireIntent(context("ALL", permissions), "batch_trace"));
+        assertThrows(DataScopeAccessDeniedException.class,
+                () -> AiQueryAccessPolicy.requireIntent(context("SELF", permissions), "batch_trace"));
+        assertThrows(DataScopeAccessDeniedException.class, () -> AiQueryAccessPolicy.requireIntent(
+                context("ALL", Set.of("ai:assistant:use", "trace:material-usage:reverse-trace")), "batch_trace"));
+    }
 }
