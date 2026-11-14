@@ -8,6 +8,15 @@ from itertools import chain
 SUPPORTED = {".pdf", ".docx", ".xlsx", ".txt", ".md"}
 
 
+def open_pdf(content):
+    from pypdf import PdfReader
+
+    reader = PdfReader(io.BytesIO(content), strict=True)
+    if reader.is_encrypted or len(reader.pages) > 300:
+        raise ValueError("请上传未加密且不超过 300 页的 PDF")
+    return reader
+
+
 def validate_sheet_coordinates(content):
     """Bound actual cells before read-only Excel can allocate sparse rows/columns.
 
@@ -60,11 +69,7 @@ def parse_file(name: str, content: bytes, max_bytes=8*1024*1024, max_chars=240_0
                 raise ValueError("文档解压后过大")
     pieces = []
     if suffix == ".pdf":
-        from pypdf import PdfReader
-        reader = PdfReader(io.BytesIO(content), strict=True)
-        if reader.is_encrypted or len(reader.pages) > 300:
-            raise ValueError("请上传未加密且不超过 300 页的 PDF")
-        for n, page in enumerate(reader.pages, 1):
+        for n, page in enumerate(open_pdf(content).pages, 1):
             pieces.append((f"第 {n} 页", page.extract_text() or ""))
     elif suffix == ".docx":
         from docx import Document

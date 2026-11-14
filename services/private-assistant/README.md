@@ -19,7 +19,7 @@
 | 人脸 | 本地 YuNet / SFace 128维；免账号唯一识别，旧一对一接口兼容；模板留在每用户私有库 |
 | 前端 | 我的知识、图谱、引用预览、偏好、账号安全；沿用米白与天蓝主题 |
 
-上传支持 PDF、DOCX、XLSX、TXT、MD。扫描件没有可提取文字时明确提示先做 OCR；本轮没有接入付费 OCR。
+普通上传支持 PDF、DOCX、XLSX、TXT、MD。启用 DeepSeek 工具后，可用独立扫描件入口选择 PDF、PNG、JPEG，选择页面、核对识别文字再发布私有资料版本。
 
 课堂演示可使用[10份关联台灯资料](examples/lamp-showcase/README.md)，包含五格式构建、24题本地验收、带来源的实际建图/回答，以及明确的未批准变更与缺失阈值案例。运行事实和本轮边界见[展示完善记录](../../docs/STAGE2_SHOWCASE.md)，原两份最小样例继续保留。
 
@@ -41,6 +41,23 @@ PostgreSQL现在使用Docker原生命名卷，数据留在Docker自己的Linux�
 本机新版前端为 `http://127.0.0.1:5181/#/ai/knowledge`，后端 8089，私有服务 8091，专用 PostgreSQL 55432。已有 5180 / 8088 实例独立保留；启动脚本遇到端口占用只报告，不终止其他程序。
 
 2026-11-08维护者明确取消验证阶段20次上限，默认`PRIVATE_LLM_LIMIT=0`，表示无本地次数上限；正整数是部署者可选限额，负数无效。所有请求仍写入原日志，不清空旧记录。11月10日本轮验证按新授权新增5次真实生成，累计40→45；本人后续问答或已允许的建图按模型平台额度使用，处理同意和原权限保持。验证脚本默认0为无限，旧有限签名任务仍按原授权上限执行。[交互与策略变更](../../docs/INTERACTION_REFINEMENT.md)保留早期记录。
+
+## 可选的 DeepSeek 应用工具
+
+默认关闭。需要联网试用时，在启动环境设置 `PRIVATE_DEEPSEEK_TOOLS_ENABLED=1`，并通过助手进程的 `PRIVATE_DEEPSEEK_TOOLS_KEY` 或运行目录内的 `deepseek-tools-secret.clixml` 提供独立 DeepSeek API Key。Windows 启动器读取后者的 `ApiKey` SecureString，仅由启动它的同一 Windows 用户在本机解密。保留原模型配置。已经运行的进程按正常流程重启后读取新配置。
+
+可在 Windows PowerShell 当前用户会话中创建独立凭据文件。先把示例路径换成自己的运行目录，如已有凭据文件则沿用。
+
+```powershell
+$toolsCredential = 'D:\AI-MES-Stage2\deepseek-tools-secret.clixml'
+if (-not (Test-Path -LiteralPath $toolsCredential)) {
+    @{ ApiKey = (Read-Host 'DeepSeek API Key' -AsSecureString) } | Export-Clixml -LiteralPath $toolsCredential
+}
+$env:PRIVATE_DEEPSEEK_TOOLS_ENABLED = '1'
+.\scripts\start-stage2.ps1
+```
+
+设置 `PRIVATE_DEEPSEEK_FETCH_HOSTS` 可用逗号分隔的域名配置应用内网页读取。PDF 扫描需确保 `pdftoppm` 在助手的 PATH。官方 `deepseek-flash` 可独立设置 `PRIVATE_DEEPSEEK_SAFETY=1`。实际工具调用可能计费，课堂离线预检使用 `-NoCloud`。 [采用范围、价格和验收方法](../../docs/DEEPSEEK_APPLICATION_20261114.md)
 
 ## 新机器准备
 

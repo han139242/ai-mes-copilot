@@ -3348,6 +3348,9 @@ public class AiServiceImpl implements AiService {
     private AiResponse parseUpstreamResponse(String responseText) {
         try {
             JsonNode root = objectMapper.readTree(responseText);
+            if ("content_filter".equals(root.path("choices").path(0).path("finish_reason").asText())) {
+                return parseModelContent("模型内容审核未通过，本次未生成回答", properties.getModel());
+            }
             String content = extractContent(root);
             if (!StringUtils.hasText(content)) {
                 throw new AiServiceException("AI服务未返回有效内容");

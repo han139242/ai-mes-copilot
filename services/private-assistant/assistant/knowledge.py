@@ -1,5 +1,6 @@
 import base64
 import hashlib
+import io
 import json
 import logging
 import os
@@ -18,6 +19,8 @@ from .parsing import parse_file
 from .vectors import VectorIndex
 from .ontology import graph_profile, has_query_evidence, identifier_tokens, is_comparison, missing_identifiers
 from .job_policy import load_policy, save_policy, assert_sources
+from .deepseek import ToolFailure, recognize, require_confirmation, speak
+from .scans import image_for_ocr, inspect_scan, pdf_renderer, render_pdf_pages, reviewed_pieces, scan_payload, selected_pages
 
 WORKERS = BoundedSemaphore(1)
 logger = logging.getLogger(__name__)
@@ -41,6 +44,7 @@ class Knowledge:
         return {"documents": docs, "jobs": jobs, **state,
                 "ragReady": any(d["vector_version"]>0 and d["active_hash"] for d in docs),
                 "graphReady": self.graph_ready(state),
+                "ocrAvailable": self.s.tools_ready,
                 "modelConfigured": all((self.s.llm_url, self.s.llm_key, self.s.llm_model))}
 
     def queue(self, db):
@@ -95,52 +99,168 @@ class Knowledge:
         if validation_policy is not None and validation_policy["sources"].get(name) != digest:
             raise ValueError("文件不在本轮批准的合成资料清单中")
         with self.dbs.locked(uid) as db:
-            previous = None
-            if document_id:
-                previous = db.execute("SELECT * FROM documents WHERE id=%s AND NOT deleted",
-                                      (document_id,)).fetchone()
-                if not previous:
-                    raise ValueError("资料不存在或已删除")
-            elif db.execute("SELECT count(*) AS n FROM documents WHERE NOT deleted").fetchone()["n"] >= 50:
-                raise ValueError("每个私有库最多保存 50 份资料，请先整理已有文件")
-            if previous and previous["hash"] == digest:
-                original = Path(previous["path"]).resolve()
-                if not original.is_relative_to(self.s.user_dir(uid).resolve()):
-                    raise ValueError("非法文件路径")
-                if not original.exists():
-                    # A same-content replacement repairs a lost original without touching an existing file.
-                    original.parent.mkdir(parents=True, exist_ok=True)
-                    with original.open("xb") as stream:
-                        stream.write(content)
-                    return {"id": document_id, "version": previous["version"], "unchanged": True, "restored": True}
-                if hashlib.sha256(original.read_bytes()).hexdigest() == digest:
-                    return {"id": document_id, "version": previous["version"], "unchanged": True}
-                # Preserve the damaged copy, publishing the verified upload as a new version below.
-            usage = db.execute("SELECT coalesce(sum(size_bytes),0) AS n FROM document_versions").fetchone()["n"]
-            if usage+len(content) > 128*1024*1024:
-                raise ValueError("私有原件及版本已达到 128 MB 配额，请整理后再上传")
-            document_id = document_id or uuid.uuid4().hex
-            version = previous["version"]+1 if previous else 1
-            path = self.s.user_dir(uid)/"files"/document_id/f"v{version}-{uuid.uuid4().hex[:12]}"
-            path.parent.mkdir(parents=True,exist_ok=True)
-            with path.open("xb") as stream:
-                stream.write(content)
-            db.execute("""INSERT INTO documents(id,name,version,hash,path,pieces)
-                VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT(id) DO UPDATE SET
-                name=excluded.name,version=excluded.version,hash=excluded.hash,path=excluded.path,
-                pieces=excluded.pieces,vector_state='queued',vector_error=null,graph_state='outdated'""",
-                (document_id,name,version,digest,str(path),Jsonb(pieces)))
-            db.execute("""INSERT INTO document_versions(document_id,version,name,hash,path,size_bytes)
-                VALUES(%s,%s,%s,%s,%s,%s)""", (document_id,version,name,digest,str(path),len(content)))
-            # The last verified version remains available until this candidate is indexed atomically.
-            db.execute("UPDATE private_state SET revision=revision+1,blocked=true WHERE id=1")
-            db.execute("UPDATE history SET valid=false WHERE valid")
-            job = self.queue(db)
-            if validation_policy is not None:
-                # A partial import may survive a crash. Bind every committed
-                # upload job, before exposing it to the resident worker.
-                save_policy(self.s, uid, job, validation_policy["sources"], validation_policy["ceiling"])
+            return self._publish_upload(db, uid, name, content, pieces, digest, document_id, validation_policy)
+
+    @staticmethod
+    def _previous_document(db, document_id):
+        if document_id:
+            previous = db.execute("SELECT * FROM documents WHERE id=%s AND NOT deleted", (document_id,)).fetchone()
+            if not previous:
+                raise ValueError("资料不存在或已删除")
+            return previous
+        if db.execute("SELECT count(*) AS n FROM documents WHERE NOT deleted").fetchone()["n"] >= 50:
+            raise ValueError("每个私有库最多保存 50 份资料，请先整理已有文件")
+        return None
+
+    def _publish_upload(self, db, uid, name, content, pieces, digest, document_id, validation_policy=None):
+        previous = self._previous_document(db, document_id)
+        ocr_pieces = any(piece.get("method") == "deepseek-ocr" for piece in pieces)
+        # A reviewed transcription can change without changing the original bytes.
+        if previous and previous["hash"] == digest and (not ocr_pieces or previous["pieces"] == pieces):
+            original = Path(previous["path"]).resolve()
+            if not original.is_relative_to(self.s.user_dir(uid).resolve()):
+                raise ValueError("非法文件路径")
+            if not original.exists():
+                # A same-content replacement repairs a lost original without touching an existing file.
+                original.parent.mkdir(parents=True, exist_ok=True)
+                with original.open("xb") as stream:
+                    stream.write(content)
+                return {"id": document_id, "version": previous["version"], "unchanged": True, "restored": True}
+            if hashlib.sha256(original.read_bytes()).hexdigest() == digest:
+                return {"id": document_id, "version": previous["version"], "unchanged": True}
+            # Preserve the damaged copy, publishing the verified upload as a new version below.
+        usage = db.execute("SELECT coalesce(sum(size_bytes),0) AS n FROM document_versions").fetchone()["n"]
+        if usage+len(content) > 128*1024*1024:
+            raise ValueError("私有原件及版本已达到 128 MB 配额，请整理后再上传")
+        document_id = document_id or uuid.uuid4().hex
+        version = previous["version"]+1 if previous else 1
+        path = self.s.user_dir(uid)/"files"/document_id/f"v{version}-{uuid.uuid4().hex[:12]}"
+        path.parent.mkdir(parents=True,exist_ok=True)
+        with path.open("xb") as stream:
+            stream.write(content)
+        db.execute("""INSERT INTO documents(id,name,version,hash,path,pieces)
+            VALUES(%s,%s,%s,%s,%s,%s) ON CONFLICT(id) DO UPDATE SET
+            name=excluded.name,version=excluded.version,hash=excluded.hash,path=excluded.path,
+            pieces=excluded.pieces,vector_state='queued',vector_error=null,graph_state='outdated'""",
+            (document_id,name,version,digest,str(path),Jsonb(pieces)))
+        db.execute("""INSERT INTO document_versions(document_id,version,name,hash,path,size_bytes,extracted_pieces)
+            VALUES(%s,%s,%s,%s,%s,%s,%s)""", (document_id,version,name,digest,str(path),len(content),
+            Jsonb(pieces) if ocr_pieces else None))
+        # The last verified version remains available until this candidate is indexed atomically.
+        db.execute("UPDATE private_state SET revision=revision+1,blocked=true WHERE id=1")
+        db.execute("UPDATE history SET valid=false WHERE valid")
+        job = self.queue(db)
+        if validation_policy is not None:
+            # A partial import may survive a crash. Bind every committed
+            # upload job, before exposing it to the resident worker.
+            save_policy(self.s, uid, job, validation_policy["sources"], validation_policy["ceiling"])
         return {"id": document_id, "version": version, "jobId": job}
+
+    def prepare_scan(self, uid, name, content, document_id=None, base_version=None):
+        if not self.s.tools_ready:
+            raise ValueError("当前未配置云 OCR")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError("请选择有效扫描件")
+        name = re.split(r"[/\\]", name)[-1][-160:]
+        reader, native, _ = inspect_scan(name, content, self.s.max_file_bytes)
+        if reader is not None:
+            pdf_renderer()
+        digest = hashlib.sha256(content).hexdigest()
+        review_id = uuid.uuid4().hex
+        with self.dbs.locked(uid) as db:
+            previous = self._previous_document(db, document_id)
+            if previous and (type(base_version) is not int or previous["version"] != base_version):
+                raise ValueError("资料版本已变化，请刷新列表后再更新")
+            db.execute("DELETE FROM ocr_reviews WHERE expires <= now()")
+            if db.execute("SELECT count(*) AS n FROM ocr_reviews WHERE state<>'published'").fetchone()["n"] >= 4:
+                raise ValueError("请先完成或关闭已有的扫描件识别")
+            db.execute("""INSERT INTO ocr_reviews(id,name,hash,document_id,base_version,pages)
+                VALUES(%s,%s,%s,%s,%s,%s)""",
+                (review_id, name, digest, document_id, base_version if previous else None, Jsonb([])))
+        return {"reviewId": review_id, "name": name, "pageCount": len(native),
+                "suggested": [page for page, text in native.items() if not text]}
+
+    @staticmethod
+    def _scan_ticket(db, review_id, content):
+        if not isinstance(review_id, str) or not re.fullmatch(r"[0-9a-f]{32}", review_id):
+            raise ValueError("识别预览编号无效")
+        row = db.execute("SELECT * FROM ocr_reviews WHERE id=%s AND expires > now()", (review_id,)).fetchone()
+        if not row or not content or len(content) > 8 * 1024 * 1024 or hashlib.sha256(content).hexdigest() != row["hash"]:
+            raise ValueError("识别预览已过期或原件不匹配，请重新选择文件")
+        return row
+
+    def start_scan(self, uid, review_id, content, selected, confirmed):
+        require_confirmation(self.s, confirmed)
+        with self.dbs.locked(uid) as db:
+            row = self._scan_ticket(db, review_id, content)
+            previous = self._previous_document(db, row["document_id"])
+            if previous and previous["version"] != row["base_version"]:
+                raise ValueError("资料已更新，请重新选择当前版本")
+            if row["state"] != "prepared":
+                raise ValueError("该扫描预览正在处理或已经识别")
+            db.execute("UPDATE ocr_reviews SET state='recognizing' WHERE id=%s", (review_id,))
+        try:
+            reader, native, _ = inspect_scan(row["name"], content, self.s.max_file_bytes)
+            pages = selected_pages(native, selected)
+            payload, name, media_type = scan_payload(content, pages, reader is not None, self.s.max_file_bytes)
+            with self.dbs.locked(uid) as db:
+                current = self._scan_ticket(db, review_id, content)
+                if current["state"] != "recognizing":
+                    raise ValueError("识别预览已关闭")
+                previous = self._previous_document(db, row["document_id"])
+                if previous and previous["version"] != row["base_version"]:
+                    raise ValueError("资料已更新，请重新选择当前版本")
+            output = recognize(self.s, payload, name, media_type, len(pages))
+            if not any(output):
+                raise ValueError("未识别到可核对的文字，请检查清晰度后再试")
+            if sum(map(len, output)) > self.s.max_text_chars:
+                raise ValueError("识别文字超过 24 万字符，请拆分后上传")
+            review = [{"page": page, "text": text} for page, text in zip(pages, output)]
+            with self.dbs.locked(uid) as db:
+                saved = db.execute("""UPDATE ocr_reviews SET state='reviewed',pages=%s
+                    WHERE id=%s AND state='recognizing' AND expires > now() RETURNING id""",
+                    (Jsonb(pages), review_id)).fetchone()
+                if not saved:
+                    raise ValueError("识别预览已过期，请重新识别")
+        except Exception:
+            with self.dbs.connect(uid) as db:
+                db.execute("UPDATE ocr_reviews SET state='prepared' WHERE id=%s AND state='recognizing'", (review_id,))
+            raise
+        return {"reviewId": review_id, "name": row["name"], "pages": review,
+                "nativePages": sum(bool(text) for page, text in native.items() if page not in pages)}
+
+    def discard_scan(self, uid, review_id):
+        if not isinstance(review_id, str) or not re.fullmatch(r"[0-9a-f]{32}", review_id):
+            raise ValueError("识别预览编号无效")
+        with self.dbs.locked(uid) as db:
+            db.execute("DELETE FROM ocr_reviews WHERE id=%s AND state<>'published'", (review_id,))
+        return {"discarded": True}
+
+    def publish_scan(self, uid, review_id, content, edited, confirmed):
+        if confirmed is not True:
+            raise ValueError("请核对扫描件识别结果后再入库")
+        with self.dbs.connect(uid) as db:
+            row = self._scan_ticket(db, review_id, content)
+        if row["state"] == "published":
+            return row["receipt"]
+        if row["state"] != "reviewed":
+            raise ValueError("请先完成扫描识别")
+        _, native, _ = inspect_scan(row["name"], content, self.s.max_file_bytes)
+        pages = selected_pages(native, row["pages"])
+        with self.dbs.locked(uid) as db:
+            current = self._scan_ticket(db, review_id, content)
+            if current["state"] == "published":
+                return current["receipt"]
+            if current["state"] != "reviewed":
+                raise ValueError("识别预览已提交或过期")
+            previous = self._previous_document(db, row["document_id"])
+            if previous and previous["version"] != row["base_version"]:
+                raise ValueError("资料已更新，请基于当前版本重新识别")
+            previous_pieces = previous["pieces"] if previous and previous["hash"] == row["hash"] else ()
+            pieces = reviewed_pieces(native, pages, edited, self.s.max_text_chars, previous_pieces)
+            result = self._publish_upload(db, uid, row["name"], content, pieces, row["hash"], row["document_id"])
+            db.execute("UPDATE ocr_reviews SET state='published',receipt=%s WHERE id=%s", (Jsonb(result), review_id))
+            return result
 
     def delete(self, uid, document_id):
         with self.dbs.locked(uid) as db:
@@ -191,14 +311,59 @@ class Knowledge:
 
     def preview(self, uid, document_id, version=None, locator=None):
         row = self.version(uid,document_id,version)
-        pieces = row["pieces"] if row["version"]==row["current_version"] else parse_file(
-            row["name"],row["resolved_path"].read_bytes(),self.s.max_file_bytes,self.s.max_text_chars)
+        if row["version"] == row["current_version"]:
+            pieces = row["pieces"]
+        elif row.get("extracted_pieces") is not None:
+            pieces = row["extracted_pieces"]
+        else:
+            pieces = parse_file(row["name"],row["resolved_path"].read_bytes(),self.s.max_file_bytes,self.s.max_text_chars)
         if locator:
             pieces = [piece for piece in pieces if piece["locator"]==locator]
         publication = "active" if row["version"]==row["vector_version"] else (
             "pending" if row["version"]==row["current_version"] else "historical")
         return {"id":document_id,"name":row["name"],"version":row["version"],"hash":row["hash"],
                 "active":publication=="active","publication":publication,"pieces":pieces[:200],"total":len(pieces)}
+
+    def scan_page(self, uid, document_id, version, locator):
+        row = self.version(uid, document_id, version)
+        piece = next((p for p in row.get("extracted_pieces") or []
+                      if p.get("method") == "deepseek-ocr" and p.get("locator") == locator), None)
+        if not piece:
+            raise ValueError("这条引用没有可查看的扫描原页")
+        content = row["resolved_path"].read_bytes()
+        if hashlib.sha256(content).hexdigest() != row["hash"]:
+            raise ValueError("本机原件校验失败")
+        reader, _, _ = inspect_scan(row["name"], content, self.s.max_file_bytes, read_text=False)
+        if reader is not None:
+            page, = render_pdf_pages(content, [piece["page"]])
+        else:
+            with image_for_ocr(content) as image:
+                stream = io.BytesIO()
+                image.save(stream, "PNG")
+                page = stream.getvalue()
+        with self.dbs.connect(uid) as db:
+            if not db.execute("SELECT 1 FROM documents WHERE id=%s AND NOT deleted", (document_id,)).fetchone():
+                raise ValueError("资料已删除，请重新打开引用")
+        return {"type": "image/png", "content": base64.b64encode(page).decode("ascii")}
+
+    def read_answer(self, uid, history_id, visible_text, confirmed):
+        require_confirmation(self.s, confirmed)
+        if type(history_id) is not int:
+            raise ValueError("请选择一条有效的知识答复")
+        @contextmanager
+        def authorize():
+            with self.dbs.locked(uid) as db:
+                row = db.execute("""SELECT h.response FROM history h JOIN private_state s ON s.id=1
+                    WHERE h.id=%s AND h.valid AND h.revision=s.answer_revision AND s.model_consent""",
+                    (history_id,)).fetchone()
+                if not row or row["response"].get("filtered"):
+                    raise ToolFailure("答复已变化或未允许云端处理资料，请重新提问或检查偏好设置")
+                if str(row["response"].get("answer", "")).strip()[:600] != visible_text:
+                    raise ToolFailure("朗读内容已变化，请重新打开答复")
+                yield
+        with authorize():
+            pass
+        return speak(self.s, visible_text, confirmed, before_send=authorize)
 
     def preferences(self, uid, payload):
         with self.dbs.locked(uid) as db:
@@ -524,10 +689,11 @@ class Knowledge:
                                   if key in {"route","pageTitle","product","recordNumber"}},authorize=authorize)
             if citations and coverage_notice:
                 generated["notice"] = "。".join(filter(None, [coverage_notice, generated["notice"]]))
-        result = {**generated,"citations":citations,"mode":actual,"requestedMode":mode,"routeReason":reason,
+        filtered = generated.get("filtered", False)
+        result = {**generated,"citations":[] if filtered else citations,"mode":actual,"requestedMode":mode,"routeReason":reason,
                   "missingIdentifiers":missing,
                   "generation":state["generation"],"revision":state["answer_revision"],"sourceRevision":state["revision"],
-                  "graphEvidence":{key:graph_data.get(key,[]) for key in ("entities","relationships")}}
+                  "graphEvidence":{} if filtered else {key:graph_data.get(key,[]) for key in ("entities","relationships")}}
         return self.remember(uid,question,session,state,result)
 
     def remember(self, uid, question, session, state, result):

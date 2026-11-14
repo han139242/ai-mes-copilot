@@ -19,6 +19,10 @@
 | [openpyxl](https://foss.heptapod.net/openpyxl/openpyxl) | 3.1.5 | MIT | 工作表及单元格来源 |
 | [cryptography](https://github.com/pyca/cryptography) | 50.0.2 | Apache-2.0 或 BSD-3-Clause | 人脸特征附件加密 |
 | [HTTPX](https://github.com/encode/httpx) | 0.28.1 | BSD-3-Clause | 有界、无隐式重试的模型请求 |
+| [Pillow](https://github.com/python-pillow/Pillow) | 13.0.0 | MIT-CMU | 扫描图片归一化与页图输出 |
+| [websockets](https://github.com/python-websockets/websockets) | 17.4 | BSD-3-Clause | DeepSeek 语音合成连接与完成帧 |
+
+PDF 扫描件渲染调用部署机器已安装的 [Poppler](https://poppler.freedesktop.org/) `pdftoppm`。仓库和应用包不附带其可执行文件。DeepSeek 应用能力通过官方 API 接入，调用及外发范围见[调研说明](../../docs/DEEPSEEK_APPLICATION_20261114.md)。
 
 数据库镜像基于 [PostgreSQL](https://www.postgresql.org/about/licence/)，安装 [pgvector](https://github.com/pgvector/pgvector) 与 [Apache AGE](https://github.com/apache/age)。构建固定的提交和镜像摘要保存在 [Dockerfile](deploy/Dockerfile)，数据库与发行物自带许可不作更改。
 

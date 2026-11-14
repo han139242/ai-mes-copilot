@@ -30,13 +30,19 @@ export async function privateAction(action, payload = {}, options = {}) {
 }
 
 export async function uploadPrivateFile(file, documentId, expectedAuthToken = getToken()) {
+  return privateFileRequest('/documents', file, documentId ? { documentId } : {}, { expectedAuthToken });
+}
+
+export async function privateFileRequest(path, file, fields = {}, options = {}) {
+  const { expectedAuthToken = getToken(), ...requestOptions } = options;
   const data = new FormData();
   data.append('file', file);
-  if (documentId) data.append('documentId', documentId);
-  const result = await request.post('/api/ai/private/documents', data, {
+  for (const [key, value] of Object.entries(fields)) data.append(key, value);
+  const result = await request.post('/api/ai/private' + path, data, {
     timeout: 60000,
     suppressErrorMessage: true,
     serviceDomain: 'private-assistant',
+    ...requestOptions,
     expectedAuthToken,
   });
   verifyOwner(expectedAuthToken);

@@ -13,6 +13,7 @@ import AiCandidatePicker from '@/components/ai/AiCandidatePicker.vue';
 import AiCreateOrderForm from '@/components/ai/AiCreateOrderForm.vue';
 import AiProductionFlowForm from '@/components/ai/AiProductionFlowForm.vue';
 import AiBusinessActionForm from '@/components/ai/AiBusinessActionForm.vue';
+import DeepSeekToolsDialog from '@/components/ai/DeepSeekToolsDialog.vue';
 import { businessActionGroups, businessActionPreviewGroups } from '@/utils/ai-business-flow';
 import PieceInspectionDialog from '@/components/business/PieceInspectionDialog.vue';
 import { formatAiAnswer } from '@/utils/ai-results';
@@ -82,6 +83,23 @@ watch(
   { flush: 'post' },
 );
 const question = activeQuestion;
+const toolsOpen = ref(false);
+const toolsMode = ref('web');
+const spokenAnswer = ref('');
+function openTools(kind, text = '') {
+  spokenAnswer.value = text;
+  toolsMode.value = kind;
+  toolsOpen.value = true;
+}
+function onVoiceDraft(text) {
+  const combined = [question.value.trim(), text].filter(Boolean).join('\n');
+  if (combined.length > 500) {
+    ElMessage.warning('加入这段文字会超过 500 字，请先精简现有问题或转写内容');
+    return false;
+  }
+  replaceQuestion(combined);
+  return true;
+}
 const sidebarSection = ref('actions');
 const actionSearch = ref('');
 const conversationActionPending = ref('');
@@ -1355,6 +1373,8 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="msg-body">
                     <p class="msg-text">{{ answerText(message) }}</p>
+                    <button v-if="!previewMode && answerText(message)" class="text-button" type="button"
+                      @click="openTools('read', answerText(message))">朗读答复</button>
                     <AiResultBlocks v-if="message.blocks?.length" :blocks="message.blocks" />
                     <!-- 有业务数据没读到时直接说明缺哪一项，避免用户把不完整的结论当成全量结论。 -->
                     <p v-if="message.dataGaps?.length" class="msg-data-gaps">
@@ -1559,11 +1579,16 @@ onBeforeUnmount(() => {
             </div>
           </div>
           <p class="compose-hint">
+            <button v-if="!previewMode" type="button" class="text-button" @click="openTools('web')">公开资料</button>
+            <button v-if="!previewMode" type="button" class="text-button" @click="openTools('voice')">语音输入</button>
             <span>Enter 发送 / Shift+Enter 换行</span>
           </p>
         </footer>
       </section>
     </div>
+
+    <DeepSeekToolsDialog v-model="toolsOpen" :mode="toolsMode" :answer="spokenAnswer"
+      :conversation="String(activeConversationId || '')" :apply-transcript="onVoiceDraft" />
 
     <!-- 没带单号的办理按钮弹这里：先列候选，用户挑一张再走预览。 -->
     <AiCandidatePicker

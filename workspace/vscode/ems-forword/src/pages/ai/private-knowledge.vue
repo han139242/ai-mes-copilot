@@ -7,6 +7,8 @@ import AppIcon from '@/components/common/AppIcon.vue';
 import GroundedAnswer from '@/components/ai/GroundedAnswer.vue';
 import KnowledgeGraph from '@/components/ai/KnowledgeGraph.vue';
 import ReviewNotebook from '@/components/ai/ReviewNotebook.vue';
+import ScanImportDialog from '@/components/ai/ScanImportDialog.vue';
+import DeepSeekToolsDialog from '@/components/ai/DeepSeekToolsDialog.vue';
 import { sliceUtf16 } from '@/utils/text';
 import { privateAction as dispatchPrivate, uploadPrivateFile } from '@/api/ai/private';
 import {
@@ -29,6 +31,12 @@ const tab = ref('ask'),
   filter = ref(''),
   sourcePanel = ref(null);
 const filesCollapsed = ref(true);
+const scanOpen = ref(false);
+const scanDocument = ref(null);
+const toolsOpen = ref(false);
+const toolsMode = ref('web');
+const spokenAnswer = ref('');
+const spokenHistoryId = ref(null);
 const notebook = ref(),
   notesOpened = ref(false);
 const expandedSources = ref(new Set());
@@ -417,13 +425,46 @@ async function download(doc) {
   }
 }
 let sourceSequence = 0;
+const scanPageUrl = ref('');
+const scanPageLoading = ref(false);
+const scanPageError = ref('');
+const scanPageType = ref('');
+function clearScanPage() {
+  if (scanPageUrl.value) URL.revokeObjectURL(scanPageUrl.value);
+  scanPageUrl.value = '';
+  scanPageLoading.value = false;
+  scanPageError.value = '';
+  scanPageType.value = '';
+}
+async function loadScanPage(piece) {
+  clearScanPage();
+  const sequence = ++sourceSequence;
+  const source = sourcePanel.value;
+  scanPageLoading.value = true;
+  try {
+    const result = await privateAction('scans.page', {
+      documentId: source.id, version: source.version, locator: piece.locator,
+    });
+    if (sequence !== sourceSequence || !mounted) return;
+    if (!['application/pdf', 'image/png', 'image/jpeg'].includes(result.type)) throw new Error();
+    const bytes = Uint8Array.from(atob(result.content), (char) => char.charCodeAt(0));
+    scanPageType.value = result.type;
+    scanPageUrl.value = URL.createObjectURL(new Blob([bytes], { type: result.type }));
+  } catch (failure) {
+    if (sequence === sourceSequence && mounted) scanPageError.value = failureText(failure, '扫描原页暂时无法打开。');
+  } finally {
+    if (sequence === sourceSequence) scanPageLoading.value = false;
+  }
+}
 function closeSource() {
   sourceSequence += 1;
+  clearScanPage();
   sourcePanel.value = null;
   sourceLoading.value = false;
   sourceError.value = '';
 }
 async function openSource(source) {
+  clearScanPage();
   const sequence = ++sourceSequence;
   sourceLoading.value = true;
   sourceError.value = '';
@@ -441,6 +482,28 @@ async function openSource(source) {
   } finally {
     if (sequence === sourceSequence) sourceLoading.value = false;
   }
+}
+function openScan(doc = null) {
+  scanDocument.value = doc;
+  scanOpen.value = true;
+}
+function openTools(mode, message = null) {
+  toolsMode.value = mode;
+  spokenAnswer.value = message?.answer || '';
+  spokenHistoryId.value = message ? Number(message.historyId) : null;
+  toolsOpen.value = true;
+}
+async function onScanPublished(value) {
+  ElMessage.success(value.unchanged ? '已保留当前资料版本' : '扫描件已入库，正在建立检索索引');
+  await refresh(true);
+}
+function onVoiceDraft(text) {
+  if (question.value.trim().length + text.length + (question.value.trim() ? 1 : 0) > 1000) {
+    ElMessage.warning('加入这段文字会超过 1000 字，请先精简现有问题或转写内容');
+    return false;
+  }
+  fillQuestion([question.value.trim(), text].filter(Boolean).join('\n'));
+  return true;
 }
 async function retryJob(job) {
   try {
@@ -686,8 +749,10 @@ onBeforeUnmount(() => {
         preview ? '登录后使用' : stageLabel
       }}</span>
       <div class="knowledge-toolbar-actions">
-        <el-button @click="toBusiness()"><AppIcon name="bot" :size="16" />业务助手</el-button
-        ><el-button
+        <el-button @click="toBusiness()"><AppIcon name="bot" :size="16" />业务助手</el-button>
+        <el-button :disabled="preview || !service || uploading" @click="openScan()">
+          <AppIcon name="scan" :size="16" />扫描件识别
+        </el-button><el-button
           type="primary"
           :disabled="preview || uploading || !service || !!serviceError"
           :loading="uploading"
@@ -780,6 +845,8 @@ onBeforeUnmount(() => {
               <div class="file-actions">
                 <button type="button" @click="download(doc)">下载</button
                 ><button type="button" :disabled="uploading" @click="chooseReplacement(doc)">更新版本</button
+                ><button v-if="/\.(pdf|png|jpe?g)$/i.test(doc.name) && service?.ocrAvailable" type="button"
+                  :disabled="uploading" @click="openScan(doc)">用扫描件更新</button
                 ><button type="button" class="danger-text" @click="deleteDocument(doc)">删除</button>
               </div>
             </article>
@@ -973,6 +1040,8 @@ onBeforeUnmount(() => {
                 </button>
               </details>
               <div class="message-next-actions">
+                <button v-if="!preview && service?.model_consent && message.historyId && message.answer && message.valid !== false && !message.filtered"
+                  class="text-action" type="button" @click="openTools('read', message)">朗读答复</button>
                 <button
                   v-if="message.historyId && message.citations?.length && message.valid !== false"
                   type="button"
@@ -1033,6 +1102,8 @@ onBeforeUnmount(() => {
             </button>
           </div>
           <div class="composer-note">
+            <button v-if="!preview && service" type="button" class="text-action" @click="openTools('web')">公开资料</button>
+            <button v-if="!preview && service" type="button" class="text-action" @click="openTools('voice')">语音输入</button>
             <button type="button" class="generation-entry" :title="generation.detail" @click="tab = 'settings'">
               <AppIcon :name="generation.available ? 'bot' : 'search'" :size="13" />{{ generation.label }}
               <AppIcon name="chevron" :size="12" />
@@ -1063,8 +1134,17 @@ onBeforeUnmount(() => {
         <div class="source-pieces">
           <section v-for="(piece, index) in sourcePanel.pieces" :key="piece.locator + '-' + index">
             <h3>{{ piece.locator }}</h3>
+            <p v-if="piece.method === 'deepseek-ocr'" class="scan-source-label">经核对的 OCR 文字</p>
             <p>{{ piece.text }}</p>
+            <button v-if="piece.method === 'deepseek-ocr'" type="button" class="text-action"
+              :disabled="scanPageLoading" @click="loadScanPage(piece)">查看扫描原页</button>
           </section>
+          <p v-if="scanPageLoading" role="status">正在读取扫描原页…</p>
+          <p v-if="scanPageError" class="source-error" role="alert">{{ scanPageError }}</p>
+          <template v-if="scanPageUrl">
+            <img v-if="scanPageType.startsWith('image/')" class="scan-source-image" :src="scanPageUrl" alt="引用对应的原始扫描图像" />
+            <a :href="scanPageUrl" target="_blank" rel="noopener noreferrer">打开扫描原页 ↗</a>
+          </template>
         </div>
         <footer v-if="sourcePanel.pieces?.length">
           <span v-if="sourcePanel.total > 200">当前显示前 200 个位置。</span
@@ -1072,6 +1152,11 @@ onBeforeUnmount(() => {
         </footer>
       </aside>
     </div>
+
+    <ScanImportDialog v-model="scanOpen" :document="scanDocument" :available="Boolean(service?.ocrAvailable)"
+      @published="onScanPublished" />
+    <DeepSeekToolsDialog v-model="toolsOpen" :mode="toolsMode" :conversation="session" :answer="spokenAnswer"
+      :history-id="spokenHistoryId" :apply-transcript="onVoiceDraft" />
 
     <ReviewNotebook
       v-if="notesOpened"

@@ -38,7 +38,14 @@ foreach($entry in $services) {
     $arguments=@('-NoProfile','-ExecutionPolicy','Bypass','-File',('"'+$script+'"'),'-Service',$entry,'-RuntimeDirectory',('"'+$RuntimeDirectory+'"'))
     if($NoCloud) { $arguments+='-NoCloud' }
     $stamp=Get-Date -Format 'yyyyMMdd-HHmmss'
-    $child=Start-Process -FilePath $powershell -ArgumentList $arguments -WorkingDirectory (Split-Path -Parent $PSScriptRoot) -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logs ($entry+'-'+$stamp+'.log')) -RedirectStandardError (Join-Path $logs ($entry+'-'+$stamp+'.err')) -PassThru
+    $toolsKey=$env:PRIVATE_DEEPSEEK_TOOLS_KEY
+    if($entry -ne 'assistant' -or $NoCloud) { $env:PRIVATE_DEEPSEEK_TOOLS_KEY='' }
+    try {
+        $child=Start-Process -FilePath $powershell -ArgumentList $arguments -WorkingDirectory (Split-Path -Parent $PSScriptRoot) -WindowStyle Hidden -RedirectStandardOutput (Join-Path $logs ($entry+'-'+$stamp+'.log')) -RedirectStandardError (Join-Path $logs ($entry+'-'+$stamp+'.err')) -PassThru
+    } finally {
+        $env:PRIVATE_DEEPSEEK_TOOLS_KEY=$toolsKey
+        $toolsKey=$null
+    }
     [pscustomobject]@{Service=$entry;ParentProcessId=$child.Id;Port=$port;StartedUtc=[DateTime]::UtcNow.ToString('o')} | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $RuntimeDirectory ($entry+'-process.json')) -Encoding UTF8
     Write-Output ($entry + ' starting on 127.0.0.1:' + $port)
 }

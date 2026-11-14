@@ -92,7 +92,7 @@ flowchart LR
 - 文档向量按来源片段取约 240 字符、重叠 40 字符；图谱输入使用独立的 tokenizer 限长与合并逻辑，两种切块不能混为一谈。
 - 文本由本地模型变成 512 维向量，写入 `knowledge_chunks.embedding`。原件、哈希、版本和位置共同支持回读。
 - 更新先创建候选版本，索引成功且任务仍有效后才发布。失败继续使用已发布旧版，并说明所用版本。
-- 无文字扫描 PDF 提示先做 OCR，当前解析入口未接入自动 OCR 服务。
+- 扫描件走独立的识别与校对入口。用户选择可外发的页面，服务本机渲染后送 OCR，核对文字后才进入同一索引队列。引用保留原始页码，可打开对应版本的扫描原页。
 
 ### 问答链路
 
@@ -161,6 +161,10 @@ flowchart LR
 
 人脸认证使用本地 YuNet / SFace 的 128 维特征，与文本 512 维分别管理。核验后回到原 JWT 与账号状态流程。动作检查不等同于专业活体防伪，真人验收范围见[人脸说明](FACE_AUTO_CAPTURE.md)。
 
+### 可选的 DeepSeek 应用工具
+
+在工作台和知识页分别提供公开资料、语音转写与答复朗读，扫描件从知识页入库。Spring Boot 复用 MES 权限和签名机制，Python 只调用指定的独立工具接口并记录调用结果。公开网页结果在工具窗口查阅，转写只填入草稿，知识答复朗读会复核本人答复和处理同意。扫描件校对后继续走私有文件版本和本地向量索引；图谱抽取按原有同意配置运行。能力选择、外发范围、价格和验证见[DeepSeek 接入调研](DEEPSEEK_APPLICATION_20261114.md)。
+
 ## 7. 技术取舍与验证
 
 | 取舍 | 原因和影响 |
@@ -183,6 +187,7 @@ flowchart LR
 | 身份网关 | [PrivateAssistantController.java](../workspace/idea/ems/src/main/java/com/neuedu/ems/controller/ai/PrivateAssistantController.java)、[PrivateAssistantClient.java](../workspace/idea/ems/src/main/java/com/neuedu/ems/service/impl/ai/PrivateAssistantClient.java) |
 | API、私有库与文件生命周期 | [app.py](../services/private-assistant/assistant/app.py)、[database.py](../services/private-assistant/assistant/database.py)、[knowledge.py](../services/private-assistant/assistant/knowledge.py) |
 | 解析与向量 | [parsing.py](../services/private-assistant/assistant/parsing.py)、[vectors.py](../services/private-assistant/assistant/vectors.py)、[chunking.py](../services/private-assistant/assistant/chunking.py) |
+| 扫描校对与独立工具 | [scans.py](../services/private-assistant/assistant/scans.py)、[deepseek.py](../services/private-assistant/assistant/deepseek.py) |
 | LightRAG 与领域约束 | [worker.py](../services/private-assistant/assistant/worker.py)、[ontology.py](../services/private-assistant/assistant/ontology.py) |
 | 回答与请求授权 | [answers.py](../services/private-assistant/assistant/answers.py)、[llm.py](../services/private-assistant/assistant/llm.py)、[job_policy.py](../services/private-assistant/assistant/job_policy.py) |
 | 工作单 | [review_notes.py](../services/private-assistant/assistant/review_notes.py)、[ReviewNotebook.vue](../workspace/vscode/ems-forword/src/components/ai/ReviewNotebook.vue) |

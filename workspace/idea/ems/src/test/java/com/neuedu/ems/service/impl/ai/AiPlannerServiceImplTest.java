@@ -125,6 +125,19 @@ class AiPlannerServiceImplTest {
         assertNull(planner.revise("物料还够不够用", List.of(Map.of("resource", "material"))));
     }
 
+    @Test
+    void upstreamContentFilterStopsPlanningWithoutInterpretingUnreviewedContent() {
+        var client = new OkHttpClient.Builder().addInterceptor(chain -> new Response.Builder()
+                .request(chain.request()).protocol(Protocol.HTTP_1_1).code(200).message("OK")
+                .body(ResponseBody.create("""
+                        {"choices":[{"finish_reason":"content_filter","message":{"content":"synthetic unreviewed output"}}]}
+                        """, JSON)).build()).build();
+        var planner = new AiPlannerServiceImpl(enabledProperties(), client, objectMapper);
+        var result = planner.plan("测试拒答", List.of());
+        assertEquals(AiPlan.MODE_CHAT, result.mode());
+        assertEquals("模型内容审核未通过，本次未生成回答", result.answer());
+    }
+
     private AiProperties enabledProperties() {
         AiProperties properties = new AiProperties();
         properties.setEnabled(true);

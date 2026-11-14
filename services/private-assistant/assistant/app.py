@@ -16,6 +16,7 @@ from .index_queue import IndexQueue
 from .model_proxy import proxy
 from .security import Journal
 from .review_notes import ReviewNotes
+from . import deepseek
 
 settings = Settings()
 databases = Databases(settings)
@@ -58,9 +59,23 @@ def health():
 
 
 def dispatch(uid, action, p):
+    if not isinstance(p, dict):
+        raise ValueError("请求参数无效")
     if type(uid) is int and uid == 0 and action in FaceIdentification.ACTIONS:
         return identification.dispatch(action, p)
+    if action == "tools.status":
+        return {"available": settings.tools_ready}
+    if action == "tools.search":
+        return deepseek.search(settings, p.get("query"), p.get("confirmed"))
+    if action == "tools.fetch":
+        return deepseek.fetch(settings, p.get("url"), p.get("confirmed"))
+    if action == "tools.asr":
+        return deepseek.transcribe(settings, base64.b64decode(p["content"], validate=True), p.get("confirmed"))
+    if action == "tools.tts":
+        return deepseek.speak(settings, p.get("text"), p.get("confirmed"))
     databases.ensure(uid)
+    if action == "tools.tts.private":
+        return knowledge.read_answer(uid, p.get("historyId"), p.get("text"), p.get("confirmed"))
     if action in {'notes.list','notes.add','notes.update','notes.delete'}:
         notes = ReviewNotes(databases)
         return {'notes.list': lambda: notes.listing(uid), 'notes.add': lambda: notes.add(uid,p),
@@ -72,6 +87,19 @@ def dispatch(uid, action, p):
         return knowledge.listing(uid)
     if action == "documents.upload":
         return knowledge.upload(uid, p["name"], base64.b64decode(p["content"], validate=True), p.get("documentId"))
+    if action == "scans.prepare":
+        return knowledge.prepare_scan(uid, p["name"], base64.b64decode(p["content"], validate=True),
+                                      p.get("documentId"), p.get("baseVersion"))
+    if action == "scans.recognize":
+        return knowledge.start_scan(uid, p.get("reviewId"), base64.b64decode(p["content"], validate=True),
+                                    p.get("pages"), p.get("confirmed"))
+    if action == "scans.publish":
+        return knowledge.publish_scan(uid, p.get("reviewId"), base64.b64decode(p["content"], validate=True),
+                                      p.get("pages"), p.get("confirmed"))
+    if action == "scans.discard":
+        return knowledge.discard_scan(uid, p.get("reviewId"))
+    if action == "scans.page":
+        return knowledge.scan_page(uid, p.get("documentId"), p.get("version"), p.get("locator"))
     if action == "documents.delete":
         return knowledge.delete(uid, p["documentId"])
     if action == "documents.download":
@@ -132,7 +160,7 @@ async def signed_dispatch(request: Request):
         if not (type(uid) is int and uid == 0 and message["action"] in FaceIdentification.ACTIONS):
             settings.user_dir(uid)
         data = await asyncio.to_thread(dispatch, uid, message["action"], message.get("payload", {}))
-        if message['action'] in {'documents.upload', 'documents.delete', 'jobs.retry',
+        if message['action'] in {'documents.upload', 'scans.publish', 'documents.delete', 'jobs.retry',
                                   'graph.build', 'preferences.save'}:
             app.state.index_queue.notify(uid)
         return {"ok": True, "data": jsonable_encoder(data)}

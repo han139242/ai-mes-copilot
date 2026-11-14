@@ -1,8 +1,25 @@
 import json
 from contextlib import ExitStack
+from urllib.parse import urlsplit
 import httpx
 from .config import Settings
 from .security import Journal
+
+
+class ContentFiltered(RuntimeError):
+    def __init__(self):
+        super().__init__("模型内容审核未通过，本次未生成回答")
+
+
+def _official_safety(settings, endpoint):
+    if not settings.deepseek_safety or settings.llm_model != "deepseek-flash":
+        return False
+    try:
+        url = urlsplit(endpoint)
+        return (url.scheme == "https" and url.hostname == "api.deepseek.com"
+                and url.port in (None, 443) and url.username is None and not url.query and not url.fragment)
+    except ValueError:
+        return False
 
 
 async def complete(settings: Settings, purpose: str, prompt: str, system_prompt=None, history_messages=None,
@@ -20,6 +37,10 @@ async def complete_messages(settings, purpose, messages, before_send=None):
     endpoint = settings.llm_url.rstrip("/")
     if not endpoint.endswith("/chat/completions"):
         endpoint += "/chat/completions" if endpoint.endswith("/v1") else "/v1/chat/completions"
+    body = {"model": settings.llm_model, "messages": messages, "temperature": 0.1,
+            "max_tokens": 3000, "stream": False}
+    if _official_safety(settings, endpoint):
+        body["safety_check"] = {"level": "high"}
     # The authorization guard runs after client preparation, immediately before accepting
     # an outbound attempt. Revocation can prevent new attempts, not recall one already sent.
     async with httpx.AsyncClient(timeout=120, follow_redirects=False) as client:
@@ -42,20 +63,27 @@ async def complete_messages(settings, purpose, messages, before_send=None):
             # No SDK retries. Every HTTP attempt reserves a durable budget slot first.
             response = await client.post(endpoint,
                 headers={"Authorization": f"Bearer {settings.llm_key}"},
-                json={"model": settings.llm_model, "messages": messages, "temperature": 0.1,
-                      "max_tokens": 3000, "stream": False}, extensions={"trace":sent})
+                json=body, extensions={"trace":sent})
             status = response.status_code
+            if status == 400 and "safety_check" in body and "content exists risk" in response.text.lower():
+                raise ContentFiltered()
             if response.status_code != 200:
                 raise RuntimeError(f"模型服务返回 HTTP {response.status_code}")
             value = response.json()
-            result = value["choices"][0]["message"]["content"]
+            choice = value["choices"][0]
+            if choice.get("finish_reason") == "content_filter" or choice["message"].get("refusal"):
+                raise ContentFiltered()
+            result = choice["message"]["content"]
             if not isinstance(result, str) or not result.strip():
                 raise RuntimeError("模型没有返回文本")
             journal.finish(call, "success", json.dumps(value.get("usage", {})))
             return result
         except Exception as exc:
             # Safe diagnostic metadata only; provider bodies and credential-bearing URLs stay out.
-            journal.finish(call, "failed", json.dumps({"errorType": type(exc).__name__, "httpStatus": status}))
+            journal.finish(call, "filtered" if isinstance(exc, ContentFiltered) else "failed",
+                           json.dumps({"errorType": type(exc).__name__, "httpStatus": status}))
+            if isinstance(exc, ContentFiltered):
+                raise
             if status in (401,403):
                 message = "模型服务未通过认证，请检查后端模型配置"
             elif status == 402:

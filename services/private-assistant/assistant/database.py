@@ -12,7 +12,7 @@ from .config import Settings
 
 
 class Databases:
-    SCHEMA_VERSION = 4
+    SCHEMA_VERSION = 6
     def __init__(self, settings: Settings):
         self.s = settings
         self._ready = set()
@@ -125,6 +125,13 @@ class Databases:
             UPDATE documents SET active_hash=hash,active_name=name,active_pieces=pieces
                 WHERE NOT deleted AND vector_version=version AND vector_version>0 AND active_hash IS NULL;
             ALTER TABLE document_versions ADD COLUMN IF NOT EXISTS size_bytes BIGINT NOT NULL DEFAULT 0;
+            ALTER TABLE document_versions ADD COLUMN IF NOT EXISTS extracted_pieces JSONB;
+            CREATE TABLE IF NOT EXISTS ocr_reviews (
+              id TEXT PRIMARY KEY, name TEXT NOT NULL, hash TEXT NOT NULL, document_id TEXT,
+              base_version INTEGER, pages JSONB NOT NULL, state TEXT NOT NULL DEFAULT 'prepared', receipt JSONB,
+              expires TIMESTAMPTZ NOT NULL DEFAULT (now() + interval '30 minutes'));
+            ALTER TABLE ocr_reviews ADD COLUMN IF NOT EXISTS state TEXT NOT NULL DEFAULT 'prepared';
+            ALTER TABLE ocr_reviews ADD COLUMN IF NOT EXISTS receipt JSONB;
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS vector_state TEXT NOT NULL DEFAULT 'queued';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS graph_state TEXT NOT NULL DEFAULT 'not_requested';
             ALTER TABLE jobs ADD COLUMN IF NOT EXISTS graph_requested BOOLEAN NOT NULL DEFAULT FALSE;
@@ -143,8 +150,9 @@ class Databases:
             CREATE TABLE IF NOT EXISTS graph_profiles (
                 generation TEXT PRIMARY KEY,signature TEXT NOT NULL,reused_extractions INTEGER NOT NULL DEFAULT 0);
             CREATE TABLE IF NOT EXISTS private_schema(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL);
-            INSERT INTO private_schema(id,version) VALUES(1,4) ON CONFLICT(id) DO UPDATE SET version=excluded.version;
             """)
+            db.execute("""INSERT INTO private_schema(id,version) VALUES(1,%s)
+                ON CONFLICT(id) DO UPDATE SET version=excluded.version""", (self.SCHEMA_VERSION,))
 
     @contextmanager
     def index_lease(self, uid):

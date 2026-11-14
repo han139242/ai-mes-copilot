@@ -376,6 +376,10 @@ public class AiPlannerServiceImpl implements AiPlannerService {
     private AiPlan parsePlan(String responseText) {
         try {
             JsonNode root = objectMapper.readTree(responseText);
+            if ("content_filter".equals(root.path("choices").path(0).path("finish_reason").asText())) {
+                return new AiPlan(AiPlan.MODE_CHAT, "", Map.of(), "", "模型内容审核未通过，本次未生成回答",
+                        List.of(), "", List.of());
+            }
             JsonNode content = root.path("choices").path(0).path("message").path("content");
             if (!content.isTextual()) {
                 return null;

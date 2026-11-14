@@ -3,7 +3,7 @@ import asyncio
 import json
 import re
 
-from .llm import complete
+from .llm import ContentFiltered, complete
 
 
 def business_intent(question):
@@ -110,6 +110,8 @@ def generate(settings, uid, question, citations, state, history, graph_data, con
     try:
         answer = asyncio.run(complete(settings, f"answer:u{uid}:r{state['revision']}", prompt, system, messages,
                                       before_send=authorize))
+    except ContentFiltered as exc:
+        return {"answer": str(exc), "generated": False, "notice": "", "filtered": True}
     except RuntimeError as exc:
         return {"answer": excerpt_answer(citations), "generated": False, "notice": str(exc)}
     used = set(re.findall(r"\[(S\d+)\]", answer))

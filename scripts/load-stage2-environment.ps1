@@ -10,6 +10,9 @@ if($NoCloud) {
     $env:PRIVATE_LLM_URL=''
     $env:PRIVATE_LLM_KEY=''
     $env:PRIVATE_LLM_MODEL=''
+    $env:PRIVATE_DEEPSEEK_TOOLS_KEY=''
+    $env:PRIVATE_DEEPSEEK_TOOLS_ENABLED='0'
+    $env:PRIVATE_DEEPSEEK_SAFETY='0'
 } elseif(Test-Path -LiteralPath $modelConfigurationPath) {
     $modelConfiguration=Import-Clixml -LiteralPath $modelConfigurationPath
     if($modelConfiguration.ApiKey -isnot [Security.SecureString]) {

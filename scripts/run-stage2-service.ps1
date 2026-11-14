@@ -6,8 +6,18 @@ param(
 $ErrorActionPreference='Stop'
 $repository=Split-Path -Parent $PSScriptRoot
 . (Join-Path $PSScriptRoot 'load-stage2-mes-environment.ps1') -RuntimeDirectory $RuntimeDirectory -NoCloud:$NoCloud
+if($Service -ne 'assistant') { $env:PRIVATE_DEEPSEEK_TOOLS_KEY='' }
 switch($Service) {
     'assistant' {
+        if(-not $NoCloud -and $env:PRIVATE_DEEPSEEK_TOOLS_ENABLED -eq '1' -and -not $env:PRIVATE_DEEPSEEK_TOOLS_KEY) {
+            $keyPath=Join-Path $RuntimeDirectory 'deepseek-tools-secret.clixml'
+            if(Test-Path -LiteralPath $keyPath) {
+                $credential=Import-Clixml -LiteralPath $keyPath
+                if($credential.ApiKey -isnot [Security.SecureString]) { throw 'Expected a Windows user-encrypted DeepSeek tools credential.' }
+                $env:PRIVATE_DEEPSEEK_TOOLS_KEY=([pscredential]::new('deepseek-tools',$credential.ApiKey)).GetNetworkCredential().Password
+                $credential=$null
+            }
+        }
         Set-Location -LiteralPath (Join-Path $repository 'services\private-assistant')
         $env:PYTHONPATH=(Get-Location).Path
         & (Join-Path $RuntimeDirectory '.venv\Scripts\python.exe') -m uvicorn assistant.app:app --host 127.0.0.1 --port $stage2State.AssistantPort --no-access-log

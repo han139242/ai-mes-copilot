@@ -6,7 +6,7 @@ import uuid
 
 from fastapi import HTTPException
 
-from .llm import complete_messages
+from .llm import ContentFiltered, complete_messages
 
 
 def gateway_model_token(settings):
@@ -35,7 +35,10 @@ async def proxy(request, settings):
         raise HTTPException(400, "仅支持有界的文本对话请求") from None
     try:
         answer = await complete_messages(settings,"mes-business-model",messages)
+        reason = "stop"
+    except ContentFiltered:
+        answer, reason = "", "content_filter"
     except RuntimeError as exc:
         raise HTTPException(503,str(exc)) from None
     return {"id":"mes-"+uuid.uuid4().hex,"object":"chat.completion",
-            "choices":[{"index":0,"message":{"role":"assistant","content":answer},"finish_reason":"stop"}]}
+            "choices":[{"index":0,"message":{"role":"assistant","content":answer},"finish_reason":reason}]}

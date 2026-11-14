@@ -14,12 +14,22 @@ class Settings:
     llm_url: str = field(default_factory=lambda: os.environ.get("PRIVATE_LLM_URL", ""))
     llm_key: str = field(default_factory=lambda: os.environ.get("PRIVATE_LLM_KEY", ""))
     llm_model: str = field(default_factory=lambda: os.environ.get("PRIVATE_LLM_MODEL", ""))
+    deepseek_tools_key: str = field(default_factory=lambda: os.environ.get("PRIVATE_DEEPSEEK_TOOLS_KEY", ""), repr=False)
+    deepseek_tools_enabled: bool = field(default_factory=lambda: os.environ.get("PRIVATE_DEEPSEEK_TOOLS_ENABLED") == "1")
+    deepseek_safety: bool = field(default_factory=lambda: os.environ.get("PRIVATE_DEEPSEEK_SAFETY") == "1")
+    public_fetch_hosts: str = field(default_factory=lambda: os.environ.get(
+        "PRIVATE_DEEPSEEK_FETCH_HOSTS",
+        "gov.cn,edu.cn,iso.org,iec.ch,siemens.com,se.com,schneider-electric.com,omron.com,keyence.com,mitsubishielectric.com,deepseek.com"))
     # 0 disables the optional local call cap; the durable request journal is never reset.
     llm_limit: int = field(default_factory=lambda: int(os.environ.get("PRIVATE_LLM_LIMIT", "0")))
     embedding_model: str = "BAAI/bge-small-zh-v1.5"
     embedding_dim: int = 512
     max_file_bytes: int = 8 * 1024 * 1024
     max_text_chars: int = 240_000
+
+    @property
+    def tools_ready(self):
+        return bool(self.deepseek_tools_enabled and self.deepseek_tools_key.strip())
 
     def validate(self):
         if self.llm_limit < 0:

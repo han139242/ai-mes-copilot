@@ -9,6 +9,7 @@ See the [AI architecture](AI_ARCHITECTURE.md) and [classroom walkthrough](TEACHE
 | Capability | Behavior |
 |---|---|
 | File lifecycle | PDF, DOCX, XLSX, TXT and Markdown upload/update/download/delete with versioned source locations. |
+| Scanned documents | Choose PDF, PNG or JPEG pages for OCR, correct the transcription and approve it for indexing. Citations can open the original page from the cited version. |
 | Document RAG | Local 512-dimensional Chinese embeddings and pgvector retrieval. Ranking uses exact identifiers, requested evidence types and source coverage. |
 | GraphRAG / fusion | LightRAG extraction and AGE storage; automatic, document, graph and fusion show actual routing and fallback. |
 | Graph exploration | Actual data, search, filters, zoom, neighbors, paths up to six edges in the visible graph, sources and a text list. |
@@ -17,6 +18,8 @@ See the [AI architecture](AI_ARCHITECTURE.md) and [classroom walkthrough](TEACHE
 | Business handoff | Prepare a draft; execution still follows the original permission and confirmation flow. |
 
 Ready document retrieval remains usable when graph indexing fails. Missing configuration, consent or evidence is explicit. Source and citation-ID validation does not establish sentence-level semantic correctness. Human-camera checks are described in the [face guide](FACE_AUTO_CAPTURE.md).
+
+The optional DeepSeek tools add public search and page reading, editable voice input, and answer playback to the AI workbench and knowledge page. Public results open in a dedicated viewer. Transcriptions are inserted as drafts. See the [integration and deployment notes](DEEPSEEK_APPLICATION_20261114.md) (Chinese).
 
 ## Queries and analysis
 
