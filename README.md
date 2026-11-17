@@ -2,13 +2,17 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**面向智能调光台灯制造的 AI 助手：查业务、读资料、追关系，把建议带入可确认的业务流程。**
+**在智能台灯制造场景里，用自然语言查库存和工单、查有出处的工艺资料，并把建议带到可确认的业务预览。**
 
-Spring Boot · Vue 3 · MySQL · Python / FastAPI · PostgreSQL / pgvector / Apache AGE · LightRAG
+[按演示指南试用](docs/TEACHER_DEMO.md) · [配置与启动](docs/SETUP.md) · [功能目录](docs/FEATURES.md) · [验证记录](docs/VERIFICATION.md) · [English](README.en.md)
 
-[AI 架构详解](docs/AI_ARCHITECTURE.md) · [教师演示与讲解](docs/TEACHER_DEMO.md) · [功能目录](docs/FEATURES.md) · [部署运行](docs/SETUP.md) · [English](README.en.md)
+| 第一次体验 | 你会看到什么 |
+| --- | --- |
+| 问“哪些物料低于安全库存？” | 工作台查询当前库存，返回结果表格与可追踪的业务入口 |
+| 问“L100 当前生效的驱动板是什么？” | 知识页返回带文件和版本的引用，可直接打开原文；进一步可沿图谱追到装配工序和检验规范 |
+| 准备工单领料 | 后端校验业务条件并生成预览，确认后执行，再回查结果 |
 
-项目以智能调光台灯 L100 / L200 为场景，连接采购、库存、生产、质量、设备与发货。在已有 MES 上集成自然语言业务办理、私有 RAG、GraphRAG 和研判工作单，让业务数据与文档知识各有依据、能够衔接。
+项目覆盖台灯 L100 / L200 的采购、生产、质检、入库和发货。业务查询与操作接入 Spring Boot、Vue 3 和 MySQL。私有知识服务用 FastAPI、PostgreSQL、pgvector、Apache AGE 和 LightRAG，部署说明分别列出了基础 MES、知识检索和模型生成的环境要求。
 
 ## AI 能做什么
 

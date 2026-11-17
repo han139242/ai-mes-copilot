@@ -2,13 +2,17 @@
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**An AI-assisted manufacturing execution system: query operations, retrieve private documents, explore relationships, and carry evidence into confirmed business actions.**
+**Ask about inventory and work orders, open the exact manufacturing document behind an answer, and preview a business action before confirming it.**
 
-Spring Boot · Vue 3 · MySQL · Python / FastAPI · PostgreSQL / pgvector / Apache AGE · LightRAG
+[Setup](docs/SETUP.en.md) · [Capabilities](docs/FEATURES.en.md) · [Classroom demo (Chinese)](docs/TEACHER_DEMO.md) · [Verification (Chinese)](docs/VERIFICATION.md) · [简体中文](README.md)
 
-[简体中文](README.md) · [AI architecture (Chinese)](docs/AI_ARCHITECTURE.md) · [Classroom demo (Chinese)](docs/TEACHER_DEMO.md) · [Capabilities](docs/FEATURES.en.md) · [Setup](docs/SETUP.en.md)
+| Try this | What you can inspect |
+| --- | --- |
+| Ask which parts are below safety stock | The workbench reads current inventory and returns a table with a route to the relevant operation |
+| Ask which driver board the L100 currently uses | The knowledge page cites the document and version. Follow graph relationships to assembly and inspection references |
+| Prepare a material issue for a work order | The backend checks the requested action and previews it. It executes after approval and reads back the result |
 
-The project uses L100 / L200 dimmable lamps as its manufacturing scenario. It connects purchasing, inventory, production, quality, equipment and shipping, with business AI, private RAG, GraphRAG and review worksheets integrated into the existing MES.
+The demonstration follows two dimmable lamps, L100 and L200, from purchasing through production, inspection, inventory and shipping. The MES uses Spring Boot, Vue 3 and MySQL. The private knowledge service adds FastAPI, PostgreSQL, pgvector, Apache AGE and LightRAG.
 
 ## AI capabilities
 
