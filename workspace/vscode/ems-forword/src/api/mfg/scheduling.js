@@ -30,8 +30,8 @@ export function openManualScheduleDraft() {
 }
 
 // 查询人工排产工作台整块看板数据，包括待排订单、产线和已放置任务。
-export function getManualScheduleBoard() {
-  return request.get(`${BASE_URL}/manual-board`);
+export function getManualScheduleBoard(options = {}) {
+  return request.get(`${BASE_URL}/manual-board`, options);
 }
 
 // 针对整张人工排产看板生成AI建议。

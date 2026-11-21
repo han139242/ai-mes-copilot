@@ -88,6 +88,7 @@ const specialRules = [
   ['post', /^\/api\/trace\/barcode\/generate$/, 'trace:barcode:generate'],
   ['get', /^\/api\/trace\/barcode\/scan\/[^/]+$/, 'trace:barcode:scan'],
   ['get', /^\/api\/trace\/product-lot\/lot-no\/[^/]+$/, 'trace:product-lot:trace'],
+  ['get', /^\/api\/trace\/product-lot\/[^/]+\/trace$/, 'trace:product-lot:trace'],
   ['get', /^\/api\/trace\/material-usage\/batch\/[^/]+$/, 'trace:material-usage:reverse-trace'],
 ];
 

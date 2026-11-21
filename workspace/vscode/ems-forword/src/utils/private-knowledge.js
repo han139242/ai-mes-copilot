@@ -65,6 +65,38 @@ export function answerTokens(value) {
     });
 }
 
+// Compare against verified source text while retaining the original line breaks.
+export function locateCitationExcerpt(value, excerpt) {
+  if (typeof value !== 'string' || typeof excerpt !== 'string' || !excerpt.trim()) return null;
+  const identifierCharacter = /[A-Za-z0-9_-]/;
+  const splitsIdentifier = (index) =>
+    identifierCharacter.test(value.charAt(index - 1)) && identifierCharacter.test(value.charAt(index));
+
+  function uniqueSpan(text, quote, offsets) {
+    let found = null;
+    for (let index = text.indexOf(quote); index >= 0; index = text.indexOf(quote, index + 1)) {
+      const last = index + quote.length - 1;
+      const start = offsets ? offsets[index] : index;
+      const end = (offsets ? offsets[last] : last) + 1;
+      if (splitsIdentifier(start) || splitsIdentifier(end)) continue;
+      if (found) return false;
+      found = { start, end };
+    }
+    return found;
+  }
+
+  let span = uniqueSpan(value, excerpt);
+  if (span === null) {
+    const offsets = [];
+    for (const character of value.matchAll(/\S/g)) offsets.push(character.index);
+    span = uniqueSpan(value.replace(/\s+/g, ''), excerpt.replace(/\s+/g, ''), offsets);
+  }
+  if (!span) return null;
+
+  const { start, end } = span;
+  return { before: value.slice(0, start), match: value.slice(start, end), after: value.slice(end) };
+}
+
 export function answerBlocks(value) {
   const lines = String(value || '').split(/\r?\n/),
     blocks = [];

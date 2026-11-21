@@ -120,16 +120,24 @@ class VectorIndex:
             db.execute("UPDATE history SET valid=false WHERE valid")
         return True
 
-    def retrieve(self, uid, question, limit=8):
+    def retrieve(self, uid, question, limit=8, *, source_scope=None):
         vector = json.dumps(embed(self.s, [question[:400]], query=True)[0].tolist())
+        candidates_sql = _CANDIDATES
+        parameters = (vector, self.s.embedding_model)
+        if source_scope is not None:
+            candidates_sql += " AND d.id=%s AND d.vector_version=%s AND d.active_hash=%s"
+            parameters += (source_scope["documentId"], source_scope["version"], source_scope["hash"])
+        ranked_sql = " ORDER BY c.embedding <=> %s::vector,c.id"
         with self.dbs.connect(uid) as db:
-            candidates = db.execute(
-                _CANDIDATES + " ORDER BY c.embedding <=> %s::vector,c.id LIMIT 40",
-                (vector,self.s.embedding_model,vector)).fetchall()
+            candidates = db.execute(candidates_sql + ranked_sql + " LIMIT 40", (*parameters, vector)).fetchall()
             selected = self.select_dense(candidates, question, limit)
             missing = missing_identifiers(question, selected)
             if missing:
-                selected = self.recover_identifiers(db, vector, question, selected, missing, limit)
+                def find_exact(token):
+                    return db.execute(candidates_sql + " AND c.content ~* %s" + ranked_sql + " LIMIT 1",
+                                      (*parameters, identifier_pattern(token), vector)).fetchone()
+
+                selected = self.recover_identifiers(find_exact, question, selected, missing, limit)
         return selected if has_query_evidence(question, selected) else []
 
     @staticmethod
@@ -146,16 +154,14 @@ class VectorIndex:
                 break
         return selected
 
-    def recover_identifiers(self, db, vector, question, selected, missing, limit):
+    def recover_identifiers(self, find_exact, question, selected, missing, limit):
         # PostgreSQL ARE uses the same explicit identifier boundaries. Prioritize
         # the best available source for each missing code, capped at one per code.
         recovered = []
         for token in missing[:min(4, limit)]:
             if not missing_identifiers(token, recovered):
                 continue
-            row = db.execute(
-                _CANDIDATES + " AND c.content ~* %s ORDER BY c.embedding <=> %s::vector,c.id LIMIT 1",
-                (vector,self.s.embedding_model,identifier_pattern(token),vector)).fetchone()
+            row = find_exact(token)
             if row:
                 recovered.append({**row, "score": round(float(row["score"]), 4), "retrieval": "identifier"})
         if not recovered:

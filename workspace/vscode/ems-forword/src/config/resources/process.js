@@ -34,6 +34,14 @@ export default [
       status: { type: 'select', options: optionSets.enable },
       createdTime: { form: false, width: 170 },
     },
+    masterDetail: {
+      title: '工艺参数',
+      resource: 'process-parameter',
+      parentField: 'operationId',
+      endpoint: () => '/api/process/parameter/page',
+      params: (row) => ({ current: 1, size: 100, operationId: row.operationId }),
+      label: (row) => row.operationName,
+    },
     relations: [{ key: 'parameters', title: '工艺参数', resource: 'process-parameter', parentField: 'operationId' }],
   }),
   defineResource({

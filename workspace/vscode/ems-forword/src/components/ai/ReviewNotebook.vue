@@ -286,7 +286,7 @@ defineExpose({ capture, clearForAuthChange });
           <AppIcon name="refresh" :size="16" />
         </button>
       </header>
-      <p v-if="!items.length" class="review-list-empty">把有用的答复存到这里，留下依据和下一步。</p>
+      <p v-if="!items.length && !loading" class="review-list-empty">暂无工作单</p>
       <button
         v-for="note in items"
         :key="note.id"
@@ -306,13 +306,13 @@ defineExpose({ capture, clearForAuthChange });
       </button>
       <p class="review-private"><AppIcon name="lock" :size="14" />仅自己可见 · 保存在私有库</p>
     </aside>
-    <main class="review-main">
+    <div class="review-main">
       <p v-if="error" class="source-error" role="alert">
         {{ error }} <button v-if="dirty" type="button" class="text-action" @click="exportDraft">导出当前草稿</button>
       </p>
       <div v-if="!current" class="review-empty">
         <AppIcon name="clipboard" :size="30" />
-        <h2>让一次问答，成为下一步的依据。</h2>
+        <h2>{{ loading ? '正在读取工作单' : '从资料答复创建工作单' }}</h2>
         <p>在资料答复下选择“存为工作单”，再补充现场备注和核对项。</p>
       </div>
       <template v-else>
@@ -415,7 +415,7 @@ defineExpose({ capture, clearForAuthChange });
           </div>
         </footer>
       </template>
-    </main>
+    </div>
   </section>
 </template>
 

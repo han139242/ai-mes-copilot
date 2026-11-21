@@ -16,8 +16,8 @@
       title="计划数量是合格目标，达标只计已审核报工；不良不计入合格数。原任务本次报工结束后，仍须通过返工或补产补足差额。"
     />
     <WorkReportPreparationPanel
-      v-if="config.key === 'mfg-work-report' && filters.taskId"
-      :task-id="filters.taskId"
+      v-if="config.key === 'mfg-work-report' && appliedFilters.taskId"
+      :task-id="appliedFilters.taskId"
       :empty="!loading && total === 0"
       :can-create="permissions.create"
       @create="openCreate({ taskId: $event })"
@@ -28,7 +28,6 @@
           <span class="resource-title-icon"><AppIcon :name="config.icon" :size="18" /></span>
           <div class="resource-title-line">
             <h1>{{ config.title }}</h1>
-            <span class="resource-count" aria-live="polite">{{ resultCountLabel }}</span>
             <el-tag v-if="previewMode" size="small" type="warning" effect="plain">预览数据</el-tag>
           </div>
         </div>
@@ -55,7 +54,55 @@
               @click="mobileFiltersOpen = !mobileFiltersOpen"
               ><AppIcon name="filter" :size="15" />筛选{{ activeFilterCount ? ` (${activeFilterCount})` : '' }}</el-button
             >
-            <span class="data-source" :class="{ 'is-local': localDataMode }"><i />{{ dataSourceLabel }}</span>
+            <el-tooltip content="刷新数据" placement="top">
+              <el-button class="mes-icon-button" aria-label="刷新数据" :loading="loading" @click="refreshData"
+                ><AppIcon name="refresh" :size="16"
+              /></el-button>
+            </el-tooltip>
+          </div>
+        </div>
+      </header>
+
+      <div :id="`query-${config.key}`" class="resource-querybar" :class="{ 'is-mobile-expanded': mobileFiltersOpen }">
+        <div class="filter-grid">
+          <div v-for="item in visibleFilters" :key="item.prop" class="filter-item">
+            <label :for="`filter-${config.key}-${item.prop}`">{{ item.label }}</label>
+            <ResourceField
+              v-model="filters[item.prop]"
+              :field="item"
+              :input-id="`filter-${config.key}-${item.prop}`"
+              :options="optionsFor(item)"
+              compact
+              @keyup.enter="!$event.isComposing && $event.keyCode !== 229 && handleSearch()"
+            />
+          </div>
+        </div>
+        <div class="filter-actions">
+          <el-button type="primary" @click="handleSearch"><AppIcon name="search" :size="15" />查询</el-button>
+          <el-button @click="resetSearch">重置</el-button>
+          <el-button v-if="hasExtraFilters" text :aria-expanded="filterExpanded" @click="filterExpanded = !filterExpanded">
+            <AppIcon name="filter" :size="15" />{{ filterExpanded ? '收起条件' : '更多条件' }}
+          </el-button>
+        </div>
+      </div>
+
+      <div class="resource-results">
+        <div class="resource-results-summary">
+          <span class="resource-count" aria-live="polite">{{ resultCountLabel }}</span>
+          <span v-if="focusedFromLink" class="result-sort-scope">另显示 1 条关联记录</span>
+          <span v-if="hasLoaded && !config.treeEndpoint && total > pagination.size" class="result-sort-scope"
+            title="点击表头可对当前页排序">表头按本页排序</span>
+          <span class="data-source" :class="{ 'is-local': localDataMode }"><i />{{ dataSourceLabel }}</span>
+        </div>
+        <div class="toolbar-secondary" role="group" aria-label="表格视图操作">
+            <ResourceFilterViews
+              v-if="savedFilterStorageKey"
+              :storage-key="savedFilterStorageKey"
+              :fields="config.filters"
+              :current="appliedFilters"
+              :can-save="hasLoaded && !loading && !loadError && appliedFilterItems.length > 0"
+              @apply="useSavedFilters"
+            />
             <el-tooltip content="导出 Excel" placement="top">
               <el-button
                 v-if="permissions.export"
@@ -89,36 +136,6 @@
                 </div>
               </div>
             </el-popover>
-            <el-tooltip content="刷新数据" placement="top">
-              <el-button class="mes-icon-button" aria-label="刷新数据" :loading="loading" @click="refreshData"
-                ><AppIcon name="refresh" :size="16"
-              /></el-button>
-            </el-tooltip>
-          </div>
-        </div>
-      </header>
-
-      <div :id="`query-${config.key}`" class="resource-querybar" :class="{ 'is-mobile-expanded': mobileFiltersOpen }">
-        <div class="filter-grid">
-          <div v-for="item in visibleFilters" :key="item.prop" class="filter-item">
-            <label :for="`filter-${config.key}-${item.prop}`">{{ item.label }}</label>
-            <ResourceField
-              v-model="filters[item.prop]"
-              :field="item"
-              :input-id="`filter-${config.key}-${item.prop}`"
-              :options="optionsFor(item)"
-              compact
-              @keyup.enter="!$event.isComposing && $event.keyCode !== 229 && handleSearch()"
-            />
-          </div>
-        </div>
-        <div class="filter-actions">
-          <el-button type="primary" @click="handleSearch"><AppIcon name="search" :size="15" />查询</el-button>
-          <el-button @click="resetSearch"><AppIcon name="refresh" :size="15" />重置</el-button>
-          <el-button v-if="hasExtraFilters" text @click="filterExpanded = !filterExpanded">
-            <AppIcon name="filter" :size="15" />{{ filterExpanded ? '收起条件' : `高级查询${activeFilterCount ? `
-            (${activeFilterCount})` : ''}` }}
-          </el-button>
         </div>
       </div>
 
@@ -136,7 +153,10 @@
         >
           <span>{{ item.label }}：{{ item.value }}</span><AppIcon name="close" :size="13" />
         </button>
-        <span v-if="filtersChanged" class="query-pending"><AppIcon name="edit" :size="13" />条件已修改，查询后生效</span>
+        <span v-if="filtersChanged" class="query-pending">
+          <AppIcon name="edit" :size="13" />条件已修改，查询后生效
+          <el-button link type="primary" :disabled="loading" @click="discardFilterDraft">撤销编辑</el-button>
+        </span>
       </div>
 
       <div v-if="batchDeleteAllowed && selectedBatchRows.length" class="resource-selectionbar" role="status">
@@ -244,7 +264,7 @@
         >
           <template #default="scope">
             <div class="row-actions">
-              <el-tooltip v-if="detailConfig" content="查看关联明细" placement="top">
+              <el-tooltip v-if="detailConfig && detailViewAllowed" content="查看关联明细" placement="top">
                 <el-button
                   link
                   type="primary"
@@ -273,12 +293,19 @@
                     ><AppIcon name="edit" :size="16" /></el-button
                 ></span>
               </el-tooltip>
-              <el-dropdown v-if="visibleActions(scope.row).length || visibleRelations(scope.row).length" trigger="click">
+              <el-button
+                v-for="action in visibleActions(scope.row).filter((item) => item.primary)"
+                :key="action.key"
+                link
+                type="primary"
+                @click.stop="openAction(action, scope.row)"
+              ><AppIcon :name="action.icon" :size="15" />{{ actionLabel(action) }}</el-button>
+              <el-dropdown v-if="visibleActions(scope.row).some((item) => !item.primary) || visibleRelations(scope.row).length" trigger="click">
                 <el-button link type="primary">更多<AppIcon name="chevron" :size="13" /></el-button>
                 <template #dropdown>
                   <el-dropdown-menu>
                     <el-dropdown-item
-                      v-for="action in visibleActions(scope.row)"
+                      v-for="action in visibleActions(scope.row).filter((item) => !item.primary)"
                       :key="action.key"
                       @click="openAction(action, scope.row)"
                     >
@@ -359,10 +386,10 @@
         </el-pagination>
       </div>
 
-      <div v-if="detailConfig && !selectedRow && rows.length" class="resource-detail-hint">
+      <div v-if="detailConfig && detailViewAllowed && !selectedRow && rows.length" class="resource-detail-hint">
         <AppIcon name="link" :size="14" />点选一条记录，查看关联明细
       </div>
-      <section v-if="detailConfig && detailViewAllowed && selectedRow" class="master-detail-panel">
+      <section v-if="detailConfig && detailViewAllowed && selectedRow" ref="masterDetailPanel" class="master-detail-panel" aria-label="关联明细" tabindex="-1">
         <header class="master-detail-head">
           <div>
             <span class="master-detail-icon"><AppIcon name="link" :size="16" /></span>
@@ -702,40 +729,7 @@
       >
     </el-dialog>
 
-    <el-drawer v-model="traceOpen" class="resource-drawer" size="min(760px, 100vw)" :with-header="false" append-to-body>
-      <div class="drawer-shell">
-        <header class="drawer-header">
-          <div>
-            <span class="drawer-icon"><AppIcon name="scan" :size="19" /></span>
-            <div>
-              <strong>{{ traceTitle }}</strong>
-            </div>
-          </div>
-          <el-button text @click="traceOpen = false"><AppIcon name="close" :size="18" /></el-button>
-        </header>
-        <main class="drawer-content trace-content">
-          <section v-for="[key, value] in traceEntries" :key="key" class="trace-section">
-            <h3>{{ key }}</h3>
-            <el-table v-if="Array.isArray(value)" v-live-column-resize :data="value" border size="small"
-              ><el-table-column
-                v-for="column in Object.keys(value[0] || {})"
-                :key="column"
-                :prop="column"
-                :label="column"
-                min-width="120"
-                show-overflow-tooltip
-            /></el-table>
-            <el-descriptions v-else-if="value && typeof value === 'object'" :column="1" border
-              ><el-descriptions-item v-for="(childValue, childKey) in value" :key="childKey" :label="childKey"
-                >{{ typeof childValue === 'object' ? JSON.stringify(childValue) : childValue }}</el-descriptions-item
-              ></el-descriptions
-            >
-            <p v-else>{{ value ?? '--' }}</p>
-          </section>
-          <el-empty v-if="!traceEntries.length" description="暂无追溯结果" />
-        </main>
-      </div>
-    </el-drawer>
+    <LotTraceDrawer v-model="traceOpen" :selection="traceSelection" />
     <PieceInspectionDialog v-model="pieceInspectionOpen" :inspection="pieceInspectionRow" @completed="refreshData" />
     <el-drawer
       v-model="progressOpen"

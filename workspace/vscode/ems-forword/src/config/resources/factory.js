@@ -31,6 +31,14 @@ export default [
       },
       createdTime: { form: false, width: 170 },
     },
+    masterDetail: {
+      title: '车间产线',
+      resource: 'factory-line',
+      parentField: 'workshopId',
+      endpoint: () => '/api/factory/line/page',
+      params: (row) => ({ current: 1, size: 100, workshopId: row.workshopId }),
+      label: (row) => row.workshopName,
+    },
   }),
   defineResource({
     key: 'factory-line',
@@ -57,6 +65,14 @@ export default [
         ]),
       },
       createdTime: { form: false, width: 170 },
+    },
+    masterDetail: {
+      title: '产线工位',
+      resource: 'factory-station',
+      parentField: 'lineId',
+      endpoint: () => '/api/factory/station/page',
+      params: (row) => ({ current: 1, size: 100, lineId: row.lineId }),
+      label: (row) => row.lineName,
     },
   }),
   defineResource({
@@ -101,6 +117,13 @@ export default [
         endpoint: (row) => `/api/factory/station-operation/station/${row.stationId}`,
       },
     ],
+    masterDetail: {
+      title: '可执行工序',
+      resource: 'factory-station-operation',
+      parentField: 'stationId',
+      endpoint: (row) => `/api/factory/station-operation/station/${row.stationId}`,
+      label: (row) => row.stationName,
+    },
   }),
   defineResource({
     key: 'factory-station-operation',

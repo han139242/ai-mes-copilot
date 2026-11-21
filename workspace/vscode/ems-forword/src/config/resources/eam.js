@@ -6,7 +6,6 @@ import dayjs from 'dayjs';
 import { getCurrentUser } from '@/utils/auth';
 import { defineResource, field, optionSets, values } from './helpers';
 
-const repairStatuses = ['FAULT', 'REPAIRING'];
 const canViewMaintenance = (row) => row.status !== 'SCRAPPED';
 const isBrokenText = (value) => /\?{2,}/.test(String(value || ''));
 
@@ -108,6 +107,17 @@ export default [
       },
     ],
     rowTone: (row) => equipmentRowTone(row),
+    masterDetails: [
+      {
+        key: 'repair-orders',
+        title: '维修记录',
+        resource: 'eam-repair-order',
+        parentField: 'equipmentId',
+        endpoint: () => '/api/eam/repair-order/page',
+        params: (row) => ({ current: 1, size: 100, equipmentId: row.equipmentId }),
+        label: (row) => `${row.equipmentCode} · ${row.equipmentName}`,
+      },
+    ],
     actions: [
       {
         key: 'create-repair-order',
@@ -151,7 +161,6 @@ export default [
         title: '维修工单',
         resource: 'eam-repair-order',
         parentField: 'equipmentId',
-        visible: (row) => repairStatuses.includes(row.status),
       },
     ],
   }),

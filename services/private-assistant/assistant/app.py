@@ -112,7 +112,7 @@ def dispatch(uid, action, p):
         return knowledge.cancel(uid, p.get("jobId"))
     if action == "question":
         return knowledge.ask(uid, p.get("question", ""), p.get("mode", "auto"),
-                             p.get("sessionId", "default"), p.get("context"))
+                             p.get("sessionId", "default"), p.get("context"), p.get("sourceScope"))
     if action == "graph":
         return knowledge.graph(uid, str(p.get("search", "")))
     if action == "graph.build":

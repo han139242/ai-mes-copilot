@@ -1,4 +1,5 @@
 <script setup>
+import MesPageHeading from '@/components/common/MesPageHeading.vue';
 import { computed, onMounted, reactive, ref } from 'vue';
 import dayjs from 'dayjs';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -31,6 +32,8 @@ const lineOptions = ref([]);
 const productOptions = ref([]);
 const orderOptions = ref([]);
 const loading = ref(false);
+const boardError = ref('');
+const lastBoardSync = ref('');
 const candidateLoading = ref(false);
 const addingLineId = ref(null);
 const savingPlacement = ref(false);
@@ -147,7 +150,9 @@ const aiAdviceParagraphs = computed(() => formatAiAdviceParagraphs(aiAdvice.valu
 const conflictItems = computed(() => manualItems.value.filter((item) => item.status === 'CONFLICT'));
 // 每类操作分别判断后端权限码，按钮显示和实际请求保持一致。
 const selectedIsManual = computed(() => selectedItem.value?.sourceType === 'MANUAL');
-const selectedCanEditManual = computed(() => selectedIsManual.value && !selectedItem.value?.aiBatch);
+const selectedCanEditManual = computed(() =>
+  !loading.value && !boardError.value && selectedIsManual.value && !selectedItem.value?.aiBatch,
+);
 // 以下五项分别控制新增、修改、删除、AI建议和确认计划按钮权限。
 const canCreateSchedule = computed(() => hasPermission('mfg:schedule-scenario:create'));
 // 判断当前账号能否调整人工排产位置。
@@ -689,12 +694,10 @@ async function loadReferenceData() {
 }
 
 // 打开草稿并加载人工排产统一看板，拆分为时间轴和待排订单数据。
-async function loadBoard({ open = false } = {}) {
-  // 有创建权限时先打开可编辑草稿，再获取统一看板并拆分到各个响应式状态。
+async function loadBoard() {
   loading.value = true;
   try {
-    const seed = canCreateSchedule.value && (open || !draft.value) ? await openManualScheduleDraft() : null;
-    const result = await getManualScheduleBoard();
+    const result = await getManualScheduleBoard({ suppressErrorMessage: true });
     const nextBoard = result?.data || null;
     const nextFingerprint = createBoardFingerprint(nextBoard);
     if (aiAdvice.value && boardFingerprint.value && nextFingerprint !== boardFingerprint.value) {
@@ -702,11 +705,15 @@ async function loadBoard({ open = false } = {}) {
     }
     boardFingerprint.value = nextFingerprint;
     board.value = nextBoard;
-    draft.value = board.value?.workspaceDraft || seed?.data || draft.value;
+    draft.value = board.value?.workspaceDraft || null;
     timelineItems.value = board.value?.timelineItems || [];
     pendingOrders.value = board.value?.pendingOrders || [];
     const itemLineIds = timelineItems.value.filter((item) => item.lineId).map((item) => String(item.lineId));
     visibleLineIds.value = [...new Set([...visibleLineIds.value.map(String), ...itemLineIds])];
+    boardError.value = '';
+    lastBoardSync.value = dayjs().format('HH:mm:ss');
+  } catch (failure) {
+    boardError.value = failure?.displayMessage || failure?.message || '排产看板暂未读取';
   } finally {
     loading.value = false;
   }
@@ -715,13 +722,14 @@ async function loadBoard({ open = false } = {}) {
 // 并行刷新排产看板与关联名称数据。
 async function refreshWorkbench() {
   // 看板数据和关联名称没有依赖关系，因此并行刷新。
-  await Promise.all([loadBoard({ open: true }), loadReferenceData()]);
+  if (loading.value) return;
+  await Promise.all([loadBoard(), loadReferenceData()]);
 }
 
 // 查询所选订单满足能力和产能约束的候选产线并打开候选弹窗。
 async function openCandidates(order) {
   // 选择待排订单后向后端查询满足产品能力、日历和产能要求的候选产线。
-  if (!canCreateSchedule.value || !draft.value) {
+  if (!canCreateSchedule.value || loading.value || boardError.value) {
     return;
   }
   const requestSequence = ++candidateRequestSequence;
@@ -731,6 +739,12 @@ async function openCandidates(order) {
   candidateOpen.value = true;
   candidateLoading.value = true;
   try {
+    if (!draft.value) {
+      const result = await openManualScheduleDraft();
+      if (requestSequence !== candidateRequestSequence) return;
+      if (!result?.data?.scenarioId) throw new Error('未取得可编辑草稿');
+      draft.value = result.data;
+    }
     const result = await getManualEligibleLines(draft.value.scenarioId, order.productionOrderId);
     if (requestSequence !== candidateRequestSequence) {
       return;
@@ -751,7 +765,7 @@ async function openCandidates(order) {
 // 把选中的待排订单加入指定产线草稿，并重新加载后端看板。
 async function addToLine(candidate) {
   // 后端创建草稿项后重新加载看板，确保版本号、冲突状态和计算时间以服务端为准。
-  if (!canCreateSchedule.value || !draft.value) {
+  if (!canCreateSchedule.value || !draft.value || loading.value || boardError.value) {
     return;
   }
   if (!selectedOrder.value || addingLineId.value !== null) {
@@ -1061,7 +1075,7 @@ async function confirmTwice(firstMessage, firstTitle, secondMessage, secondTitle
 
 // 生成一批可撤回的AI排产草案，后端负责排除已有计划和已有草案的订单。
 async function runAiBatchSchedule() {
-  if (!canCreateSchedule.value || aiBatchGenerating.value || activeAiBatch.value) {
+  if (!canCreateSchedule.value || aiBatchGenerating.value || activeAiBatch.value || loading.value || boardError.value) {
     return;
   }
   if (!unscheduledPendingOrders.value.length) {
@@ -1190,19 +1204,16 @@ onMounted(refreshWorkbench);
 <template>
   <!-- 左侧管理待排订单，中间是分产线时间轴，弹窗负责候选产线和具体时间编辑。 -->
   <div class="mes-page manual-scheduling-workbench">
-    <header class="mes-page-header workbench-header">
-      <div class="workbench-heading">
-        <span class="workbench-heading-icon"><AppIcon name="route" :size="23" /></span>
-        <div>
-          <h1 class="mes-page-title">智能排产工作台</h1>
-        </div>
-      </div>
-      <div class="workbench-actions">
+    <MesPageHeading title="智能排产工作台" icon="route" class="workbench-header">
+      <template #detail>
+        {{ boardError ? (lastBoardSync ? `显示 ${lastBoardSync} 的结果` : '尚未同步看板') : lastBoardSync ? `更新于 ${lastBoardSync}` : '正在读取看板' }}
+      </template>
+      <template #actions>
         <el-button
           v-if="canCreateSchedule && !activeAiBatch"
           type="primary"
           :loading="aiBatchGenerating"
-          :disabled="loading || !unscheduledPendingOrders.length"
+          :disabled="loading || Boolean(boardError) || !unscheduledPendingOrders.length"
           @click="runAiBatchSchedule"
           ><AppIcon name="bot" :size="15" />AI 一键排产</el-button
         >
@@ -1210,7 +1221,7 @@ onMounted(refreshWorkbench);
           v-if="canConfirmSchedule && activeAiBatch"
           type="success"
           :loading="aiBatchConfirming"
-          :disabled="loading || aiBatchWithdrawing || !aiBatchScheduledItems.length || aiBatchConflictItems.length > 0"
+          :disabled="loading || Boolean(boardError) || aiBatchWithdrawing || !aiBatchScheduledItems.length || aiBatchConflictItems.length > 0"
           @click="confirmAiBatch"
           ><AppIcon name="check" :size="15" />确认本次排产</el-button
         >
@@ -1219,17 +1230,19 @@ onMounted(refreshWorkbench);
           type="danger"
           plain
           :loading="aiBatchWithdrawing"
-          :disabled="loading || aiBatchConfirming"
+          :disabled="loading || Boolean(boardError) || aiBatchConfirming"
           @click="withdrawAiBatch"
           ><AppIcon name="trash" :size="15" />撤回本次排产</el-button
         >
-        <el-tag type="primary" effect="plain">整体计划板</el-tag>
         <el-tooltip content="刷新工作台" placement="bottom"
           ><el-button circle :loading="loading" aria-label="刷新工作台" @click="refreshWorkbench"
             ><AppIcon name="refresh" :size="16" /></el-button
         ></el-tooltip>
-      </div>
-    </header>
+      </template>
+    </MesPageHeading>
+    <el-alert v-if="boardError" :title="boardError" type="warning" show-icon :closable="false" class="board-load-warning">
+      <el-button link type="primary" :disabled="loading" @click="refreshWorkbench">重新读取</el-button>
+    </el-alert>
 
     <section class="top-grid">
       <section class="mes-panel pending-panel">
@@ -1295,7 +1308,7 @@ onMounted(refreshWorkbench);
                 ><el-button link type="primary" aria-label="查看已排安排" @click="openPendingOrderPlacement(row)"
                   ><AppIcon name="eye" :size="16" /></el-button></el-tooltip
               ><el-tooltip v-else-if="canCreateSchedule" content="添加到产线" placement="top"
-                ><el-button link type="primary" aria-label="添加到产线" :disabled="!draft" @click="openCandidates(row)"
+                ><el-button link type="primary" aria-label="添加到产线" :disabled="loading || Boolean(boardError)" @click="openCandidates(row)"
                   ><AppIcon name="plus" :size="16" /></el-button></el-tooltip
               ><el-tooltip content="推演这笔订单的开工与完工时间" placement="top"
                 ><el-button link type="primary" aria-label="排程推演" @click="openSimulation(row)"
@@ -1403,6 +1416,7 @@ onMounted(refreshWorkbench);
             :max="TIMELINE_ZOOM_MAX"
             :step="0.05"
             :show-tooltip="false"
+            aria-label="时间轴放大比例"
           /><span class="zoom-value">{{ timelineZoomPercent }}%</span
           ><el-tooltip content="放大时间轴" placement="top"
             ><el-button
@@ -1413,6 +1427,12 @@ onMounted(refreshWorkbench);
               @click="changeTimelineZoom(0.1)"
               ><AppIcon name="zoom-in" :size="14" /></el-button
           ></el-tooltip>
+          <el-button
+            v-if="timelineZoom !== TIMELINE_ZOOM_DEFAULT"
+            size="small"
+            text
+            @click="timelineZoom = TIMELINE_ZOOM_DEFAULT"
+          >恢复 100%</el-button>
         </div>
       </div>
       <div v-if="lineGroups.length" class="timeline-board">

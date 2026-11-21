@@ -1,7 +1,16 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { businessActionGroups, businessActionPreviewGroups, filterWorkflowCandidates, preferredIssueWarehouse,
-  workflowTargetNumbers } from '../src/utils/ai-business-flow.js';
+import {
+  businessActionGroups,
+  businessActionPreviewGroups,
+  filterBusinessActions,
+  filterWorkflowCandidates,
+  permittedBusinessCommands,
+  preferredIssueWarehouse,
+  workbenchShortcutLimit,
+  workbenchShortcuts,
+  workflowTargetNumbers,
+} from '../src/utils/ai-business-flow.js';
 import { resolveOrderContext } from '../src/utils/ai-order-context.js';
 
 test('办理入口按业务顺序组织，只呈现服务端真实注册能力', () => {
@@ -22,6 +31,40 @@ test('预览沿用业务入口顺序且明确不可执行，正式空目录不�
   assert.equal(groups[0].items[0].code, 'CREATE_PRODUCTION_ORDER');
   assert.deepEqual(businessActionGroups([]), []);
   assert.deepEqual(businessActionGroups([{ code: 'CREATE_PRODUCTION_ORDER', kind: 'query' }]), []);
+});
+
+test('置顶保留工序变体、尊重当前权限，且最多返回四个办理入口', () => {
+  const pins = ['stock-SUBMIT_INSPECTION', 'unknown', 'stock-SUBMIT_INSPECTION', 'shipment-SUBMIT_INSPECTION'];
+  const shortcuts = workbenchShortcuts(businessActionPreviewGroups(), pins);
+  assert.equal(shortcuts.length, workbenchShortcutLimit);
+  assert.deepEqual(shortcuts.slice(0, 2).map((item) => item.label), ['领用复验', '填写出货检验']);
+  const restricted = businessActionGroups([{ code: 'SUBMIT_WORK_REPORT', kind: 'command' }]);
+  assert.deepEqual(workbenchShortcuts(restricted, pins).map((item) => item.code), ['SUBMIT_WORK_REPORT']);
+  assert.deepEqual(workbenchShortcuts([], pins), []);
+});
+
+test('办理搜索同时匹配生产环节和实际事项描述', () => {
+  const groups = businessActionPreviewGroups();
+  const result = filterBusinessActions(groups, 'stock', '检验  转线边');
+  assert.deepEqual(result.flatMap((group) => group.items).map((item) => item.label), ['领料转线边']);
+  assert.deepEqual(filterBusinessActions(groups, 'shipment', '转线边'), []);
+});
+
+test('受限岗位只看到有基础权限的办理，排产和生成动作检查附加条件', () => {
+  const actions = [
+    { action: 'CREATE_PRODUCTION_ORDER', permission: 'mfg:production-order:create' },
+    { action: 'SCHEDULE_PRODUCTION_ORDER', permission: 'mfg:schedule-scenario:confirm' },
+    { action: 'GENERATE_WORK_ORDER', permission: 'mfg:work-order:generate' },
+    { action: 'SUBMIT_INSPECTION', permission: 'qms:inspection-order:submit' },
+    { action: 'UNKNOWN' },
+  ];
+  const can = (permission) => permission === 'qms:inspection-order:submit' || permission.endsWith(':confirm');
+  assert.deepEqual(permittedBusinessCommands(actions, can, false).map((item) => item.action), ['SUBMIT_INSPECTION']);
+  assert.deepEqual(
+    permittedBusinessCommands(actions, () => true, false).map((item) => item.action),
+    ['CREATE_PRODUCTION_ORDER', 'SCHEDULE_PRODUCTION_ORDER', 'SUBMIT_INSPECTION'],
+  );
+  assert.equal(permittedBusinessCommands(actions, () => true, true).length, 4);
 });
 
 test('组件默认半成品仓，整机默认原料仓；多个匹配仓库不得擅自选择', () => {

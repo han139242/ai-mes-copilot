@@ -297,13 +297,12 @@ onBeforeUnmount(() => {
       <button type="button" :aria-pressed="view === 'path'" @click="view = 'path'">
         <AppIcon name="route" :size="16" />关联路径
       </button>
-      <span>让每一步关联，都回到资料里的依据。</span>
     </div>
     <div v-if="view === 'browse'" class="graph-tools">
       <el-input
         v-model="search"
         clearable
-        placeholder="搜索当前图谱，回车定位实体"
+        placeholder="输入实体名，回车定位"
         aria-label="搜索知识图谱"
         @keyup.enter="emit('search', search)"
         @clear="resetView"
@@ -320,7 +319,9 @@ onBeforeUnmount(() => {
         >适应窗口</el-button
       >
       <el-button title="清除筛选并恢复 100% 缩放" @click="resetView">还原视图</el-button>
-      <span class="graph-count">{{ visible.nodes.length }} 节点 · {{ visible.edges.length }} 关系</span>
+      <span v-if="value.ready && !loading" class="graph-count" role="status">
+        {{ visible.nodes.length }} 节点 · {{ visible.edges.length }} 关系
+      </span>
     </div>
     <div v-else class="path-explorer">
       <div class="path-inputs">
@@ -544,11 +545,6 @@ onBeforeUnmount(() => {
   border-color: var(--mes-primary-border);
   font-weight: 600;
 }
-.graph-explore-mode > span {
-  margin-left: auto;
-  font-size: 13px;
-  color: var(--mes-text-secondary);
-}
 .path-explorer {
   margin-bottom: 20px;
 }
@@ -713,8 +709,10 @@ onBeforeUnmount(() => {
   gap: 12px;
   align-items: center;
   flex-wrap: wrap;
-  padding-bottom: 18px;
-  border-bottom: 1px solid var(--mes-border);
+  padding: 10px 12px;
+  border: 1px solid var(--mes-border);
+  border-radius: var(--mes-radius);
+  background: var(--mes-surface-muted);
 }
 .graph-tools .el-input {
   width: 280px;
@@ -742,6 +740,7 @@ onBeforeUnmount(() => {
 .graph-stage {
   min-width: 0;
   position: relative;
+  margin-top: 10px;
 }
 .graph-canvas {
   height: clamp(380px, 46vh, 600px);

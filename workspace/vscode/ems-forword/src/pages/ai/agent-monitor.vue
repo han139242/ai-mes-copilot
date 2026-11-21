@@ -2,6 +2,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import dayjs from 'dayjs';
 import AppIcon from '@/components/common/AppIcon.vue';
+import MesPageHeading from '@/components/common/MesPageHeading.vue';
 import MesChart from '@/components/chart/MesChart.vue';
 import { getAgentCommandDetail, getAgentCommands, getAgentCapabilities, getAgentStats } from '@/api/ai/agent';
 
@@ -288,22 +289,18 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="agent-monitor">
-    <header class="page-header">
-      <div class="page-title">
-        <span class="page-icon"><AppIcon name="monitor" :size="21" /></span>
-        <div>
-          <h1>AI 执行监控</h1>
-        </div>
-      </div>
-      <div class="page-actions">
-        <span v-if="lastRefreshAt" class="refresh-time">更新于 {{ lastRefreshAt }}</span>
+    <MesPageHeading title="AI 执行监控" icon="monitor">
+      <template #detail>
+        <span class="refresh-time">{{ lastRefreshAt ? '更新于 ' + lastRefreshAt : '尚未获取更新时间' }}</span>
+      </template>
+      <template #actions>
         <el-switch v-model="autoRefresh" size="small" active-text="自动刷新" />
         <el-button :loading="loading || statsLoading" @click="refreshAll">
           <AppIcon name="refresh" :size="15" />
           <span>刷新</span>
         </el-button>
-      </div>
-    </header>
+      </template>
+    </MesPageHeading>
 
     <p v-if="offlineHint" class="offline-notice">
       <AppIcon name="alert" :size="14" />
@@ -539,58 +536,6 @@ onBeforeUnmount(() => {
   gap: 14px;
   color: var(--am-text);
   font-size: 13px;
-}
-
-.page-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.page-title {
-  display: flex;
-  align-items: center;
-  gap: 11px;
-}
-
-.page-icon {
-  display: inline-flex;
-  width: 42px;
-  height: 42px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  color: var(--mes-primary);
-  border: 1px solid var(--mes-primary-border, #bcd3fb);
-  border-radius: 6px;
-  background: var(--mes-primary-soft, #eaf2ff);
-}
-
-.page-title h1 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-
-.page-title span {
-  color: var(--am-text-3);
-  font-size: 11.5px;
-}
-
-.page-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.page-actions :deep(.el-button > span) {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
 }
 
 .refresh-time {

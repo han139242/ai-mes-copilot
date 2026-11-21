@@ -13,8 +13,8 @@ export function getResourcePage(baseUrl, params, options = {}) {
 }
 
 // 列表查询：url由调用方提供，适合树结构、主从明细等不一定带/page的接口。
-export function getResourceList(url, params) {
-  return request.get(url, { params });
+export function getResourceList(url, params, options = {}) {
+  return request.get(url, { params, ...options });
 }
 
 // 详情查询：把主键id拼到baseUrl后，例如GET /api/sys/role/10。

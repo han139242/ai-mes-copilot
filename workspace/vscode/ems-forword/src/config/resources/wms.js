@@ -132,6 +132,19 @@ export default [
       sourceProductLotId: { type: 'reference', reference: 'trace-product-lot' },
       createdTime: { form: false, width: 170 },
     },
+    actions: [
+      {
+        key: 'batch-trace',
+        label: '追查批次去向',
+        icon: 'route',
+        kind: 'trace',
+        direction: 'outputs',
+        primary: true,
+        visible: (row) => Boolean(row.batchId),
+        path: (row) => `/api/trace/material-usage/batch/${row.batchId}`,
+      },
+    ],
+    actionColumnWidth: 210,
   }),
   defineResource({
     key: 'wms-inventory',

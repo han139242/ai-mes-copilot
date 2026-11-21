@@ -7,8 +7,8 @@ import { ElNotification } from 'element-plus';
 import AppIcon from '@/components/common/AppIcon.vue';
 import ThemeDrawer from '@/components/layout/ThemeDrawer.vue';
 import { authRevision, clearAuth, getCurrentUser, isFrameworkPreview } from '@/utils/auth';
-import { firstAccessiblePath, getModuleDefinition, getNavigationItems } from '@/config/navigation';
-import { openAiAssistant } from '@/utils/app-events';
+import { firstAccessiblePath, getModuleDefinition, getNavigationItems, isNotificationRouteAccessible } from '@/config/navigation';
+import { openAiAssistant, openBusinessForm } from '@/utils/app-events';
 import { activeTheme } from '@/utils/theme';
 import { getCurrentUserInfo, logout } from '@/api/auth';
 import { getNotificationPage, getNotificationUnreadCount, markNotificationRead } from '@/api/sys/notification';
@@ -16,6 +16,8 @@ import { alertStreamUrl, getAlertPending } from '@/api/ai/alert';
 import { setCurrentUser } from '@/utils/auth';
 import { hasPermission } from '@/utils/permission';
 import { navigationResults, safeRecentPaths } from '@/utils/navigation-search';
+import { businessActionEntries, businessActionGroups } from '@/utils/ai-business-flow';
+import { businessCommands, businessCommandsState, loadBusinessCommands } from '@/stores/aiBusinessActions';
 
 // 顶部栏负责菜单开关、全局搜索、通知、全屏、主题和用户退出。
 defineProps({
@@ -27,10 +29,12 @@ const emit = defineEmits(['toggle']);
 const route = useRoute();
 const router = useRouter();
 const searchOpen = ref(false);
+const searchScope = ref('all');
 const searchKeyword = ref('');
 const searchInput = ref();
 const activeSearchIndex = ref(0);
 const recentPaths = ref([]);
+let requestedBusinessForm;
 const themeOpen = ref(false);
 const fullscreenActive = ref(Boolean(document.fullscreenElement));
 const fullscreenPending = ref(false);
@@ -70,6 +74,7 @@ const timeText = computed(() => now.value.format('HH:mm'));
 const previewMode = isFrameworkPreview();
 // 三个computed分别控制AI入口、通知入口和标记已读操作的权限。
 const canUseAi = computed(() => hasPermission('ai:assistant:use'));
+const canSearchActions = computed(() => !previewMode && canUseAi.value);
 // 判断当前账号是否能看到通知入口和通知列表。
 const canViewNotifications = computed(() => hasPermission('sys:notification:view'));
 // 判断当前账号是否能把通知标记为已读。
@@ -93,12 +98,41 @@ const breadcrumbTitle = computed(() => {
   return route.meta.title || '首页';
 });
 
-const searchResults = computed(() => navigationResults(getNavigationItems(), searchKeyword.value, recentPaths.value));
+const searchScopes = computed(() => [
+  { key: 'all', label: '全部' },
+  { key: 'pages', label: '页面' },
+  ...(canSearchActions.value ? [{ key: 'actions', label: '办理事项' }] : []),
+]);
+const actionSearchItems = computed(() =>
+  canSearchActions.value
+    ? businessActionEntries(businessActionGroups(businessCommands.value)).map((action) => ({
+        label: action.label,
+        group: action.phase,
+        description: [action.prompt, action.description].filter(Boolean).join(' '),
+        icon: 'clipboard',
+        flowKey: action.flowKey,
+      }))
+    : [],
+);
+const searchResults = computed(() => {
+  const keyword = searchKeyword.value.trim();
+  const scope = searchScope.value === 'actions' && !canSearchActions.value ? 'pages' : searchScope.value;
+  const pages = scope !== 'actions' ? getNavigationItems() : [];
+  const actions = scope === 'actions' || (scope === 'all' && keyword) ? actionSearchItems.value : [];
+  const items = [...pages, ...actions];
+  return navigationResults(items, keyword, recentPaths.value, keyword || scope === 'actions' ? items.length : 8);
+});
+const showActionSearchState = computed(
+  () => canSearchActions.value && (searchScope.value === 'actions' || (searchScope.value === 'all' && searchKeyword.value.trim())),
+);
 const activeSearchId = computed(() =>
   searchResults.value.length ? `mes-navigation-result-${activeSearchIndex.value}` : undefined,
 );
 watch(searchResults, () => {
   activeSearchIndex.value = 0;
+});
+watch([searchOpen, authRevision], ([open]) => {
+  if (open && canSearchActions.value) loadBusinessCommands();
 });
 
 // Store static module paths only, separated by account and app instance. Query
@@ -146,18 +180,37 @@ function handleSearchKeydown(event) {
 
 // 打开全局搜索对话框。
 function openSearch() {
+  if (searchOpen.value) return;
   activeSearchIndex.value = 0;
+  searchScope.value = 'all';
+  searchKeyword.value = '';
   searchOpen.value = true;
 }
 
 // 点击搜索结果后关闭搜索，并根据入口类型执行路由跳转或打开AI助手。
 async function navigateTo(item) {
+  if (!searchOpen.value || !item) return;
+  if (item.flowKey) requestedBusinessForm = { key: item.flowKey, revision: authRevision.value };
   searchOpen.value = false;
-  searchKeyword.value = '';
+  if (item.flowKey) return;
   if (item.action === 'ai') {
     openAiAssistant();
   } else if (item.path) {
     await router.push(item.path);
+  }
+}
+
+async function openSelectedBusinessForm() {
+  const selection = requestedBusinessForm;
+  requestedBusinessForm = undefined;
+  if (!selection || selection.revision !== authRevision.value || !canSearchActions.value) return;
+  const sessionOwner = getCurrentUser().userId ?? getCurrentUser().username;
+  const failure = route.path === '/ai/workbench' ? undefined : await router.push('/ai/workbench');
+  if (!failure && route.path === '/ai/workbench') {
+    await loadBusinessCommands();
+    await nextTick();
+    const owner = getCurrentUser().userId ?? getCurrentUser().username;
+    if (owner === sessionOwner && canSearchActions.value && route.path === '/ai/workbench') openBusinessForm(selection.key);
   }
 }
 
@@ -207,7 +260,7 @@ async function openNotification(item) {
     await markNotificationRead(item.recipientId);
   }
   rememberUrgentNotification(item?.recipientId);
-  if (isSafeNotificationRoute(item?.routePath)) {
+  if (isNotificationRouteAccessible(router, item?.routePath)) {
     await router.push(item.routePath);
   }
   await loadNotifications();
@@ -218,12 +271,6 @@ async function openNotificationCenter() {
   notificationOpen.value = false;
   closeUrgentNotification();
   await router.push('/notifications');
-}
-
-// 判断通知携带的地址是否为安全站内路由。
-function isSafeNotificationRoute(path) {
-  // 禁止//开头的协议相对URL，避免通知数据把用户带到站外地址。
-  return typeof path === 'string' && path.startsWith('/') && !path.startsWith('//');
 }
 
 async function redirectIfCurrentRouteForbidden() {
@@ -325,6 +372,14 @@ function notificationTime(value) {
 
 // 处理用户菜单命令，目前logout会调用后端退出并无条件清理本地认证状态。
 async function handleCommand(command) {
+  if (command === 'theme') {
+    themeOpen.value = true;
+    return;
+  }
+  if (command === 'alerts') {
+    await router.push('/ai/alert');
+    return;
+  }
   if (command === 'security') {
     await router.push('/account/security');
     return;
@@ -575,12 +630,13 @@ onBeforeUnmount(() => {
       <button
         class="global-search"
         type="button"
-        title="搜索模块（Ctrl+Shift+K）"
+        title="搜索页面与办理（Ctrl+Shift+K）"
+        aria-label="搜索页面与办理"
         aria-keyshortcuts="Control+Shift+K Meta+Shift+K"
         @click="openSearch"
       >
         <AppIcon name="search" :size="17" />
-        <span>搜索模块</span>
+        <span>搜索或办理</span>
       </button>
 
       <div class="header-clock">
@@ -602,7 +658,7 @@ onBeforeUnmount(() => {
       </el-tooltip>
 
       <el-tooltip :content="`界面主题：${activeTheme.name}`" placement="bottom">
-        <el-button class="header-icon-button" text aria-label="界面主题" @click="themeOpen = true">
+        <el-button class="header-icon-button header-secondary" text aria-label="界面主题" @click="themeOpen = true">
           <AppIcon name="palette" :size="18" />
         </el-button>
       </el-tooltip>
@@ -661,7 +717,7 @@ onBeforeUnmount(() => {
 
       <el-tooltip v-if="canViewAlerts" content="预警中心" placement="bottom">
         <el-badge
-          class="notification-badge"
+          class="notification-badge header-secondary"
           :value="alertBadgeCount"
           :max="99"
           :hidden="alertBadgeCount === 0"
@@ -674,13 +730,13 @@ onBeforeUnmount(() => {
       </el-tooltip>
 
       <el-tooltip v-if="canUseAi" content="AI 工作台" placement="bottom">
-        <el-button class="header-icon-button" text aria-label="AI 工作台" @click="openAiAssistant">
+        <el-button class="header-icon-button header-secondary" text aria-label="AI 工作台" @click="openAiAssistant">
           <AppIcon name="bot" :size="18" />
         </el-button>
       </el-tooltip>
 
       <el-dropdown trigger="click" @command="handleCommand">
-        <button class="user-entry" type="button">
+        <button class="user-entry" type="button" :aria-label="`账号菜单 · ${displayName}`">
           <span class="user-avatar">{{ displayInitial }}</span>
           <span class="user-copy">
             <strong>{{ displayName }}</strong>
@@ -690,6 +746,12 @@ onBeforeUnmount(() => {
         </button>
         <template #dropdown>
           <el-dropdown-menu>
+            <el-dropdown-item v-if="mobile" class="compact-account-action" command="theme">
+              <AppIcon name="palette" :size="16" />界面主题
+            </el-dropdown-item>
+            <el-dropdown-item v-if="mobile && canViewAlerts" class="compact-account-action" command="alerts">
+              <AppIcon name="alert" :size="16" />预警中心
+            </el-dropdown-item>
             <el-dropdown-item command="security"> <AppIcon name="shield-check" :size="16" />账号安全 </el-dropdown-item>
             <el-dropdown-item command="logout">
               <AppIcon name="logout" :size="16" />
@@ -703,10 +765,11 @@ onBeforeUnmount(() => {
     <el-dialog
       v-model="searchOpen"
       class="search-dialog"
-      title="模块导航"
+      title="搜索页面与办理"
       width="min(560px, 94vw)"
       append-to-body
       @opened="focusSearch"
+      @closed="openSelectedBusinessForm"
     >
       <div class="navigation-search-input">
         <AppIcon name="search" :size="18" /><input
@@ -714,9 +777,9 @@ onBeforeUnmount(() => {
           v-model="searchKeyword"
           type="search"
           autocomplete="off"
-          placeholder="搜索模块名称或英文路径"
+          placeholder="试试领料、生产工单或批次追溯"
           role="combobox"
-          aria-label="搜索模块"
+          aria-label="输入页面或办理事项"
           aria-autocomplete="list"
           aria-controls="mes-navigation-results"
           :aria-expanded="searchOpen"
@@ -724,12 +787,23 @@ onBeforeUnmount(() => {
           @keydown="handleSearchKeydown"
         />
       </div>
-      <p v-if="!searchKeyword.trim()" class="search-section-label">最近访问与常用模块</p>
-      <div id="mes-navigation-results" class="search-results" role="listbox" aria-label="可访问模块">
+      <div v-if="canSearchActions" class="search-scopes" role="group" aria-label="搜索范围">
+        <button
+          v-for="scope in searchScopes"
+          :key="scope.key"
+          type="button"
+          :aria-pressed="searchScope === scope.key"
+          @click="searchScope = scope.key"
+          @keydown.up.prevent="focusSearch"
+          @keydown.down.prevent="focusSearch"
+        >{{ scope.label }}</button>
+      </div>
+      <p v-if="!searchKeyword.trim() && searchScope !== 'actions'" class="search-section-label">最近访问与常用页面</p>
+      <div id="mes-navigation-results" class="search-results" role="listbox" aria-label="可访问页面和办理事项">
         <button
           v-for="(item, index) in searchResults"
           :id="`mes-navigation-result-${index}`"
-          :key="item.path || item.action"
+          :key="item.path || item.action || item.flowKey"
           type="button"
           role="option"
           :aria-selected="index === activeSearchIndex"
@@ -743,10 +817,20 @@ onBeforeUnmount(() => {
             ><strong>{{ item.label }}</strong
             ><small v-if="item.description">{{ item.description }}</small></span
           >
+          <span v-if="item.flowKey || item.group" class="search-result-kind">{{ item.flowKey ? '办理' : item.group }}</span>
           <AppIcon name="right" :size="15" />
         </button>
       </div>
-      <div v-if="!searchResults.length" class="search-empty" role="status">未找到可访问模块，试试更短的名称</div>
+      <div v-if="showActionSearchState && businessCommandsState === 'error'" class="search-feedback" role="status">
+        办理目录暂不可用
+        <el-button link type="primary" @click="loadBusinessCommands({ force: true })">重新读取</el-button>
+      </div>
+      <div v-else-if="showActionSearchState && ['idle', 'loading'].includes(businessCommandsState)" class="search-feedback" role="status">
+        正在读取可办理事项…
+      </div>
+      <div v-else-if="!searchResults.length" class="search-empty" role="status">
+        {{ searchScope === 'actions' && !searchKeyword.trim() ? '当前账号暂无办理事项' : '没有匹配结果，可试试更短的名称' }}
+      </div>
       <footer class="search-keyboard-hint"><span>↑ ↓ 选择 · Enter 打开 · Esc 关闭</span><kbd>Ctrl Shift K</kbd></footer>
     </el-dialog>
 
@@ -1047,7 +1131,7 @@ onBeforeUnmount(() => {
   max-height: min(56vh, 480px);
   flex-direction: column;
   gap: 4px;
-  margin-top: 14px;
+  margin-top: 8px;
   overflow-y: auto;
 }
 .navigation-search-input {
@@ -1080,10 +1164,33 @@ onBeforeUnmount(() => {
   color: var(--mes-text-secondary);
 }
 
+.search-scopes {
+  display: flex;
+  gap: 6px;
+  margin-top: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid var(--mes-border);
+}
+.search-scopes button {
+  min-height: 36px;
+  padding: 4px 12px;
+  color: var(--mes-text-secondary);
+  border: 1px solid transparent;
+  border-radius: var(--mes-radius-sm);
+  background: transparent;
+  font: inherit;
+  cursor: pointer;
+}
+.search-scopes button:hover,
+.search-scopes button[aria-pressed='true'] {
+  color: var(--mes-primary);
+  border-color: var(--mes-primary-border);
+  background: var(--mes-primary-soft);
+}
 .search-results button {
   display: grid;
   min-height: 46px;
-  grid-template-columns: 34px 1fr auto;
+  grid-template-columns: 34px minmax(0, 1fr) auto 15px;
   align-items: center;
   gap: 10px;
   padding: 5px 10px;
@@ -1102,7 +1209,7 @@ onBeforeUnmount(() => {
 }
 
 .search-section-label {
-  margin-top: 14px;
+  margin: 12px 0 0;
   color: var(--mes-text-secondary);
   font-size: 12px;
 }
@@ -1122,6 +1229,23 @@ onBeforeUnmount(() => {
   font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.search-result-kind {
+  color: var(--mes-text-secondary);
+  font-size: 12px;
+  white-space: nowrap;
+}
+.search-results button > :last-child {
+  grid-column: 4;
+}
+.search-feedback {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 10px;
+  color: var(--mes-text-secondary);
+  font-size: var(--mes-font-label);
 }
 .search-keyboard-hint {
   display: flex;
@@ -1150,12 +1274,12 @@ onBeforeUnmount(() => {
   justify-content: center;
   border: 1px solid var(--mes-border);
   border-radius: var(--mes-radius-sm);
-  background: #fff;
+  background: var(--mes-surface);
 }
 
 .search-empty {
-  padding: 52px 0;
-  color: var(--mes-text-muted);
+  padding: 30px 0;
+  color: var(--mes-text-secondary);
   text-align: center;
 }
 
@@ -1165,7 +1289,7 @@ onBeforeUnmount(() => {
   }
 }
 @media (max-width: 1180px) {
-  .global-search,
+  .global-search > span,
   .header-clock,
   .user-copy,
   .user-entry > .app-icon {
@@ -1177,9 +1301,19 @@ onBeforeUnmount(() => {
     padding: 3px 0 3px 8px;
   }
 
+  .global-search {
+    width: var(--mes-touch-target);
+    height: var(--mes-touch-target);
+    justify-content: center;
+    padding: 0;
+  }
+
   .app-header {
     padding-right: 10px;
   }
+}
+.compact-account-action {
+  display: none;
 }
 
 @media (max-width: 720px) {
@@ -1189,6 +1323,12 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 520px) {
+  .header-secondary {
+    display: none;
+  }
+  .compact-account-action {
+    display: flex;
+  }
   .breadcrumb > span,
   .breadcrumb > .app-icon {
     display: none;

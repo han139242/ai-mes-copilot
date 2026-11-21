@@ -1,16 +1,22 @@
 <script setup>
+import MesPageHeading from '@/components/common/MesPageHeading.vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
 import dayjs from 'dayjs';
 import { getBomExplosion } from '@/api/bom';
-import { getResourcePage } from '@/api/resource';
+import { getResourceDetail, getResourcePage } from '@/api/resource';
 import { hasPermission } from '@/utils/permission';
 import { getCurrentUser } from '@/utils/auth';
+import { isResourceFocusId } from '@/utils/resource-page-state';
 
+const route = useRoute();
+const routeBomId = isResourceFocusId(route.query.bomId) ? String(route.query.bomId) : '';
 const bomId = ref(null);
 const quantity = ref(100);
 const asOf = ref(dayjs().format('YYYY-MM-DD'));
 const useSemiStock = ref(false);
 const boms = ref([]);
+const selectedBom = ref(null);
 const selecting = ref(false);
 const loading = ref(false);
 const error = ref('');
@@ -39,13 +45,19 @@ async function searchBoms(keyword = 'LAMP-BOM') {
   const number = ++searchNumber;
   selecting.value = true;
   try {
-    const response = await getResourcePage('/api/mdm/bom', { current: 1, size: 50, bomCode: keyword });
+    const response = await getResourcePage('/api/mdm/bom', { current: 1, size: 50, bomCode: keyword }, { suppressErrorMessage: true });
     if (number !== searchNumber) {
       return;
     }
-    boms.value = response.data?.records || [];
+    const found = response.data?.records || [];
+    boms.value = selectedBom.value && !found.some((row) => row.bomId === selectedBom.value.bomId)
+      ? [selectedBom.value, ...found]
+      : found;
     if (!bomId.value) {
-      bomId.value = boms.value.find((b) => b.bomCode === 'LAMP-BOM-L200-V1')?.bomId || boms.value[0]?.bomId || null;
+      if (routeBomId) return;
+      const defaultBom = boms.value.find((b) => b.bomCode === 'LAMP-BOM-L200-V1') || boms.value[0];
+      selectedBom.value = defaultBom || null;
+      bomId.value = defaultBom?.bomId || null;
     }
   } catch (e) {
     if (number === searchNumber) {
@@ -94,8 +106,24 @@ watch([bomId, quantity, asOf, useSemiStock], () => {
   loading.value = false;
   result.value = null;
   error.value = '';
+  if (bomId.value) selectedBom.value = boms.value.find((row) => row.bomId === bomId.value) || selectedBom.value;
 });
-onMounted(() => searchBoms());
+onMounted(async () => {
+  await searchBoms(routeBomId ? '' : undefined);
+  if (!routeBomId || queryNumber || !hasPermission('mdm:bom:view')) return;
+  const search = searchNumber;
+  const listed = boms.value.find((row) => String(row.bomId) === routeBomId);
+  try {
+    const selected = listed || (await getResourceDetail('/api/mdm/bom', routeBomId)).data;
+    if (search !== searchNumber || bomId.value) return;
+    if (!selected || String(selected.bomId) !== routeBomId) throw new Error('来源 BOM 暂不可用');
+    selectedBom.value = selected;
+    if (!listed) boms.value = [selected, ...boms.value];
+    bomId.value = selected.bomId;
+  } catch {
+    if (search === searchNumber && !bomId.value) error.value = '未取得来源 BOM 版本，可在列表中手动选择。';
+  }
+});
 onBeforeUnmount(() => {
   pending?.abort();
   ++queryNumber;
@@ -105,12 +133,11 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="bom-explorer">
-    <header class="bom-heading">
-      <div>
-        <h1>BOM 需求分析</h1>
-      </div>
-      <el-tag type="info" effect="plain">只读分析</el-tag>
-    </header>
+    <MesPageHeading title="BOM 需求分析" icon="route" class="bom-heading">
+      <template #actions>
+        <el-tag type="info" effect="plain">只读分析</el-tag>
+      </template>
+    </MesPageHeading>
     <el-form class="bom-controls" label-position="top" novalidate @submit.prevent="analyze">
       <el-form-item label="产品物料清单" class="bom-selector">
         <el-select
@@ -148,7 +175,8 @@ onBeforeUnmount(() => {
     <el-alert v-if="error" :title="error" type="error" show-icon :closable="false" class="bom-message" />
     <div v-if="result" class="bom-results" v-loading="loading">
       <div class="bom-summary" aria-live="polite">
-        <strong>{{ result.bomVersion }} · {{ result.quantity }} {{ result.unitName }}</strong
+        <strong>{{ result.bomCode }} · {{ result.bomVersion }} · {{ result.quantity }} {{ result.unitName }}</strong
+        ><span>生效日期 {{ result.asOf }}</span
         ><span>叶子物料 {{ result.distinctMaterialCount }} 种</span><span>原材料 {{ result.rawMaterialCount }} 种</span
         ><span>直接子项 {{ result.directItems.length }} 种</span>
       </div>
@@ -212,20 +240,10 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .bom-explorer {
-  padding: 22px;
   color: var(--el-text-color-primary);
 }
 .bom-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-  gap: 16px;
-  margin-bottom: 22px;
-}
-.bom-heading h1 {
-  font-size: 26px;
-  margin: 0;
-  letter-spacing: -0.5px;
+  margin-bottom: 16px;
 }
 .bom-controls {
   display: flex;
@@ -284,14 +302,8 @@ onBeforeUnmount(() => {
   }
 }
 @media (max-width: 600px) {
-  .bom-explorer {
-    padding: 12px;
-  }
   .bom-selector {
     min-width: 100%;
-  }
-  .bom-heading h1 {
-    font-size: 22px;
   }
 }
 </style>

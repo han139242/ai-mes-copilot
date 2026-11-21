@@ -488,7 +488,7 @@ const labels = {
 export const referencePresentation = {
   'sys-user': ['username'],
   'sys-role': ['roleName', 'roleCode'],
-  'sys-menu': ['menuName'],
+  'sys-menu': ['menuName', 'permissionCode', 'routePath'],
   'sys-file': ['fileName'],
   'org-department': ['departmentName', 'departmentCode'],
   'org-employee': ['employeeName', 'employeeNo'],

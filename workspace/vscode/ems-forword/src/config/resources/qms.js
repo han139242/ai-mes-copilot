@@ -166,6 +166,7 @@ export default [
     icon: 'shield-check',
     baseUrl: '/api/qms/inspection-order',
     idField: 'inspectionId',
+    actionColumnWidth: 220,
     createPath: '/full',
     updatePath: '/full',
     fields: [
@@ -262,6 +263,7 @@ export default [
         label: '逐件检验',
         icon: 'check',
         kind: 'piece-inspection',
+        primary: true,
         method: 'put',
         path: (row) => `/api/qms/inspection-order/${row.inspectionId}/submit-piece`,
         visible: (row) => row.status === 'DRAFT',
@@ -293,6 +295,7 @@ export default [
       },
       {
         key: 'view-existing-ncr', label: '查看已有处置单', icon: 'arrow', kind: 'navigate',
+        primary: true,
         targetResource: 'qms-nonconforming-order',
         visible: (row) => Boolean(row.nonconformingOrderId),
         query: (row) => ({ inspectionId: row.inspectionId, focus: row.nonconformingOrderId, from: row.inspectionNo,

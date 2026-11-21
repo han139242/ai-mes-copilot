@@ -1,4 +1,5 @@
 <script setup>
+import MesPageHeading from '@/components/common/MesPageHeading.vue';
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import dayjs from 'dayjs';
 import { ElMessage, ElMessageBox } from 'element-plus';
@@ -131,15 +132,16 @@ onBeforeUnmount(() => {
 
 <template>
   <section class="account-security">
-    <header class="security-heading">
-      <div>
-        <h1>账号安全</h1>
-        <p>管理本人的人脸登录。密码登录始终保留。</p>
-      </div>
-      <el-button :loading="loading" :disabled="preview" @click="loadStatus"
-        ><AppIcon name="refresh" :size="15" />刷新状态</el-button
-      >
-    </header>
+    <MesPageHeading title="账号安全" icon="shield-check" class="security-heading">
+      <template #detail>
+        管理本人的人脸登录。密码登录始终保留。
+      </template>
+      <template #actions>
+        <el-button :loading="loading" :disabled="preview" @click="loadStatus"
+          ><AppIcon name="refresh" :size="15" />刷新状态</el-button
+        >
+      </template>
+    </MesPageHeading>
     <div v-if="preview" class="security-notice" role="status">
       当前为框架预览。<RouterLink :to="{ path: '/login', query: { redirect: '/account/security' } }"
         >登录后管理本人设置</RouterLink
@@ -227,22 +229,7 @@ onBeforeUnmount(() => {
   color: var(--mes-text);
 }
 .security-heading {
-  display: flex;
-  justify-content: space-between;
-  gap: 20px;
-  align-items: center;
-  margin-bottom: 24px;
-}
-.security-heading h1 {
-  margin: 0;
-  font-size: 24px;
-  font-weight: 650;
-}
-.security-heading p {
-  margin: 8px 0 0;
-  color: var(--mes-text-secondary);
-  font-size: 14px;
-  line-height: 1.7;
+  margin-bottom: 16px;
 }
 .security-section {
   background: var(--mes-surface);
@@ -347,12 +334,6 @@ onBeforeUnmount(() => {
   }
 }
 @media (max-width: 640px) {
-  .security-heading {
-    align-items: flex-start;
-  }
-  .security-heading h1 {
-    font-size: 21px;
-  }
   .security-section {
     padding: 20px 16px;
   }

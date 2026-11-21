@@ -61,6 +61,7 @@ export default [
     icon: 'route',
     baseUrl: '/api/trace/product-lot',
     idField: 'productLotId',
+    actionColumnWidth: 218,
     permissions: { create: false, edit: false, delete: false },
     fields: [
       'lotNo',
@@ -96,7 +97,7 @@ export default [
         resource: 'qms-inspection-order',
         parentField: 'productLotId',
         endpoint: () => '/api/qms/inspection-order/page',
-        params: (row) => ({ current: 1, size: 100, productLotId: row.productLotId }),
+        params: (row) => ({ current: 1, size: 100, productLotId: row.productLotId, inspectionType: 'FINAL' }),
         label: (row) => row.lotNo,
       },
       {
@@ -112,10 +113,13 @@ export default [
     actions: [
       {
         key: 'trace',
-        label: '查看全链路',
+        label: '查看追溯',
         icon: 'scan',
         type: 'primary',
         kind: 'trace',
+        direction: 'inputs',
+        primary: true,
+        visible: (row) => Boolean(row.lotNo),
         path: (row) => `/api/trace/product-lot/lot-no/${encodeURIComponent(row.lotNo)}`,
       },
       {
@@ -159,6 +163,7 @@ export default [
     icon: 'database',
     baseUrl: '/api/trace/material-usage',
     idField: 'usageId',
+    actionColumnWidth: 205,
     permissions: { create: false, edit: false, delete: false },
     fields: [
       'productLotId',
@@ -185,10 +190,13 @@ export default [
     actions: [
       {
         key: 'batch-trace',
-        label: '反向追溯',
+        label: '追查批次去向',
         icon: 'route',
         type: 'primary',
         kind: 'trace',
+        direction: 'outputs',
+        primary: true,
+        visible: (row) => Boolean(row.batchId),
         path: (row) => `/api/trace/material-usage/batch/${row.batchId}`,
       },
     ],

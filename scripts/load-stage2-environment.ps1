@@ -6,12 +6,10 @@ if(-not (Test-Path -LiteralPath $configurationPath)) {
 }
 . $configurationPath
 $modelConfigurationPath=Join-Path $RuntimeDirectory 'model-secret.clixml'
-if($NoCloud) {
+if($NoCloud -or $env:PRIVATE_DEEPSEEK_TOOLS_ONLY -eq '1') {
     $env:PRIVATE_LLM_URL=''
     $env:PRIVATE_LLM_KEY=''
     $env:PRIVATE_LLM_MODEL=''
-    $env:PRIVATE_DEEPSEEK_TOOLS_KEY=''
-    $env:PRIVATE_DEEPSEEK_TOOLS_ENABLED='0'
     $env:PRIVATE_DEEPSEEK_SAFETY='0'
 } elseif(Test-Path -LiteralPath $modelConfigurationPath) {
     $modelConfiguration=Import-Clixml -LiteralPath $modelConfigurationPath
@@ -26,6 +24,10 @@ if($NoCloud) {
     $env:PRIVATE_LLM_URL=[Environment]::GetEnvironmentVariable('AI_API_URL','User')
     $env:PRIVATE_LLM_KEY=[Environment]::GetEnvironmentVariable('AI_API_KEY','User')
     $env:PRIVATE_LLM_MODEL=[Environment]::GetEnvironmentVariable('AI_MODEL','User')
+}
+if($NoCloud) {
+    $env:PRIVATE_DEEPSEEK_TOOLS_KEY=''
+    $env:PRIVATE_DEEPSEEK_TOOLS_ENABLED='0'
 }
 $env:PYTHONUTF8='1'
 $env:HF_HUB_DISABLE_TELEMETRY='1'

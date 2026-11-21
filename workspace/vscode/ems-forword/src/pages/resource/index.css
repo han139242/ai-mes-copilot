@@ -1,5 +1,6 @@
 /* 通用资源页样式：适用于全部配置化表格、表单、主从明细和动作弹窗。 */
 .resource-page {
+  container: resources / inline-size;
   min-width: 0;
 }
 .resource-workspace {
@@ -49,10 +50,10 @@
   flex: none;
   align-items: center;
   justify-content: center;
-  color: var(--mes-text-secondary);
-  border: 1px solid #e6eaf0;
+  color: var(--mes-primary);
+  border: 1px solid var(--mes-primary-border);
   border-radius: 6px;
-  background: var(--mes-surface-muted);
+  background: var(--mes-primary-soft);
 }
 .resource-title-line {
   min-width: 0;
@@ -69,9 +70,27 @@
 }
 .resource-count {
   flex: none;
-  color: var(--mes-text-muted);
-  font-size: 12px;
+  color: var(--mes-text);
+  font-size: 13px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
+}
+.result-sort-scope {
+  color: var(--mes-text-secondary);
+  font-size: var(--mes-font-small);
+}
+.resource-results,
+.resource-results-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+}
+.resource-results {
+  min-height: 44px;
+  justify-content: space-between;
+  padding: 6px 20px;
+  border-bottom: 1px solid var(--mes-border);
 }
 .resource-toolbar {
   min-width: 0;
@@ -692,28 +711,6 @@
 .upload-meta :deep(.el-input-number) {
   width: 100%;
 }
-.trace-content {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-}
-.trace-section {
-  overflow: hidden;
-  border: 1px solid var(--mes-border);
-  border-radius: var(--mes-radius);
-  background: #fff;
-}
-.trace-section h3 {
-  padding: 11px 14px;
-  border-bottom: 1px solid var(--mes-border);
-  font-size: 13px;
-}
-.trace-section > p {
-  padding: 14px;
-  color: var(--mes-text-secondary);
-  font-size: 12px;
-  white-space: pre-wrap;
-}
 /* 订单全过程抽屉比表格详情更宽：八阶段横向排开，图表两列并排。 */
 .progress-drawer .drawer-shell {
   grid-template-rows: auto minmax(0, 1fr);
@@ -726,7 +723,7 @@
   align-items: center;
   gap: 4px;
 }
-@media (max-width: 1280px) {
+@container resources (max-width: 980px) {
   .resource-commandbar {
     align-items: flex-start;
     flex-wrap: wrap;
@@ -744,7 +741,7 @@
     width: auto;
   }
 }
-@media (max-width: 720px) {
+@container resources (max-width: 720px) {
   .resource-commandbar {
     align-items: flex-start;
     flex-direction: column;
@@ -778,6 +775,13 @@
   }
   .resource-query-state {
     padding: 10px 16px;
+  }
+  .resource-results {
+    padding-inline: 16px;
+  }
+  .resource-results .mes-icon-button {
+    min-width: var(--mes-touch-target);
+    min-height: var(--mes-touch-target);
   }
   .resource-toolbar :deep(.el-button),
   .filter-actions :deep(.el-button),

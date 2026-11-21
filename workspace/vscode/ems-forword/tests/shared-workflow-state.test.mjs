@@ -12,7 +12,8 @@ import { registerPageRefreshGuard, allowPageRefresh } from '../src/utils/app-eve
 function setup(path) {
   return readFileSync(new URL(path, import.meta.url), 'utf8')
     .match(/<script setup>([\s\S]*?)<\/script>/)[1]
-    .replace(/^import[\s\S]*?;\r?$/gm, '');
+    .replace(/^import[\s\S]*?;\r?$/gm, '')
+    .replaceAll('import.meta.env', '{}');
 }
 const resourceScript = setup('../src/pages/resource/index.vue');
 function deferred() {
@@ -86,6 +87,7 @@ function harness() {
     const getCurrentUser=()=>fixture.user,authRevision=ref(0),hasAuthenticatedSession=()=>fixture.authenticated;
     const isFrameworkPreview=()=>false,canUseResourceMockFallback=()=>false;
     const hasPermission=()=>fixture.permissions !== false,hasRequestPermission=()=>true,resourcePermission=()=>'';
+    const isNavigationPathAccessible=()=>fixture.permissions !== false;
     const getResourcePage=(url,params)=>{requests.push({url,params});return fixture.query(url,params)};
     const getResourceList=async()=>({data:[]}),getResourceDetail=(...args)=>fixture.detail(...args);
     const createResource=(...args)=>{writes.push(args);return fixture.write(...args)},updateResource=createResource,executeResourceAction=createResource;
@@ -130,12 +132,15 @@ function harness() {
 
 test('module search ranks exact names first, supports English paths and filters unsafe recents', () => {
   const items = [
-    { label: '工单管理', path: '/mfg/work-orders', description: '生产工单' },
+    { label: '工单管理', path: '/mfg/work-orders', description: '生产工单', group: '生产制造' },
     { label: '工单', path: '/mfg/tasks' },
     { label: '我的知识', path: '/ai/knowledge' },
+    { label: '领料转线边', flowKey: 'stock-TRANSFER_TO_LINE_SIDE', group: '领料与库存' },
   ];
   assert.equal(navigationResults(items, '工单')[0].label, '工单');
   assert.equal(navigationResults(items, 'mfg work-orders')[0].path, '/mfg/work-orders');
+  assert.equal(navigationResults(items, '生产制造 工单')[0].path, '/mfg/work-orders');
+  assert.equal(navigationResults(items, '库存 转线边')[0].flowKey, 'stock-TRANSFER_TO_LINE_SIDE');
   assert.deepEqual(safeRecentPaths(['/private', '/ai/knowledge?secret=x', '/ai/knowledge', '/ai/knowledge'], items), [
     '/ai/knowledge',
   ]);
@@ -354,6 +359,50 @@ test('failed queries preserve the last result, mark edited conditions and block 
   } finally {
     h.dispose();
   }
+});
+test('paging, refresh and retries use the selected query without submitting unsaved edits', async () => {
+  const h = harness();
+  try {
+    h.c.filters.keyword = 'applied';
+    await h.c.handleSearch();
+    h.c.filters.keyword = 'draft';
+    h.fixture.query = async () => { throw new Error('Offline on page two'); };
+    await h.c.handlePageChange(2);
+    assert.deepEqual(h.requests.at(-1).params, { current: 2, size: 20, keyword: 'applied' });
+    h.fixture.query = async () => response('refreshed', 2);
+    await h.c.retryQuery();
+    assert.deepEqual(h.requests.at(-1).params, { current: 2, size: 20, keyword: 'applied' });
+    await h.c.refreshData();
+    assert.equal(h.requests.at(-1).params.keyword, 'applied');
+    assert.equal(h.c.filters.keyword, 'draft');
+    h.c.discardFilterDraft();
+    assert.equal(h.c.filters.keyword, 'applied');
+    assert.equal(h.c.filtersChanged.value, false);
+  } finally {
+    h.dispose();
+  }
+});
+test('removing an applied filter does not apply different in-progress filters', async () => {
+  const h = harness();
+  try {
+    Object.assign(h.c.filters, { keyword: 'old term', status: 'FINISHED' });
+    await h.c.handleSearch();
+    h.c.filters.keyword = 'unsaved term';
+    await h.c.removeAppliedFilter('status');
+    assert.deepEqual(h.requests.at(-1).params, { current: 1, size: 20, keyword: 'old term' });
+    assert.equal(h.c.filters.keyword, 'unsaved term');
+    assert.equal(h.c.filtersChanged.value, true);
+  } finally {
+    h.dispose();
+  }
+});
+test('saved filters accept only existing scalar query fields', () => {
+  assert.deepEqual(
+    state.readSavedFilterValues([{ prop: 'min' }, { prop: 'enabled' }, { prop: 'query' }], {
+      min: 0, enabled: false, query: ['invalid'], privateData: 'excluded',
+    }),
+    { min: 0, enabled: false },
+  );
 });
 for (const fails of [false, true])
   test(`late in-flight focus hydration cannot alter newer results (${fails ? 'failure' : 'success'})`, async () => {

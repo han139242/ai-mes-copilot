@@ -9,6 +9,7 @@ import { getResourcePage } from '@/api/resource';
 import { createDashboardPreview } from '@/config/dashboard-preview';
 import { appShortName } from '@/config/branding';
 import { isFrameworkPreview } from '@/utils/auth';
+import { hasPermission } from '@/utils/permission';
 import { productionScreenLayout } from '@/utils/production-screen-layout';
 
 // 生产大屏面向车间看板，以固定1920x1080设计稿等比缩放，并每分钟刷新生产运营数据。
@@ -95,7 +96,7 @@ const syncText = computed(() => {
   if (scheduleError.value) {
     return '排期数据未更新';
   }
-  return '数据已同步';
+  return lastUpdated.value ? '数据已同步' : '等待同步数据';
 });
 
 // 从生产汇总中读取今日合格数量。
@@ -1011,10 +1012,28 @@ onBeforeUnmount(() => {
   <!-- stage内部始终按1920x1080布局，外层页面只负责缩放；各数据区由computed结构循环渲染。 -->
   <div class="big-screen-page">
     <div class="screen-mobile-toolbar" :inert="scheduleExpanded">
-      <span>生产大屏 · 横屏查看更清晰</span>
-      <button type="button" @click="exitBigScreen">返回工作台</button>
+      <div>
+        <strong>生产概况</strong>
+        <span role="status">{{ syncText }}<template v-if="lastUpdated"> · {{ updateText }}</template></span>
+      </div>
+      <button type="button" @click="exitBigScreen">返回首页</button>
     </div>
-    <div class="big-screen-stage" :style="stageStyle">
+    <section class="screen-mobile-metrics" aria-label="生产关键指标" :inert="scheduleExpanded">
+      <dl>
+        <div v-for="kpi in kpis" :key="kpi.label">
+          <dt>{{ kpi.label }}</dt>
+          <dd>{{ lastUpdated ? kpi.value : '—' }}<small v-if="lastUpdated">{{ kpi.unit }}</small></dd>
+        </div>
+      </dl>
+      <div class="screen-mobile-links">
+        <button type="button" :disabled="loading" @click="loadData">刷新数据</button>
+        <button v-if="hasPermission('mfg:production-plan:view')" type="button" @click="openModule('/mfg/production-plans')">
+          生产计划
+        </button>
+        <span>横屏可查看完整图表</span>
+      </div>
+    </section>
+    <div class="big-screen-stage" :class="{ 'is-schedule-expanded': scheduleExpanded }" :style="stageStyle">
       <header class="screen-header" :inert="scheduleExpanded">
         <div class="header-branding">
           <button

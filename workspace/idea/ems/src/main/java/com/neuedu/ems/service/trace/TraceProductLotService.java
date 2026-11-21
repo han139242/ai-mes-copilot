@@ -69,4 +69,6 @@ public interface TraceProductLotService extends IService<TraceProductLot> {
      * @return 产品追溯详情
      */
     Map<String, Object> getProductLotTraceByLotNo(String lotNo);
+
+    Map<String, Object> getProductLotTraceById(Long productLotId);
 }

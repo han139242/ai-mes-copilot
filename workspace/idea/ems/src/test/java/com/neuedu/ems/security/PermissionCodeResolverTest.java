@@ -53,6 +53,10 @@ class PermissionCodeResolverTest {
                 resolver.resolve("POST", "/api/qms/inspection-result/batch").orElseThrow());
         assertEquals("trace:material-usage:reverse-trace",
                 resolver.resolve("GET", "/api/trace/material-usage/batch/4").orElseThrow());
+        assertEquals("trace:product-lot:trace",
+                resolver.resolve("GET", "/api/trace/product-lot/27/trace").orElseThrow());
+        assertEquals("trace:product-lot:trace",
+                resolver.resolve("GET", "/api/trace/product-lot/invalid-id/trace").orElseThrow());
         assertEquals("mfg:schedule-scenario:validate",
                 resolver.resolve("POST", "/api/mfg/schedule-scenario/5/validate").orElseThrow());
         assertEquals("mfg:schedule-scenario:ai-advice",

@@ -156,6 +156,18 @@ export default [
       status: enable,
       createdTime: { form: false, width: 170 },
     },
+    actions: [
+      {
+        key: 'manufacturing-preparation',
+        label: '检查制造准备',
+        icon: 'clipboard',
+        kind: 'page',
+        primary: true,
+        path: '/mdm/manufacturing-preparation',
+        query: (row) => ({ productId: row.productId }),
+      },
+    ],
+    actionColumnWidth: 212,
   }),
   defineResource({
     key: 'mdm-bom',
@@ -178,6 +190,19 @@ export default [
     canEdit: (row) => row.status === 'DRAFT',
     canDelete: (row) => row.status === 'DRAFT',
     lockedReason: '已发布 BOM 版本已冻结，请新建版本后调整',
+    actions: [
+      {
+        key: 'analyze-bom',
+        label: '分析用料',
+        icon: 'route',
+        kind: 'page',
+        primary: true,
+        path: '/mdm/bom-explorer',
+        query: (row) => ({ bomId: row.bomId }),
+        visible: (row) => ['RELEASED', 'DRAFT'].includes(row.status),
+      },
+    ],
+    actionColumnWidth: 215,
     relations: [
       {
         key: 'items',

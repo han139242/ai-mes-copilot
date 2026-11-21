@@ -4,6 +4,8 @@ import { readFileSync } from 'node:fs';
 import * as vue from 'vue';
 import * as knowledge from '../src/utils/private-knowledge.js';
 import { sliceUtf16 } from '../src/utils/text.js';
+import { createClientId } from '../src/utils/client-id.js';
+import { queueBusinessDraft, takeBusinessDraft } from '../src/utils/business-handoff.js';
 
 // Execute the shipped component scripts. API responses and the parent graph
 // response are in-memory fixtures; these tests never contact a service.
@@ -45,13 +47,21 @@ function knowledgeHarness(graphResponses = [], responses = {}) {
       'sliceUtf16',
       'injectedResponses',
       'injectedToken',
+      'queueBusinessDraft',
+      'createClientId',
       `
     const {computed,nextTick,reactive,ref,watch}=vue;
     const {historySessions,knowledgeModes,knowledgeGenerationState,knowledgePreferencesSnapshot,
-      knowledgePreferencesChanged,knowledgeState,savePrivateDownload,validateKnowledgeFile}=knowledge;
+      knowledgePreferencesChanged,knowledgeState,locateCitationExcerpt,savePrivateDownload,validateKnowledgeFile}=knowledge;
     const onMounted=()=>{},onBeforeUnmount=fn=>cleanup.push(fn);
     const routeRequests=[];
-    const useRouter=()=>({push(value){routeRequests.push(value)}}),dayjs=()=>({format(){return ''}});
+    const useRouter=()=>({
+      push(value){
+        routeRequests.push(value);
+        if(injectedResponses.navigate) return injectedResponses.navigate(value);
+      }
+    }),dayjs=()=>({format(){return ''}});
+    const isNavigationPathAccessible=()=>injectedResponses.canOpenBusiness?.() ?? true;
     const ElMessage={success(){},info(){}},ElMessageBox={confirm:async()=>{}};
     const authRevision=ref(0),getToken=()=> injectedToken.value,isFrameworkPreview=()=>false;
     const dispatchPrivate=(action,payload)=>{
@@ -68,9 +78,9 @@ function knowledgeHarness(graphResponses = [], responses = {}) {
     const uploadPrivateFile=()=>{throw new Error('Unexpected upload')};
     const window={addEventListener(){},removeEventListener(){},location:{reload(){}}};
     ${script}
-    return {${declaredFunctions(script).join(',')},sourcePanel,sourceError,sourceLoading,service,graph,graphLoading,graphError,thread,messages,routeRequests,question,mode,session,sending,replacedQuestion,previousConversation,canReturnPrevious,historyClearing,histories};
+    return {${declaredFunctions(script).join(',')},sourcePanel,sourceError,sourceLoading,service,graph,graphLoading,graphError,thread,messages,routeRequests,question,mode,session,sending,replacedQuestion,previousConversation,canReturnPrevious,historyClearing,histories,documents,sourceScope,scopeCurrent};
   `,
-    )(vue, knowledge, pending, [...graphResponses], graphRequests, cleanup, sliceUtf16, responses, token),
+    )(vue, knowledge, pending, [...graphResponses], graphRequests, cleanup, sliceUtf16, responses, token, queueBusinessDraft, createClientId),
   );
   return {
     c,
@@ -83,6 +93,28 @@ function knowledgeHarness(graphResponses = [], responses = {}) {
     },
   };
 }
+
+test('the knowledge page can start new conversations using Web Crypto without native randomUUID', () => {
+  const descriptor = Object.getOwnPropertyDescriptor(globalThis.crypto, 'randomUUID');
+  Object.defineProperty(globalThis.crypto, 'randomUUID', { configurable: true, value: undefined });
+  try {
+    const h = knowledgeHarness();
+    try {
+      const first = h.c.session.value;
+      h.c.newConversation();
+      const second = h.c.session.value;
+      for (const value of [first, second]) {
+        assert.match(value, /^[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/);
+      }
+      assert.notEqual(first, second);
+    } finally {
+      h.dispose();
+    }
+  } finally {
+    if (descriptor) Object.defineProperty(globalThis.crypto, 'randomUUID', descriptor);
+    else delete globalThis.crypto.randomUUID;
+  }
+});
 
 test('empty knowledge conversations reset to the top while populated threads keep the latest message', async () => {
   const h = knowledgeHarness(),
@@ -102,17 +134,34 @@ test('empty knowledge conversations reset to the top while populated threads kee
   }
 });
 
-test('long knowledge questions respect the existing 500 character business chat contract', () => {
-  const h = knowledgeHarness();
+test('knowledge-to-business navigation carries a single-use draft outside the URL and respects the character limit', async () => {
+  const drafts = [];
+  const h = knowledgeHarness([], { navigate() { drafts.push(takeBusinessDraft('synthetic-owner')); } });
   try {
-    h.c.toBusiness('问'.repeat(1000));
-    assert.equal(h.c.routeRequests[0].query.prefill.length, 500);
-    assert.equal(h.c.routeRequests[0].path, '/ai/workbench');
-    h.c.toBusiness('a'.repeat(499) + '😀');
-    assert.equal(h.c.routeRequests[1].query.prefill.length, 499);
-    assert.doesNotThrow(() => encodeURIComponent(h.c.routeRequests[1].query.prefill));
+    await h.c.toBusiness('问'.repeat(1000));
+    await h.c.toBusiness('a'.repeat(499) + '😀');
+    assert.deepEqual(h.c.routeRequests, ['/ai/workbench', '/ai/workbench']);
+    assert.deepEqual(drafts, ['问'.repeat(500), 'a'.repeat(499)]);
+    assert.equal(takeBusinessDraft('synthetic-owner'), '');
   } finally {
     h.dispose();
+  }
+});
+
+test('blocked or canceled navigation and account switches cannot leave a transferable draft', async () => {
+  const restricted = knowledgeHarness([], { canOpenBusiness: () => false });
+  const canceled = knowledgeHarness([], { navigate: () => ({ type: 4 }) });
+  try {
+    await restricted.c.toBusiness('私有问题');
+    assert.deepEqual(restricted.c.routeRequests, []);
+    await canceled.c.toBusiness('取消跳转');
+    assert.equal(takeBusinessDraft('synthetic-owner'), '');
+    queueBusinessDraft('仅当前会话', 'synthetic-owner');
+    assert.equal(takeBusinessDraft('other-owner'), '');
+    assert.equal(takeBusinessDraft('synthetic-owner'), '');
+  } finally {
+    restricted.dispose();
+    canceled.dispose();
   }
 });
 
@@ -409,6 +458,116 @@ test('retrying a failed knowledge question preserves the next question and its u
     h.c.undoQuestionReplacement();
     assert.equal(h.c.question.value, '下一问的手写内容');
     assert.equal(h.c.sending.value, false);
+  } finally {
+    h.dispose();
+  }
+});
+
+test('scoped retries keep their original document and version after the composer changes scope', async () => {
+  const requests = [];
+  const h = knowledgeHarness([], {
+    question: async (payload) => {
+      requests.push(payload);
+      throw { displayMessage: '合成请求失败' };
+    },
+  });
+  try {
+    const document = { id: 'test-a', name: '合成说明.md', active_hash: 'valid', vector_version: 1 };
+    h.c.service.value = { revision: 1, sourceScopeAvailable: true };
+    h.c.documents.value = [document];
+    h.c.chooseSourceScope(document);
+    h.c.question.value = '本次待查问题';
+    await h.c.sendQuestion();
+    const failure = h.c.messages.value.at(-1);
+    h.c.clearSourceScope();
+    h.c.mode.value = 'fusion';
+    h.c.question.value = '接下来准备提问';
+    await h.c.sendQuestion(failure.retry, failure.retryContext);
+    assert.deepEqual(requests.map(({ mode, sourceScope }) => [mode, sourceScope]), [
+      ['rag', { documentId: document.id, version: 1, previousHistoryId: null }],
+      ['rag', { documentId: document.id, version: 1, previousHistoryId: null }],
+    ]);
+    assert.equal(h.c.question.value, '接下来准备提问');
+    assert.equal(h.c.sourceScope.value, null);
+  } finally {
+    h.dispose();
+  }
+});
+
+test('history keeps a superseded document scope until the user explicitly changes it', async () => {
+  const h = knowledgeHarness();
+  try {
+    const scope = { documentId: 'test-a', name: '旧版说明.md', version: 1 };
+    h.c.service.value = { revision: 2, sourceScopeAvailable: true };
+    h.c.documents.value = [{ id: scope.documentId, name: '新版说明.md', active_hash: 'valid', vector_version: 2 }];
+    h.c.openConversation({ id: 'saved', rows: [{ id: 1, response: { sourceScope: scope }, question: '旧问题', valid: false }] });
+    assert.deepEqual(h.c.sourceScope.value, { ...scope, previousHistoryId: null });
+    assert.equal(h.c.scopeCurrent.value, false);
+    h.c.chooseSourceScope(h.c.documents.value[0]);
+    assert.equal(h.c.sourceScope.value.version, 2);
+    assert.equal(h.c.scopeCurrent.value, true);
+    h.c.newConversation();
+    assert.equal(h.c.sourceScope.value, null);
+    h.c.returnPreviousConversation();
+    assert.equal(h.c.sourceScope.value.version, 2);
+  } finally {
+    h.dispose();
+  }
+});
+
+test('a scoped question refuses an unscoped or out-of-scope response', async () => {
+  const queue = [
+    { answer: '旧服务未确认范围', citations: [{ documentId: 'test-b', version: 1 }] },
+    { sourceScope: { documentId: 'test-a', version: 1 }, citations: [{ documentId: 'test-b', version: 1 }] },
+  ];
+  const h = knowledgeHarness([], { question: async () => queue.shift() });
+  try {
+    const document = { id: 'test-a', name: '合成说明.md', active_hash: 'valid', vector_version: 1 };
+    h.c.service.value = { revision: 1, sourceScopeAvailable: true };
+    h.c.documents.value = [document];
+    h.c.chooseSourceScope(document);
+    await h.c.sendQuestion('第一次检查资料范围');
+    await h.c.sendQuestion('第二次检查资料范围');
+    const replies = h.c.messages.value.filter((message) => message.role !== 'user');
+    assert.deepEqual(replies.map(({ role, text }) => [role, text]), Array(2).fill([
+      'error', '这次未能确认查询范围，请重试“只问此资料”。',
+    ]));
+    assert.equal(h.c.sourceScope.value.documentId, 'test-a');
+  } finally {
+    h.dispose();
+  }
+});
+
+test('scoped followups use the last visible history ID and start cold after selecting another source', async () => {
+  const requests = [];
+  const first = { id: 'test-a', name: '合成型号.md', active_hash: 'one', vector_version: 1 };
+  const second = { id: 'test-b', name: '合成检验.md', active_hash: 'two', vector_version: 1 };
+  const listing = { documents: [first, second], revision: 1, sourceScopeAvailable: true };
+  const h = knowledgeHarness([], {
+    'documents.list': async () => listing,
+    status: async () => ({}),
+    history: async () => [],
+    question: async ({ sourceScope }) => {
+      requests.push(sourceScope);
+      return { sourceScope, citations: [], historyId: requests.length };
+    },
+  });
+  try {
+    await h.c.refresh();
+    h.c.chooseSourceScope(first);
+    await h.c.sendQuestion('查 L100');
+    await h.c.sendQuestion('它的检验码是什么？');
+    h.c.chooseSourceScope(second);
+    h.c.chooseSourceScope(first);
+    await h.c.sendQuestion('它的检验码是什么？');
+    assert.deepEqual(requests.map(({ previousHistoryId }) => previousHistoryId), [null, 1, null]);
+
+    h.c.openConversation({
+      id: 'saved',
+      rows: [{ id: 15, response: { sourceScope: requests[0] }, question: '查 L200', valid: true }],
+    });
+    await h.c.sendQuestion('它的检验码是什么？');
+    assert.equal(requests.at(-1).previousHistoryId, 15);
   } finally {
     h.dispose();
   }

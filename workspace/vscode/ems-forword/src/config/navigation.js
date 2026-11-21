@@ -89,7 +89,7 @@ function domainEntries(domain) {
       description: resource.description,
       permission: resourcePermission(resource.key, 'view'),
     })),
-  ];
+  ].map((item) => ({ ...item, group: domainDefinitions[domain].title }));
 }
 
 // 把业务域定义转换成一个可展开的父菜单，并挂载该域下的资源子菜单。
@@ -228,6 +228,17 @@ export function firstAccessiblePath(fallback = '/dashboard') {
 export function isNavigationPathAccessible(path) {
   const [plainPath] = String(path || '').split(/[?#]/, 1);
   return Boolean(plainPath) && getNavigationItems().some((item) => item.path === plainPath);
+}
+
+export function isNotificationRouteAccessible(router, path) {
+  if (typeof path !== 'string' || !path.startsWith('/') || path.startsWith('//')) return false;
+  try {
+    const { name, meta, params } = router.resolve(path);
+    const permission = meta.permission || (name === 'ModuleHub' ? `module:${params.moduleKey}:view` : '');
+    return Boolean(permission && hasPermission(permission));
+  } catch {
+    return false;
+  }
 }
 
 // 逐组执行权限过滤，删除没有任何可见子项的空分组。

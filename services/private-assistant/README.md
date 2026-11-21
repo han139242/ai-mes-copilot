@@ -59,6 +59,8 @@ $env:PRIVATE_DEEPSEEK_TOOLS_ENABLED = '1'
 
 设置 `PRIVATE_DEEPSEEK_FETCH_HOSTS` 可用逗号分隔的域名配置应用内网页读取。PDF 扫描需确保 `pdftoppm` 在助手的 PATH。官方 `deepseek-flash` 可独立设置 `PRIVATE_DEEPSEEK_SAFETY=1`。实际工具调用可能计费，课堂离线预检使用 `-NoCloud`。 [采用范围、价格和验收方法](../../docs/DEEPSEEK_APPLICATION_20261114.md)
 
+在部署环境另外设置 `PRIVATE_DEEPSEEK_TOOLS_ONLY=1`，可让 OCR、搜索和语音按需联网，同时让知识问答继续使用本地检索，并暂停云模型建图和业务模型生成。使用 `-NoCloud` 启动时也会关闭这些工具。
+
 ## 新机器准备
 
 实际验证环境是 Windows AMD64、Python 3.12.14、JDK 21、Node.js 24、Docker。以下仅用于新的独立环境，原业务数据库按 [原运行说明](../../docs/SETUP.md)维护。

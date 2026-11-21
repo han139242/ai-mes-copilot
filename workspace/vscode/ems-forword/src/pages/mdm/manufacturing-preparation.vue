@@ -1,6 +1,7 @@
 <script setup>
+import MesPageHeading from '@/components/common/MesPageHeading.vue';
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue';
-import { useRouter } from 'vue-router';
+import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import dayjs from 'dayjs';
 import { hasPermission } from '@/utils/permission';
@@ -13,6 +14,7 @@ import {
 } from '@/api/manufacturing-preparation';
 
 const router = useRouter();
+const route = useRoute();
 const products = ref([]);
 const productId = ref(null);
 const asOf = ref(dayjs().format('YYYY-MM-DD'));
@@ -87,7 +89,13 @@ async function initialize() {
       return;
     }
     products.value = response.data || [];
-    productId.value ||=
+    const requested = typeof route.query.productId === 'string' ? route.query.productId : '';
+    const selected = products.value.find((row) => String(row.productId) === requested);
+    if (requested && !selected) {
+      error.value = '来源产品不在制造准备清单中，可重新选择产品或组件。';
+      return;
+    }
+    productId.value ||= selected?.productId ||
       products.value.find((row) => row.productCode === 'LAMP-L200')?.productId || products.value[0]?.productId || null;
     if (!productId.value) {
       error.value = '尚无受控制造产品，请先完成产品模板初始化';
@@ -167,12 +175,11 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="preparation-page">
-    <header class="preparation-heading">
-      <div>
-        <h1>制造准备检查</h1>
-      </div>
-      <el-tag :type="readinessStatus.type" effect="plain">{{ readinessStatus.label }}</el-tag>
-    </header>
+    <MesPageHeading title="制造准备检查" icon="clipboard" class="preparation-heading">
+      <template #actions>
+        <el-tag :type="readinessStatus.type" effect="plain">{{ readinessStatus.label }}</el-tag>
+      </template>
+    </MesPageHeading>
     <el-form class="preparation-controls" label-position="top" @submit.prevent="inspect">
       <el-form-item label="产品 / 组件" class="product-control"
         ><el-select v-model="productId" :disabled="booting || loading || saving" placeholder="选择产品或组件"
@@ -367,10 +374,8 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .preparation-page {
-  padding: 22px;
   color: var(--el-text-color-primary);
 }
-.preparation-heading,
 .detail-heading {
   display: flex;
   align-items: center;
@@ -379,13 +384,7 @@ onBeforeUnmount(() => {
   gap: 12px;
 }
 .preparation-heading {
-  align-items: flex-start;
-  margin-bottom: 22px;
-}
-.preparation-heading h1 {
-  margin: 0;
-  font-size: 26px;
-  letter-spacing: -0.5px;
+  margin-bottom: 16px;
 }
 .preparation-controls {
   display: flex;
@@ -453,14 +452,8 @@ onBeforeUnmount(() => {
   padding: 10px 0;
 }
 @media (max-width: 700px) {
-  .preparation-page {
-    padding: 12px;
-  }
   .product-control {
     min-width: 100%;
-  }
-  .preparation-heading h1 {
-    font-size: 23px;
   }
 }
 </style>

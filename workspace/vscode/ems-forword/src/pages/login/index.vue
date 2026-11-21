@@ -143,51 +143,44 @@ onBeforeUnmount(() => {
 
 <template>
   <main class="login-page">
-    <div class="ambient-art" aria-hidden="true">
-      <span class="ambient-ribbon ribbon-one" /><span class="ambient-ribbon ribbon-two" />
-    </div>
     <header class="page-header">
       <div class="brand">
         <span class="brand-icon" aria-hidden="true">
           <img :src="appLogo" alt="" width="32" height="32" />
         </span>
         <div class="brand-name">
-          <strong>{{ appName }}</strong
-          ><span>MANUFACTURING EXECUTION SYSTEM</span>
+          <strong>{{ appName }}</strong>
         </div>
       </div>
-      <span class="header-caption">LAMP MES <i /> 工作台入口</span>
     </header>
 
     <div class="login-main">
       <section class="product-intro" aria-label="智能调光台灯制造执行系统">
         <div class="intro-copy">
-          <h1>让每一束光，<br /><span>有序而生。</span></h1>
-          <p class="intro-subtitle">智能调光台灯制造执行系统</p>
+          <h1>台灯制造工作台</h1>
+          <p class="intro-subtitle">生产、库存、质量与批次追溯</p>
         </div>
         <div class="product-visual">
-          <span class="visual-orbit" aria-hidden="true" />
           <LampScene />
-          <div class="product-meta"><span>智能调光系列</span><strong>L100 / L200</strong></div>
-          <span class="visual-caption" aria-hidden="true">PRECISION IN EVERY LIGHT</span>
+          <div class="product-meta"><strong>L100 / L200</strong><span>智能调光系列</span></div>
         </div>
         <div class="capability-list" aria-label="平台能力">
           <div class="capability-item">
-            <AppIcon name="bot" :size="19" /><span><strong>AI 智能办理</strong><small>让业务操作更高效</small></span>
+            <AppIcon name="bot" :size="19" /><span><strong>AI 智能办理</strong></span>
           </div>
           <div class="capability-item">
-            <AppIcon name="route" :size="19" /><span><strong>全过程跟踪</strong><small>让生产过程更清晰</small></span>
+            <AppIcon name="route" :size="19" /><span><strong>批次追溯</strong></span>
           </div>
           <div class="capability-item">
-            <AppIcon name="bell" :size="19" /><span><strong>主动预警</strong><small>让异常处理更及时</small></span>
+            <AppIcon name="bell" :size="19" /><span><strong>异常预警</strong></span>
           </div>
         </div>
       </section>
 
       <section class="login-card" aria-label="系统登录">
         <header class="login-heading">
-          <h2>欢迎登录</h2>
-          <p>欢迎使用智能调光台灯 MES</p>
+          <h2>登录工作台</h2>
+          <p>使用 MES 账号和密码登录</p>
         </header>
         <el-form
           ref="formRef"
@@ -196,7 +189,7 @@ onBeforeUnmount(() => {
           :rules="rules"
           :aria-busy="loading"
           label-position="top"
-          @keyup.enter="handleLogin"
+          @submit.prevent="handleLogin"
         >
           <el-form-item label="用户名" prop="username">
             <el-input v-model="form.username" autocomplete="username" placeholder="请输入用户名" size="large">
@@ -216,19 +209,19 @@ onBeforeUnmount(() => {
             >
               <template #prefix><AppIcon name="lock" :size="18" /></template>
             </el-input>
-            <p v-if="capsLock" class="caps-hint"><AppIcon name="alert" :size="13" />大写锁定已开启</p>
+            <p v-if="capsLock" class="caps-hint" role="status"><AppIcon name="alert" :size="13" />大写锁定已开启</p>
           </el-form-item>
           <div class="login-options"><el-checkbox v-model="form.remember">保持登录</el-checkbox></div>
-          <el-button class="login-submit" type="primary" :loading="loading" @click="handleLogin">
+          <el-button class="login-submit" type="primary" native-type="submit" :loading="loading">
             {{ submitText }}<AppIcon v-if="!loading" name="arrow" :size="17" />
           </el-button>
         </el-form>
 
         <div class="face-login-entry">
           <button type="button" :disabled="loading" @click="openFaceLogin">
-            <AppIcon name="scan" :size="17" />刷脸登录 · 无需账号
+            <AppIcon name="scan" :size="17" />刷脸登录
           </button>
-          <span>已录入即可直接刷脸；首次请用密码登录，在“账号安全”中录入</span>
+          <span>已录入人脸可直接刷脸登录。首次使用请在“账号安全”录入。</span>
         </div>
 
         <div v-if="showPreview" class="development-tools">
@@ -254,9 +247,6 @@ onBeforeUnmount(() => {
             </div>
           </details>
           <el-button class="preview-button" text @click="enterPreview">查看基础框架</el-button>
-        </div>
-        <div class="access-note">
-          <AppIcon name="shield-check" :size="14" /><span>授权访问 · 安全连接每一道工序</span>
         </div>
       </section>
     </div>
@@ -302,73 +292,12 @@ onBeforeUnmount(() => {
   line-height: 1.7;
   text-align: center;
 }
-/* 登录页专属视觉：深海蓝、青绿与暖光；不影响任何公共组件或其他页面。 */
 .login-page {
-  --el-color-primary: var(--mes-primary);
-  --el-color-primary-light-3: #5aa3a6;
-  --el-color-primary-light-5: #90bfc1;
-  --el-color-primary-light-7: #c3dfe0;
-  --el-color-primary-light-9: #edf7f6;
-  --el-color-primary-dark-2: #10666c;
-  position: relative;
   display: grid;
   grid-template-rows: auto 1fr auto;
   min-height: 100dvh;
-  overflow: clip;
   background: var(--mes-bg);
   color: var(--mes-text);
-  font-family: var(--mes-font);
-  -webkit-font-smoothing: antialiased;
-}
-.ambient-art {
-  position: absolute;
-  inset: 0;
-  overflow: hidden;
-  pointer-events: none;
-  background:
-    radial-gradient(ellipse at 88% 10%, #ffffff 0%, transparent 42%),
-    radial-gradient(ellipse at 96% 98%, #eef1ed 0%, transparent 48%);
-}
-.ambient-art::before {
-  position: absolute;
-  inset: 0 44% 0 0;
-  background:
-    radial-gradient(ellipse at 68% 53%, rgb(92 171 210 / 10%), transparent 58%),
-    radial-gradient(ellipse at 3% 0%, rgb(156 205 229 / 12%), transparent 55%),
-    linear-gradient(145deg, #f6f3e9 5%, #f8f6ef 58%, #f2f3ee 100%);
-  content: '';
-}
-.ambient-art::after {
-  position: absolute;
-  width: 340px;
-  height: 340px;
-  right: -190px;
-  bottom: -150px;
-  border: 60px solid rgb(36 110 112 / 4%);
-  border-radius: 50%;
-  content: '';
-}
-.ambient-ribbon {
-  position: absolute;
-  display: block;
-  border: 1px solid rgb(160 218 210 / 9%);
-  border-radius: 50%;
-}
-.ribbon-one {
-  width: 720px;
-  height: 720px;
-  left: -440px;
-  top: -420px;
-  box-shadow:
-    0 0 0 52px rgb(153 215 207 / 2%),
-    0 0 0 104px rgb(153 215 207 / 2%);
-}
-.ribbon-two {
-  width: 680px;
-  height: 680px;
-  left: 31%;
-  bottom: -530px;
-  border-color: rgb(157 211 202 / 14%);
 }
 .page-header,
 .page-footer {
@@ -379,7 +308,7 @@ onBeforeUnmount(() => {
   justify-content: space-between;
 }
 .page-header {
-  padding: 31px clamp(32px, 4.5vw, 88px);
+  padding: 22px clamp(32px, 4.5vw, 88px);
 }
 .brand {
   display: flex;
@@ -402,193 +331,107 @@ onBeforeUnmount(() => {
   width: 30px;
   height: 30px;
 }
-.brand-name {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
 .brand-name strong {
   color: var(--mes-text);
   font-size: 17px;
-  font-weight: 600;
-  letter-spacing: 1px;
-}
-.brand-name > span {
-  color: var(--mes-text-secondary);
-  font-size: 8px;
-  letter-spacing: 1.5px;
-}
-.header-caption {
-  display: flex;
-  align-items: center;
-  gap: 13px;
-  color: var(--mes-text-muted);
-  font-size: 10px;
-  letter-spacing: 2px;
-}
-.header-caption i {
-  width: 1px;
-  height: 12px;
-  background: #c4d0cb;
+  font-weight: 700;
 }
 .login-main {
-  position: relative;
   display: grid;
-  width: min(1280px, calc(100% - 112px));
-  grid-template-columns: minmax(0, 1fr) 424px;
+  width: min(1180px, calc(100% - 72px));
+  grid-template-columns: minmax(0, 1fr) minmax(340px, 400px);
   align-items: center;
-  gap: clamp(80px, 9vw, 160px);
+  gap: 44px;
   margin: auto;
-  padding: 22px 0 30px;
+  padding: 8px 0 24px;
 }
 .product-intro {
-  position: relative;
+  display: flex;
   min-width: 0;
-}
-.intro-copy {
-  position: relative;
-  z-index: 1;
+  flex-direction: column;
+  overflow: hidden;
+  padding: 30px 30px 17px;
+  border-radius: 16px;
+  background: #eaf1f2;
 }
 .intro-copy h1 {
-  margin: 0;
-  color: var(--mes-text);
-  font-size: clamp(42px, 3.8vw, 56px);
-  font-weight: 600;
-  line-height: 1.35;
-  letter-spacing: 3px;
-  white-space: nowrap;
-}
-.intro-copy h1 > span {
-  color: var(--mes-primary);
+  color: #183444;
+  font-size: clamp(31px, 3.1vw, 48px);
+  font-weight: 700;
+  line-height: 1.22;
+  letter-spacing: -0.024em;
 }
 .intro-subtitle {
-  margin: 17px 0 0;
-  color: var(--mes-text-secondary);
-  font-size: 13px;
-  letter-spacing: 3px;
+  margin-top: 11px;
+  color: #405b66;
+  font-size: 14px;
 }
 .product-visual {
   position: relative;
-  height: 315px;
-  margin: -2px -8px 4px -18px;
+  display: flex;
+  height: clamp(240px, 41vh, 370px);
+  flex-direction: column;
+  justify-content: center;
 }
 .product-visual :deep(.lamp-scene) {
-  position: relative;
-  z-index: 1;
-}
-.visual-orbit {
-  position: absolute;
-  width: 72%;
-  height: 42%;
-  left: 11%;
-  bottom: -2%;
-  border: 1px solid rgb(142 197 186 / 18%);
-  border-radius: 50%;
-  transform: rotate(-9deg);
-}
-.visual-orbit::before {
-  position: absolute;
-  inset: 16px -18px;
-  border: 1px dashed rgb(142 197 186 / 10%);
-  border-radius: 50%;
-  content: '';
+  width: 100%;
+  height: 100%;
 }
 .product-meta {
   position: absolute;
-  z-index: 2;
-  top: 37%;
-  right: 2%;
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
-  padding: 4px 0 4px 12px;
-  border-left: 1px solid #b4a07a;
-}
-.product-meta span {
-  color: var(--mes-text-secondary);
-  font-size: 10px;
-  letter-spacing: 1px;
+  right: 0;
+  top: 9%;
+  display: grid;
+  gap: 3px;
+  padding-left: 10px;
+  border-left: 1px solid #9bb4be;
+  color: #405b66;
+  font-size: 11px;
 }
 .product-meta strong {
-  color: var(--mes-primary);
-  font-size: 12px;
-  font-weight: 500;
-  letter-spacing: 2px;
-}
-.visual-caption {
-  position: absolute;
-  left: 12%;
-  bottom: 13%;
-  color: var(--mes-text-muted);
-  font-size: 8px;
-  letter-spacing: 2px;
-  writing-mode: vertical-rl;
-  transform: rotate(180deg);
+  color: #173946;
+  font-size: 13px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
 }
 .capability-list {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 11px;
-  padding-top: 20px;
-  border-top: 1px solid var(--mes-border);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 22px;
+  padding-top: 14px;
+  border-top: 1px solid #c9d8db;
 }
 .capability-item {
   display: flex;
   align-items: center;
-  gap: 9px;
-  min-width: 0;
+  gap: 7px;
+  color: #385967;
+  font-size: 12px;
 }
 .capability-item > .app-icon {
+  width: 15px;
+  height: 15px;
   flex: none;
-  color: var(--mes-text-secondary);
-}
-.capability-item > span {
-  display: flex;
-  flex-direction: column;
-  gap: 7px;
 }
 .capability-item strong {
-  color: var(--mes-text);
-  font-size: 12px;
-  font-weight: 500;
-  white-space: nowrap;
-}
-.capability-item small {
-  color: var(--mes-text-secondary);
-  font-size: 10px;
-  white-space: nowrap;
+  font-weight: 600;
 }
 .login-card {
-  position: relative;
   width: 100%;
-  padding: 38px 36px 25px;
-  border: 1px solid #fff;
-  border-radius: 22px;
-  background: #fff;
-  box-shadow:
-    0 26px 70px rgb(29 56 53 / 9%),
-    0 3px 12px rgb(29 56 53 / 3%);
-}
-.login-card::before {
-  position: absolute;
-  left: 36px;
-  right: 36px;
-  top: -1px;
-  height: 3px;
-  border-radius: 0 0 5px 5px;
-  background: linear-gradient(90deg, #2582b6, #9dd1ed 62%, #dfc99f);
-  content: '';
+  padding: 30px 30px 19px;
+  border-radius: 16px;
+  background: var(--mes-surface);
+  box-shadow: 0 14px 46px rgb(35 59 78 / 9%);
 }
 .login-heading {
-  margin-bottom: 29px;
+  margin-bottom: 23px;
 }
 .login-heading h2 {
   margin: 0;
   color: var(--mes-text);
   font-size: 29px;
   font-weight: 600;
-  letter-spacing: 1px;
+  letter-spacing: -0.015em;
 }
 .login-heading p {
   margin: 10px 0 0;
@@ -784,21 +627,6 @@ onBeforeUnmount(() => {
   background: transparent;
   color: var(--mes-primary);
 }
-.access-note {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 7px;
-  margin-top: 23px;
-  padding-top: 19px;
-  border-top: 1px solid #edf0ec;
-  color: var(--mes-text-muted);
-  font-size: 10px;
-  letter-spacing: 0.5px;
-}
-.access-note > .app-icon {
-  color: var(--mes-text-muted);
-}
 .page-footer {
   gap: 16px;
   padding: 23px clamp(32px, 4.5vw, 88px);
@@ -816,207 +644,43 @@ onBeforeUnmount(() => {
   outline: 2px solid #58a4a0;
   outline-offset: 4px;
 }
-@media (min-width: 1600px) {
+@media (max-width: 1080px) {
   .login-main {
-    width: min(1360px, calc(100% - 160px));
-    grid-template-columns: minmax(0, 1fr) 456px;
-    gap: 180px;
+    gap: 24px;
   }
-  .intro-copy h1 {
-    font-size: 61px;
-  }
-  .product-visual {
-    height: 370px;
-    margin-top: 0;
-  }
-  .login-card {
-    padding: 46px 42px 30px;
-  }
-  .login-card::before {
-    right: 42px;
-    left: 42px;
-  }
-  .capability-list {
-    gap: 18px;
-    padding-top: 25px;
-  }
-  .capability-item {
-    gap: 13px;
-  }
-  .capability-item strong {
-    font-size: 13px;
-  }
-  .capability-item small {
-    font-size: 11px;
+  .product-intro {
+    padding-inline: 24px;
   }
 }
-@media (min-width: 901px) and (max-height: 800px) {
+@media (max-width: 760px) {
   .page-header {
-    padding-top: 23px;
-    padding-bottom: 20px;
+    justify-content: center;
+    padding: 23px 16px 14px;
   }
   .login-main {
-    padding-top: 8px;
-    padding-bottom: 16px;
-  }
-  .intro-copy h1 {
-    font-size: 45px;
-  }
-  .intro-subtitle {
-    margin-top: 13px;
-  }
-  .product-visual {
-    height: 265px;
-    margin-top: -2px;
-  }
-  .capability-list {
-    margin-top: 6px;
-    padding-top: 17px;
-  }
-  .login-card {
-    padding-top: 30px;
-    padding-bottom: 21px;
-  }
-  .login-heading {
-    margin-bottom: 25px;
-  }
-  .access-note {
-    margin-top: 18px;
-    padding-top: 16px;
-  }
-  .page-footer {
-    padding-top: 18px;
-    padding-bottom: 18px;
-  }
-}
-@media (min-width: 901px) and (max-width: 1150px) {
-  .login-main {
-    width: calc(100% - 72px);
-    grid-template-columns: minmax(0, 1fr) 380px;
-    gap: 58px;
-  }
-  .intro-copy h1 {
-    font-size: 39px;
-    letter-spacing: 1px;
-  }
-  .intro-subtitle {
-    font-size: 12px;
-    letter-spacing: 1px;
-  }
-  .product-visual {
-    height: 290px;
-    margin-left: -30px;
-    margin-right: -10px;
-  }
-  .product-meta {
-    right: 0;
-    top: 23%;
-  }
-  .product-meta strong {
-    font-size: 10px;
-    letter-spacing: 1px;
-  }
-  .product-meta span {
-    font-size: 9px;
-  }
-  .capability-list {
-    gap: 8px;
-  }
-  .capability-item {
-    gap: 6px;
-  }
-  .capability-item > .app-icon {
-    width: 16px;
-    height: 16px;
-  }
-  .capability-item strong {
-    font-size: 11px;
-  }
-  .capability-item small {
-    display: none;
-  }
-  .login-card {
-    padding-right: 29px;
-    padding-left: 29px;
-  }
-}
-@media (max-width: 900px) {
-  .ambient-art {
-    background: linear-gradient(155deg, #f6f3e9 0%, #f2f3ee 43%, var(--mes-bg) 43.1%, var(--mes-bg) 100%);
-  }
-  .ambient-art::before {
-    inset: 0;
-    background: radial-gradient(ellipse at 80% 5%, rgb(111 185 166 / 15%), transparent 48%);
-  }
-  .ribbon-two {
-    left: 55%;
-    bottom: 35%;
-  }
-  .page-header {
-    padding: 30px;
-  }
-  .header-caption {
-    display: none;
-  }
-  .login-main {
-    width: min(424px, calc(100% - 48px));
+    width: min(420px, calc(100% - 32px));
     grid-template-columns: minmax(0, 1fr);
     gap: 0;
-    padding: 25px 0 38px;
+    padding: 12px 0 22px;
   }
   .product-intro {
     display: none;
   }
   .login-card {
-    padding: 37px 32px 25px;
+    padding: 24px clamp(19px, 6vw, 30px) 18px;
+  }
+  .login-heading {
+    margin-bottom: 20px;
+  }
+  .login-heading h2 {
+    font-size: 24px;
   }
   .page-footer {
     justify-content: center;
     flex-wrap: wrap;
-    padding: 22px 24px;
-  }
-  .page-footer > span:first-child {
-    color: var(--mes-text-muted);
-  }
-}
-@media (max-width: 400px) {
-  .page-header {
-    padding: 26px 23px;
-  }
-  .brand {
-    gap: 10px;
-  }
-  .brand-icon {
-    width: 38px;
-    height: 38px;
-    border-radius: 11px;
-  }
-  .brand-name strong {
-    font-size: 15px;
-    letter-spacing: 0.5px;
-  }
-  .brand-name > span {
-    font-size: 6px;
-    letter-spacing: 1px;
-  }
-  .login-main {
-    width: calc(100% - 32px);
-    padding: 18px 0 30px;
-  }
-  .login-card {
-    padding: 31px 25px 22px;
-    border-radius: 19px;
-  }
-  .login-card::before {
-    right: 25px;
-    left: 25px;
-  }
-  .login-heading h2 {
-    font-size: 27px;
-  }
-  .page-footer {
-    gap: 8px 14px;
-    font-size: 9px;
+    gap: 5px 12px;
+    padding: 14px 16px;
+    text-align: center;
   }
 }
 @media (prefers-reduced-motion: reduce) {

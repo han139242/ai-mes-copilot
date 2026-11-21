@@ -12,7 +12,7 @@ export function navigationResults(items, query, recent = [], limit = 8) {
   const ranked = items
     .map((item, order) => {
       const label = normalize(item.label),
-        haystack = normalize(`${item.label} ${item.description || ''} ${item.path || ''}`);
+        haystack = normalize(`${item.label} ${item.group || ''} ${item.description || ''} ${item.path || ''}`);
       if (tokens.some((token) => !haystack.includes(token))) return null;
       const relevance = !keyword
         ? 0
@@ -23,8 +23,8 @@ export function navigationResults(items, query, recent = [], limit = 8) {
             : label.includes(keyword)
               ? 2
               : 3;
-      const recentIndex = recent.indexOf(item.path);
-      return { item, relevance, recentIndex: recentIndex < 0 ? Infinity : recentIndex, order };
+      const recentIndex = item.path ? recent.indexOf(item.path) : -1;
+      return { item, relevance, recentIndex: recentIndex < 0 ? recent.length : recentIndex, order };
     })
     .filter(Boolean);
   return ranked

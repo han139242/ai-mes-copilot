@@ -1,6 +1,7 @@
 <script setup>
 import { useRouter } from 'vue-router';
 import AppIcon from '@/components/common/AppIcon.vue';
+import MesRecovery from '@/components/common/MesRecovery.vue';
 import { getNavigationItems } from '@/config/navigation';
 import { clearAuth } from '@/utils/auth';
 
@@ -21,40 +22,10 @@ async function returnHome() {
 </script>
 
 <template>
-  <!-- 已登录但无权限时显示403说明，并提供返回可访问首页的按钮。 -->
-  <main class="forbidden-page">
-    <div class="forbidden-code">403</div>
-    <h1>当前账号无访问权限</h1>
-    <p>该功能未分配给你的岗位角色。</p>
-    <el-button type="primary" @click="returnHome"> <AppIcon name="dashboard" :size="16" />返回首页 </el-button>
-  </main>
+  <MesRecovery class="forbidden-page" title="当前账号无访问权限" icon="lock">
+    该功能未分配给你的岗位角色。
+    <template #actions>
+      <el-button type="primary" @click="returnHome"><AppIcon name="home" :size="16" />返回可访问页面</el-button>
+    </template>
+  </MesRecovery>
 </template>
-
-<style scoped>
-/* 403页面使用全屏居中布局，视觉结构与404页保持一致。 */
-.forbidden-page {
-  display: flex;
-  min-height: 100dvh;
-  align-items: center;
-  justify-content: center;
-  flex-direction: column;
-  gap: 12px;
-  color: var(--mes-text);
-  background: var(--mes-bg);
-}
-
-.forbidden-code {
-  color: var(--mes-primary);
-  font-size: 52px;
-  font-weight: 700;
-}
-
-h1 {
-  font-size: 22px;
-}
-
-p {
-  color: var(--mes-text-muted);
-  font-size: 13px;
-}
-</style>

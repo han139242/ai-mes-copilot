@@ -2,6 +2,7 @@
 import { computed, onMounted, ref } from 'vue';
 import dayjs from 'dayjs';
 import AppIcon from '@/components/common/AppIcon.vue';
+import MesPageHeading from '@/components/common/MesPageHeading.vue';
 import { getResourceConflicts } from '@/api/mfg/resource-conflicts';
 
 // 跨层资源冲突：多层 BOM 展开时各层独立选线，组件可能落到同一产线，
@@ -137,14 +138,8 @@ onMounted(load);
 
 <template>
   <div class="conflict-page">
-    <header class="page-header">
-      <div class="page-title">
-        <span class="page-icon"><AppIcon name="alert" :size="21" /></span>
-        <div class="title-text">
-          <h1>跨层资源冲突</h1>
-        </div>
-      </div>
-      <div class="page-actions">
+    <MesPageHeading title="跨层资源冲突" icon="alert">
+      <template #actions>
         <el-date-picker
           v-model="range"
           type="datetimerange"
@@ -160,8 +155,8 @@ onMounted(load);
           <AppIcon name="refresh" :size="15" />
           <span>重新扫描</span>
         </el-button>
-      </div>
-    </header>
+      </template>
+    </MesPageHeading>
 
     <p v-if="offlineHint" class="offline-notice">
       <AppIcon name="alert" :size="14" />
@@ -265,57 +260,6 @@ onMounted(load);
   gap: 14px;
   color: var(--cp-text);
   font-size: 13px;
-}
-
-.page-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.page-title {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 11px;
-}
-
-.page-icon {
-  display: inline-flex;
-  width: 42px;
-  height: 42px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  color: var(--mes-primary);
-  border: 1px solid var(--mes-primary-border, #bcd3fb);
-  border-radius: 6px;
-  background: var(--mes-primary-soft, #eaf2ff);
-}
-
-.title-text {
-  min-width: 0;
-}
-
-.title-text h1 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.page-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.page-actions :deep(.el-button > span) {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
 }
 
 .range-picker {

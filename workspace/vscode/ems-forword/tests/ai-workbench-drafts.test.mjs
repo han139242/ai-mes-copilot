@@ -320,6 +320,43 @@ test('workbench reports silent history API errors and keeps confirmation cancell
   assert.deepEqual(messages, ['连接中断，请重试']);
 });
 
+test('catalog Enter opens only a unique searchable action outside composition and disabled states', () => {
+  const component = readFileSync(new URL('../src/pages/ai/workbench.vue', import.meta.url), 'utf8');
+  const start = component.indexOf('const uniqueCatalogAction =');
+  const end = component.indexOf('watch(', start);
+  const setup = new Function(
+    'computed', 'actionSearch', 'actionsDisabled', 'catalogLoading', 'catalogError', 'filteredActionGroups',
+    'openActionForm', component.slice(start, end) + '\nreturn openSearchResult;',
+  );
+  const search = ref('');
+  const disabled = ref(false), loading = ref(false), error = ref(false);
+  const candidate = { label: '填写出货检验' };
+  const matches = ref([{ items: [candidate] }]);
+  const opened = [];
+  const keydown = setup((fn) => ({ get value() { return fn(); } }), search, disabled, loading, error, matches,
+    (action) => opened.push(action.label));
+  const sent = (options = {}) => {
+    let prevented = false;
+    keydown({ preventDefault: () => { prevented = true; }, ...options });
+    return prevented;
+  };
+  assert.equal(sent(), false);
+  search.value = '检验';
+  matches.value = [{ items: [candidate, { label: '生产检验' }] }];
+  assert.equal(sent(), false);
+  matches.value = [{ items: [candidate] }];
+  for (const option of [{ isComposing: true }, { keyCode: 229 }, { repeat: true }]) {
+    assert.equal(sent(option), false);
+  }
+  for (const locked of [disabled, loading, error]) {
+    locked.value = true;
+    assert.equal(sent(), false);
+    locked.value = false;
+  }
+  assert.equal(sent(), true);
+  assert.deepEqual(opened, ['填写出货检验']);
+});
+
 test('composer recalculates draft height on width changes and disconnects replaced inputs', async () => {
   const component = readFileSync(new URL('../src/pages/ai/workbench.vue', import.meta.url), 'utf8');
   const start = component.indexOf('watch(\n  composer,');

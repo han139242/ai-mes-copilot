@@ -1,9 +1,9 @@
 <script setup>
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import dayjs from 'dayjs';
-import { useRoute, useRouter } from 'vue-router';
+import { useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
-import { sliceUtf16 } from '@/utils/text';
+import { takeBusinessDraft } from '@/utils/business-handoff';
 import AppIcon from '@/components/common/AppIcon.vue';
 import AiResultBlocks from '@/components/ai/AiResultBlocks.vue';
 import AiCommandCard from '@/components/ai/AiCommandCard.vue';
@@ -14,18 +14,25 @@ import AiCreateOrderForm from '@/components/ai/AiCreateOrderForm.vue';
 import AiProductionFlowForm from '@/components/ai/AiProductionFlowForm.vue';
 import AiBusinessActionForm from '@/components/ai/AiBusinessActionForm.vue';
 import DeepSeekToolsDialog from '@/components/ai/DeepSeekToolsDialog.vue';
-import { businessActionGroups, businessActionPreviewGroups } from '@/utils/ai-business-flow';
+import {
+  businessActionGroups,
+  businessActionPreviewGroups,
+  filterBusinessActions,
+  workbenchShortcutLimit,
+  workbenchShortcuts,
+} from '@/utils/ai-business-flow';
 import PieceInspectionDialog from '@/components/business/PieceInspectionDialog.vue';
 import { formatAiAnswer } from '@/utils/ai-results';
 import { resolveOrderContext } from '@/utils/ai-order-context';
-import { notifyDataChanged } from '@/utils/app-events';
-import { appName } from '@/config/branding';
-import { getAiCapabilities, getAiStatus } from '@/api/ai';
+import { notifyDataChanged, OPEN_BUSINESS_FORM_EVENT } from '@/utils/app-events';
+import { getAiStatus } from '@/api/ai';
 import { previewAgentCommand, previewStructuredCommand, getAgentSequence } from '@/api/ai/agent';
+import { businessCommands, businessCommandsState, loadBusinessCommands } from '@/stores/aiBusinessActions';
 import { createTaskFromStartPlan } from '@/api/ai/tasks';
 import { getResourceDetail } from '@/api/resource';
 import request from '@/api/request';
-import { isFrameworkPreview } from '@/utils/auth';
+import { authRevision, getCurrentUser, getToken, isFrameworkPreview } from '@/utils/auth';
+import { hasPermission } from '@/utils/permission';
 import { aiStatusPresentation, failedAiStatus, shouldRecheckAiStatus } from '@/utils/ai-status';
 import {
   activeConversation,
@@ -63,7 +70,6 @@ import {
 // 会话状态全部来自 @/stores/aiConversation，工作台和浮窗只是同一份数据的两种渲染位置。
 const previewMode = isFrameworkPreview();
 const router = useRouter();
-const route = useRoute();
 const conversationScroll = ref();
 const composer = ref();
 // 断点或导航宽度改变后，重新计算已有草稿的行高。
@@ -100,8 +106,11 @@ function onVoiceDraft(text) {
   replaceQuestion(combined);
   return true;
 }
+const sidebarOpen = ref(false);
 const sidebarSection = ref('actions');
 const actionSearch = ref('');
+const actionPhase = ref('');
+const actionSearchInput = ref();
 const conversationActionPending = ref('');
 const pieceInspectionOpen = ref(false);
 const pieceInspection = ref(null);
@@ -119,9 +128,6 @@ const status = ref({
 const usage = ref(null);
 // 复制成功提示的短暂状态，避免为一次复制引入全局消息组件。
 const copiedMessageId = ref('');
-// 小屏下侧栏改为抽屉，默认收起。
-const sidebarOpen = ref(false);
-const sidebarToggle = ref();
 let copiedTimer;
 let statusRetryTimer;
 let statusLoading = false;
@@ -239,44 +245,123 @@ const statusLabel = computed(() => statusPresentation.value.label);
 const statusTone = computed(() => statusPresentation.value.tone);
 // 对话或查询任一通道可用就算能发问，供发送前判断复用。
 const serviceUsable = computed(() => Boolean(status.value.available || status.value.queryAvailable));
-// 服务可用时使用当前能力的推荐问题，否则提示检查服务。
+// 服务可用时开放自由提问，否则提示检查状态。
 const inputPlaceholder = computed(() =>
-  status.value.available || status.value.queryAvailable
-    ? activeCapability.value.quickPrompts[0]
-    : 'AI 服务暂不可用，请先检查服务状态',
+  serviceUsable.value ? '输入问题，或描述要办理的事项…' : 'AI 服务暂不可用，请先检查服务状态',
 );
-// 欢迎页底部的示例问句，覆盖查询与办理两类，让用户知道能问到什么粒度、能办到什么程度。
-const exampleQuestions = [
-  '我可以让你办哪些业务',
+const batchNumberPlaceholder = '【填写批次号】';
+const commonQueries = [
+  { topic: '生产排程', icon: 'calendar', prompt: '本周排程和产能怎么样？' },
+  { topic: '质量分析', icon: 'shield-check', prompt: '本周不良主要出在哪里？' },
+  { topic: '库存缺口', icon: 'warehouse', prompt: '哪些物料低于安全库存？缺口是多少？' },
+  {
+    topic: '批次追溯',
+    icon: 'route',
+    label: '按成品批次查原料来源',
+    prompt: `反查成品批次 ${batchNumberPlaceholder} 用了哪些原料批次`,
+    selectText: batchNumberPlaceholder,
+  },
+];
+const moreQuestions = [
   'L200 工单的报工情况',
   '本周产量与不良率趋势',
   '成品仓当前可发库存',
   '帮我下达工单 WO-',
 ];
-// 能力卡不再挂问句，统一收到底部一排：当前能力前两条 + 四条通用示例，去重后最多六条。
-const welcomePrompts = computed(() => {
-  const merged = [...activeCapability.value.quickPrompts.slice(0, 2), ...exampleQuestions];
-  return [...new Set(merged)];
+const welcomeQueries = computed(() =>
+  activeCapability.value.id === 'general'
+    ? commonQueries
+    : activeCapability.value.quickPrompts.map((prompt) => ({ icon: activeCapability.value.icon, prompt })),
+);
+
+// 目录和首屏入口均从当前账号可用的后端命令筛出。
+const catalogLoading = computed(() => !previewMode && ['idle', 'loading'].includes(businessCommandsState.value));
+const catalogError = computed(() => businessCommandsState.value === 'error');
+const pinnedActions = ref([]);
+const shortcutStorageKey = computed(() => {
+  authRevision.value;
+  const user = getCurrentUser();
+  const owner = user?.userId ?? user?.username;
+  return !previewMode && getToken() && owner != null
+    ? `mes_workbench_shortcuts:${import.meta.env.VITE_APP_SCOPE || 'default'}:${owner}`
+    : '';
+});
+const actionGroups = computed(() =>
+  previewMode ? businessActionPreviewGroups() : businessActionGroups(businessCommands.value),
+);
+const filteredActionGroups = computed(() =>
+  filterBusinessActions(actionGroups.value, actionPhase.value, actionSearch.value),
+);
+const shortcuts = computed(() => workbenchShortcuts(actionGroups.value, pinnedActions.value));
+const actionCount = computed(() => actionGroups.value.reduce((count, group) => count + group.items.length, 0));
+const visiblePinnedCount = computed(
+  () => shortcuts.value.filter((item) => pinnedActions.value.includes(item.flowKey)).length,
+);
+const actionIcons = {
+  order: 'clipboard',
+  stock: 'warehouse',
+  production: 'factory',
+  inbound: 'package',
+  shipment: 'route',
+  other: 'warehouse',
+};
+const shortcutIcons = {
+  SCHEDULE_PRODUCTION_ORDER: 'calendar',
+  SUBMIT_WORK_REPORT: 'edit',
+  SUBMIT_INSPECTION: 'shield-check',
+};
+const actionsDisabled = computed(() =>
+  sending.value || historyChanging.value || Boolean(conversationActionPending.value) || previewMode,
+);
+const uniqueCatalogAction = computed(() => {
+  if (!actionSearch.value.trim() || actionsDisabled.value || catalogLoading.value || catalogError.value) return null;
+  const matches = filteredActionGroups.value.flatMap((group) => group.items);
+  return matches.length === 1 ? matches[0] : null;
 });
 
-// 后端统一登记的能力目录：左侧「可办理」一栏按这份清单渲染，避免前后端各写一套动作名。
-const catalog = ref([]);
-const catalogLoading = ref(false);
-const catalogError = ref(false);
-const actionGroups = computed(() =>
-  previewMode ? businessActionPreviewGroups() : businessActionGroups(catalog.value),
+function openSearchResult(event) {
+  const action = uniqueCatalogAction.value;
+  if (!action || event.isComposing || event.keyCode === 229 || event.repeat) return;
+  event.preventDefault();
+  openActionForm(action);
+}
+
+watch(
+  shortcutStorageKey,
+  (key) => {
+    pinnedActions.value = [];
+    if (!key) return;
+    try {
+      const stored = JSON.parse(localStorage.getItem(key) || '[]');
+      if (Array.isArray(stored)) {
+        pinnedActions.value = [...new Set(stored.filter((value) => typeof value === 'string'))]
+          .slice(0, workbenchShortcutLimit);
+      }
+    } catch {
+      // 无法读取偏好时使用默认入口。
+    }
+  },
+  { immediate: true },
 );
-const filteredActionGroups = computed(() => {
-  const terms = actionSearch.value.trim().toLowerCase().split(/\s+/).filter(Boolean);
-  return actionGroups.value
-    .map((group) => ({
-      ...group,
-      items: group.items.filter((item) =>
-        terms.every((term) => `${item.label} ${item.description || ''} ${group.label}`.toLowerCase().includes(term)),
-      ),
-    }))
-    .filter((group) => group.items.length);
-});
+
+function togglePinnedAction(key) {
+  const availableKeys = new Set(actionGroups.value.flatMap((group) => group.items.map((item) => item.flowKey)));
+  if (!shortcutStorageKey.value || !availableKeys.has(key)) return;
+  const current = pinnedActions.value.filter((item) => availableKeys.has(item));
+  if (current.includes(key)) {
+    pinnedActions.value = current.filter((item) => item !== key);
+  } else if (current.length < workbenchShortcutLimit) {
+    pinnedActions.value = [...current, key];
+  } else {
+    ElMessage.info(`首屏最多置顶 ${workbenchShortcutLimit} 项，请先取消一项`);
+    return;
+  }
+  try {
+    localStorage.setItem(shortcutStorageKey.value, JSON.stringify(pinnedActions.value));
+  } catch {
+    ElMessage.info('置顶已应用，浏览器未能保存偏好');
+  }
+}
 const businessActionEntry = ref(null);
 const businessDialogOpen = computed({
   get: () => Boolean(businessActionEntry.value),
@@ -287,35 +372,27 @@ const businessDialogOpen = computed({
   },
 });
 
-// 正式会话只使用服务端目录；预览入口不可执行，不把本地样例视为权限。
-// 统一取回目录数组：既兼容 { data: [...] } 信封，也兼容直接返回数组的旧实现。
-function pickCatalogList(response) {
-  const payload = response?.data;
-  if (Array.isArray(payload)) {
-    return payload;
-  }
-  return Array.isArray(response) ? response : [];
+function loadCapabilities(force = false) {
+  if (!previewMode) return loadBusinessCommands({ force });
 }
 
-async function loadCapabilities() {
-  if (previewMode || catalogLoading.value) return;
-  catalogLoading.value = true;
-  catalogError.value = false;
-  try {
-    const response = await getAiCapabilities();
-    catalog.value = pickCatalogList(response);
-  } catch {
-    catalog.value = [];
-    catalogError.value = true;
-  } finally {
-    catalogLoading.value = false;
+watch(authRevision, () => {
+  actionPhase.value = '';
+  loadCapabilities();
+});
+
+function openRequestedForm({ detail: flowKey }) {
+  const action = actionGroups.value.flatMap(({ items }) => items).find((item) => item.flowKey === flowKey);
+  if (!action || actionsDisabled.value) {
+    ElMessage.info('此办理入口暂不可用，可在工作台查看当前可办事项。');
+    return;
   }
+  openActionForm(action);
 }
 
-// 点某个办理动作时把「动作名 + 空单号」填进输入框，让用户自己补单号再发送，不代填任何业务数据。
-// 创建生产订单没有单号可填，参数是产品或客户，改成一个可选表单直接提交，省掉手打编码。
-function fillCommand(capability) {
-  if (sending.value || historyChanging.value || previewMode || capability?.previewOnly) {
+// 每个入口打开原有表单，由用户补齐字段并核对预览。
+function openActionForm(capability) {
+  if (actionsDisabled.value || capability?.previewOnly) {
     return;
   }
   sidebarOpen.value = false;
@@ -440,7 +517,6 @@ function selectCapability(id) {
 function newConversation() {
   if (sending.value || conversationActionPending.value) return;
   createConversation(activeCapability.value.id);
-  sidebarSection.value = 'history';
   sidebarOpen.value = false;
   nextTick(() => composer.value?.focus?.());
 }
@@ -471,7 +547,8 @@ async function openConversation(id) {
   conversationActionPending.value = id;
   try {
     if (await selectConversation(id)) {
-      closeSidebar();
+      sidebarOpen.value = false;
+      nextTick(() => composer.value?.focus?.());
       scrollToLatest();
     }
   } catch (error) {
@@ -530,10 +607,16 @@ function reportHistoryError(error) {
 }
 
 // 把快捷问题填入输入框并聚焦，仍由用户确认发送。
-function selectQuickPrompt(prompt) {
+function selectQuickPrompt(prompt, selectText = '') {
   if (historyChanging.value) return;
   replaceQuestion(prompt);
-  nextTick(() => composer.value?.focus?.());
+  nextTick(() => {
+    composer.value?.focus?.();
+    if (selectText) {
+      const start = prompt.indexOf(selectText);
+      if (start >= 0) composer.value?.textarea?.setSelectionRange(start, start + selectText.length);
+    }
+  });
 }
 
 // 命令预览卡片本身已经带「确认执行 / 取消」按钮，底部再重复一组建议只会让人误点，所以滤掉。
@@ -884,17 +967,22 @@ function retryMessage(message) {
   sendQuestion({ question: message.retryQuestion, preserveDraft: true, clientMessageId: message.retryClientMessageId });
 }
 
-// 小屏抽屉开关；大屏下侧栏常驻，该状态不影响布局。
-function toggleSidebar() {
-  if (sidebarOpen.value) closeSidebar();
-  else sidebarOpen.value = true;
+function openSidebar(section) {
+  sidebarSection.value = section;
+  actionSearch.value = '';
+  actionPhase.value = '';
+  sidebarOpen.value = true;
 }
-function closeSidebar(event) {
-  if (!sidebarOpen.value) return;
-  event?.preventDefault();
-  event?.stopPropagation();
-  sidebarOpen.value = false;
-  nextTick(() => sidebarToggle.value?.focus());
+
+function focusActionSearch() {
+  if (sidebarSection.value === 'actions' && window.matchMedia('(pointer: fine)').matches) {
+    actionSearchInput.value?.focus();
+  }
+}
+
+function onConversationCommand(command) {
+  if (command === 'clear') clearConversation();
+  else switchMode(command);
 }
 
 // 形态切换：工作台内嵌 / 右下角悬浮窗，两边共用同一份 store 数据。
@@ -923,6 +1011,10 @@ function backToWorkbench() {
 async function sendQuestion(options = {}) {
   const content = String(options.question ?? question.value).trim();
   if (!content || sending.value || historyChanging.value || conversationActionPending.value || !serviceUsable.value) {
+    return;
+  }
+  if (content.includes(batchNumberPlaceholder)) {
+    ElMessage.info('请填写实际批次号后发送');
     return;
   }
   const capability = activeCapability.value;
@@ -966,9 +1058,12 @@ function scrollToLatest() {
 
 // 挂载时先用本地缓存渲染，再让后端历史接管；接口不可用则保持本机记录。
 onMounted(() => {
-  if (typeof route.query.prefill === 'string') {
-    replaceQuestion(sliceUtf16(route.query.prefill, 500));
-    if (route.query.prefill.length > 500) ElMessage.info('问题较长，已保留前500字，请核对后发送。');
+  window.addEventListener(OPEN_BUSINESS_FORM_EVENT, openRequestedForm);
+  const handedOff = takeBusinessDraft(getToken());
+  if (handedOff) {
+    replaceQuestion(handedOff);
+    setMode('workbench');
+    setDockOpen(false);
     nextTick(() => composer.value?.focus());
   }
   persistConversations();
@@ -987,6 +1082,7 @@ onMounted(() => {
 // 离开页面时取消仍在进行的模型请求。
 onBeforeUnmount(() => {
   disposed = true;
+  window.removeEventListener(OPEN_BUSINESS_FORM_EVENT, openRequestedForm);
   clearTimeout(statusRetryTimer);
   cancelRequest();
   clearTimeout(copiedTimer);
@@ -994,355 +1090,122 @@ onBeforeUnmount(() => {
 </script>
 
 <template>
-  <!-- 左侧管理能力与会话，中间展示消息，底部输入区负责发送、停止和重试。 -->
-  <section class="ai-workbench" @keydown.esc="closeSidebar">
-    <button
-      class="sidebar-toggle"
-      ref="sidebarToggle"
-      type="button"
-      :aria-expanded="sidebarOpen ? 'true' : 'false'"
-      :aria-label="sidebarOpen ? '收起快捷办理与会话' : '打开快捷办理与会话'"
-      aria-controls="ai-workbench-sidebar"
-      @click="toggleSidebar"
-    >
-      <AppIcon :name="sidebarOpen ? 'close' : 'menu'" :size="16" />
-    </button>
-
-    <div class="wb-frame" :class="{ 'is-sidebar-open': sidebarOpen }">
-      <!-- 侧栏：品牌、新建对话、能力清单、按时间分组的会话记录、模型用量。 -->
-      <aside id="ai-workbench-sidebar" class="wb-sidebar">
-        <div class="wb-brand">
-          <span class="brand-mark"><AppIcon name="factory" :size="15" /></span>
-          <div class="brand-text">
-            <strong>{{ appName }}</strong>
-            <span>AI 数据助手</span>
-          </div>
-          <span class="status-dot" :class="`is-${statusTone}`" :title="statusLabel" />
+  <section class="ai-workbench">
+    <section class="wb-chat" aria-label="AI 工作台">
+      <header class="chat-head">
+        <div class="head-main">
+          <h1>AI 工作台</h1>
+          <details class="status-details">
+            <summary :class="'is-' + statusTone" title="服务详情">
+              <span class="status-dot" aria-hidden="true" />
+              {{ statusLabel }}
+              <AppIcon name="chevron" :size="11" class="chevron-down" />
+            </summary>
+            <div class="status-panel">
+              <div class="foot-row">
+                <span>模型</span><b>{{ modelLabel }}</b>
+              </div>
+              <div v-if="usage" class="foot-row">
+                <span>累计调用</span><b>{{ usage.totalCalls ?? 0 }}</b>
+              </div>
+              <div v-if="usage" class="foot-row">
+                <span>估算 Token</span><b>{{ usage.estimatedTokens ?? 0 }}</b>
+              </div>
+              <div class="foot-row">
+                <span>历史</span><b>{{ historySynced ? '后台记录' : '本机记录' }}</b>
+              </div>
+            </div>
+          </details>
         </div>
-
-        <div class="wb-new">
+        <div class="head-side">
           <button
-            class="new-conversation"
+            type="button"
+            class="ghost-button"
+            aria-haspopup="dialog"
+            @click="openSidebar('actions')"
+          >
+            <AppIcon name="clipboard" :size="16" />快捷办理
+          </button>
+          <button
+            type="button"
+            class="ghost-button"
+            aria-haspopup="dialog"
+            @click="openSidebar('history')"
+          >
+            <AppIcon name="clock" :size="16" />会话记录
+          </button>
+          <RouterLink to="/ai/knowledge" class="ghost-button">
+            <AppIcon name="database" :size="16" />我的知识
+          </RouterLink>
+          <button
+            class="primary-button"
             type="button"
             :disabled="sending || Boolean(conversationActionPending)"
             @click="newConversation"
           >
-            <AppIcon name="plus" :size="14" />新建对话
+            <AppIcon name="plus" :size="16" />新建对话
           </button>
-        </div>
-
-        <div class="sidebar-sections" role="group" aria-label="工作台侧栏内容">
-          <button type="button" :aria-pressed="sidebarSection === 'actions'" @click="sidebarSection = 'actions'">
-            快捷办理
-          </button>
-          <button type="button" :aria-pressed="sidebarSection === 'history'" @click="sidebarSection = 'history'">
-            会话记录
-          </button>
-        </div>
-
-        <!-- 中部内容独立滚动：底部模型用量区常驻，不被内容挤出视口。 -->
-        <div class="wb-body">
-          <div v-show="sidebarSection === 'actions'" class="wb-group wb-group-catalog" :aria-busy="catalogLoading">
-            <label class="catalog-search"
-              ><AppIcon name="search" :size="15" /><input
-                v-model="actionSearch"
-                type="search"
-                aria-label="搜索快捷办理"
-                placeholder="搜索办理事项"
-            /></label>
-            <p v-if="previewMode" class="catalog-message">当前仅预览入口，登录后按账号权限办理。</p>
-            <p v-else-if="catalogLoading" class="catalog-message" role="status">正在加载快捷入口…</p>
-            <div v-else-if="catalogError" class="catalog-message" role="status">
-              <p>快捷入口未能加载，请检查后端连接。</p>
-              <button class="ghost-button" type="button" @click="loadCapabilities">重新加载入口</button>
-            </div>
-            <p v-else-if="!actionGroups.length" class="catalog-message">当前账号暂无可办理入口。</p>
-            <div
-              v-if="actionSearch.trim() && actionGroups.length && !filteredActionGroups.length"
-              class="catalog-message"
-              role="status"
-            >
-              没有匹配的办理入口<button class="text-button" type="button" @click="actionSearch = ''">清除搜索</button>
-            </div>
-            <div v-for="group in filteredActionGroups" :key="group.id" class="catalog-phase">
-              <div class="catalog-phase-title">{{ group.label }}</div>
-              <div class="catalog-grid">
-                <button
-                  v-for="item in group.items"
-                  :key="item.flowKey"
-                  class="command-chip"
-                  type="button"
-                  :disabled="sending || historyChanging || previewMode"
-                  :title="previewMode ? '界面预览：连接后端并登录后，按账号权限开放办理' : item.description"
-                  :aria-label="`办理：${item.label}`"
-                  @click="fillCommand(item)"
+          <el-dropdown trigger="click" @command="onConversationCommand">
+            <button type="button" class="ghost-button head-menu" aria-label="更多工作台操作" title="更多操作">
+              <AppIcon name="more" :size="18" />
+            </button>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-if="showDockNotice" command="workbench">切回工作台</el-dropdown-item>
+                <el-dropdown-item v-else command="dock">切换为悬浮助手</el-dropdown-item>
+                <el-dropdown-item
+                  command="clear"
+                  :disabled="sending || Boolean(conversationActionPending) || !activeMessages.length"
                 >
-                  <AppIcon name="play" :size="11" />
-                  <span>{{ item.label }}</span>
-                </button>
-              </div>
-            </div>
-          </div>
-          <div
-            v-show="sidebarSection === 'history'"
-            class="wb-group wb-group-history"
-            :aria-busy="Boolean(conversationActionPending)"
-          >
-            <el-scrollbar class="history-scroll">
-              <template v-for="group in sessionGroups" :key="group.key">
-                <div class="history-sub">{{ group.label }}</div>
-                <div
-                  v-for="conversation in group.items"
-                  :key="conversation.id"
-                  class="session-row"
-                  :class="{ active: activeConversationId === conversation.id }"
-                >
-                  <button
-                    class="session-main"
-                    type="button"
-                    :disabled="sending || Boolean(conversationActionPending)"
-                    @click="openConversation(conversation.id)"
-                  >
-                    <span class="session-title">{{
-                      conversation.title === '新对话'
-                        ? conversationDraft(conversation).trim() || conversation.title
-                        : conversation.title
-                    }}</span>
-                    <small>{{
-                      conversationDraft(conversation).trim() ? '草稿' : conversationTime(conversation.updatedAt)
-                    }}</small>
-                  </button>
-                  <div class="session-actions">
-                    <el-tooltip content="归档会话" placement="top">
-                      <button
-                        type="button"
-                        aria-label="归档会话"
-                        :disabled="sending || Boolean(conversationActionPending)"
-                        @click.stop="changeConversationArchive(conversation.id, true)"
-                      >
-                        <AppIcon name="package" :size="12" />
-                      </button>
-                    </el-tooltip>
-                    <el-tooltip content="删除会话" placement="top">
-                      <button
-                        type="button"
-                        aria-label="删除会话"
-                        :disabled="sending || Boolean(conversationActionPending)"
-                        @click.stop="deleteConversation(conversation.id)"
-                      >
-                        <AppIcon name="trash" :size="12" />
-                      </button>
-                    </el-tooltip>
-                  </div>
-                </div>
-              </template>
-
-              <template v-if="archivedConversations.length">
-                <div class="history-sub">已归档</div>
-                <div
-                  v-for="conversation in archivedConversations"
-                  :key="conversation.id"
-                  class="session-row is-archived"
-                  :class="{ active: activeConversationId === conversation.id }"
-                >
-                  <button
-                    class="session-main"
-                    type="button"
-                    :disabled="sending || Boolean(conversationActionPending)"
-                    @click="openConversation(conversation.id)"
-                  >
-                    <span class="session-title">{{ conversation.title }}</span>
-                    <small>{{ conversationTime(conversation.updatedAt) }}</small>
-                  </button>
-                  <div class="session-actions">
-                    <el-tooltip content="恢复会话" placement="top">
-                      <button
-                        type="button"
-                        aria-label="恢复会话"
-                        :disabled="sending || Boolean(conversationActionPending)"
-                        @click.stop="changeConversationArchive(conversation.id, false)"
-                      >
-                        <AppIcon name="refresh" :size="12" />
-                      </button>
-                    </el-tooltip>
-                    <el-tooltip content="删除会话" placement="top">
-                      <button
-                        type="button"
-                        aria-label="删除会话"
-                        :disabled="sending || Boolean(conversationActionPending)"
-                        @click.stop="deleteConversation(conversation.id)"
-                      >
-                        <AppIcon name="trash" :size="12" />
-                      </button>
-                    </el-tooltip>
-                  </div>
-                </div>
-              </template>
-
-              <p v-if="!sessionGroups.length && !archivedConversations.length" class="history-empty">还没有对话记录</p>
-            </el-scrollbar>
-          </div>
-
-          <details v-show="sidebarSection === 'actions'" class="wb-group">
-            <summary class="group-head">AI 解读</summary>
-            <div class="capability-list">
-              <button
-                v-for="capability in capabilities"
-                :key="capability.id"
-                class="capability-item"
-                :class="{ active: activeCapability.id === capability.id }"
-                type="button"
-                :disabled="sending"
-                :title="capability.description"
-                @click="selectCapability(capability.id)"
-              >
-                <span class="capability-icon"><AppIcon :name="capability.icon" :size="15" /></span>
-                <span class="capability-text">
-                  <span class="capability-name">{{ capability.label }}</span>
-                  <span class="capability-desc">{{ capability.description }}</span>
-                </span>
-              </button>
-            </div>
-          </details>
+                  清空当前会话
+                </el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
+      </header>
 
-        <details class="wb-foot">
-          <summary>服务详情</summary>
-          <div class="foot-row">
-            <span>模型</span><b>{{ modelLabel }}</b>
-          </div>
-          <div v-if="usage" class="foot-row">
-            <span>累计调用</span><b>{{ usage.totalCalls ?? 0 }}</b>
-          </div>
-          <div v-if="usage" class="foot-row">
-            <span>估算 Token</span><b>{{ usage.estimatedTokens ?? 0 }}</b>
-          </div>
-          <div class="foot-row">
-            <span>历史</span><b>{{ historySynced ? '后台记录' : '本机记录' }}</b>
-          </div>
-        </details>
-      </aside>
-
-      <section class="wb-chat">
-        <header class="chat-head">
-          <div class="head-main">
-            <h1>{{ activeCapability.label }}</h1>
-            <p>{{ activeCapability.dataScope }}</p>
-          </div>
-          <div class="head-side">
-            <RouterLink to="/ai/knowledge" class="ghost-button"
-              ><AppIcon name="database" :size="14" />我的知识</RouterLink
-            >
-            <!-- 形态切换：工作台内嵌 / 右下角悬浮窗，两种形态共用同一份会话数据。 -->
-            <div class="mode-switch" role="group" aria-label="AI 助手形态">
-              <button
-                type="button"
-                :class="{ active: mode === 'workbench' }"
-                :aria-pressed="mode === 'workbench' ? 'true' : 'false'"
-                @click="switchMode('workbench')"
-              >
-                工作台
-              </button>
-              <button
-                type="button"
-                :class="{ active: mode === 'dock' }"
-                :aria-pressed="mode === 'dock' ? 'true' : 'false'"
-                @click="switchMode('dock')"
-              >
-                悬浮
-              </button>
-            </div>
-            <span class="status-badge" :class="`is-${statusTone}`"><i />{{ statusLabel }}</span>
-            <el-tooltip content="清空当前会话的历史消息" placement="top">
-              <button
-                class="ghost-button"
-                type="button"
-                :disabled="sending || Boolean(conversationActionPending) || !activeMessages.length"
-                @click="clearConversation"
-              >
-                <AppIcon name="trash" :size="13" />清空
-              </button>
-            </el-tooltip>
-          </div>
-        </header>
-
-        <!-- 悬浮形态：对话在右下角浮窗里继续，页面只保留说明和切回入口。 -->
-        <div v-if="showDockNotice" class="dock-notice">
-          <span class="dock-notice-icon"><AppIcon name="bot" :size="18" /></span>
-          <div class="dock-notice-text">
-            <strong>对话已迁移到右下角悬浮助手</strong>
-          </div>
-          <div class="dock-notice-actions">
-            <button class="primary-button" type="button" @click="setDockOpen(true)">打开浮窗</button>
-            <button class="ghost-button" type="button" @click="backToWorkbench">切回工作台</button>
-          </div>
+      <!-- 悬浮形态：对话在右下角浮窗里继续，页面只保留说明和切回入口。 -->
+      <div v-if="showDockNotice" class="dock-notice">
+        <span class="dock-notice-icon"><AppIcon name="bot" :size="18" /></span>
+        <div class="dock-notice-text">
+          <strong>对话已迁移到右下角悬浮助手</strong>
         </div>
+        <div class="dock-notice-actions">
+          <button class="primary-button" type="button" @click="setDockOpen(true)">打开浮窗</button>
+          <button class="ghost-button" type="button" @click="backToWorkbench">切回工作台</button>
+        </div>
+      </div>
 
-        <div
-          v-else-if="!(status.available || status.queryAvailable)"
-          class="service-notice"
-          :class="`is-${statusTone}`"
+      <div
+        v-else-if="!serviceUsable"
+        class="service-notice"
+        :class="`is-${statusTone}`"
+      >
+        <AppIcon name="alert" :size="15" />
+        <div>
+          <strong>{{ statusLabel }}</strong>
+          <span>{{ statusPresentation.detail }}</span>
+        </div>
+        <button
+          class="ghost-button"
+          type="button"
+          @click="previewMode ? router.push({ path: '/login', query: { redirect: '/ai/workbench' } }) : loadStatus()"
         >
-          <AppIcon name="alert" :size="15" />
-          <div>
-            <strong>{{ statusLabel }}</strong>
-            <span>{{ statusPresentation.detail }}</span>
-          </div>
-          <button
-            class="ghost-button"
-            type="button"
-            @click="previewMode ? router.push({ path: '/login', query: { redirect: '/ai/workbench' } }) : loadStatus()"
-          >
-            {{ previewMode ? '连接并登录' : '重新检查' }}
-          </button>
-        </div>
+          {{ previewMode ? '连接并登录' : '重新检查' }}
+        </button>
+      </div>
 
-        <el-scrollbar v-if="!showDockNotice" ref="conversationScroll" class="chat-scroll">
-          <main class="chat-inner">
-            <section v-if="showWelcome" class="welcome">
-              <div class="welcome-head">
-                <h2>{{ activeCapability.id === 'general' ? '想先处理哪件事？' : activeCapability.label }}</h2>
-                <p v-if="activeCapability.id !== 'general'">{{ activeCapability.description }}</p>
-              </div>
-
-              <div class="welcome-focus-prompts">
-                <button
-                  v-for="prompt in activeCapability.quickPrompts.slice(0, 3)"
-                  :key="prompt"
-                  type="button"
-                  @click="selectQuickPrompt(prompt)"
-                >
-                  <span>{{ prompt }}</span
-                  ><AppIcon name="arrow" :size="14" />
-                </button>
-              </div>
-              <details class="welcome-examples">
-                <summary class="welcome-examples-label">更多场景和示例</summary>
-                <div class="welcome-modes" role="group" aria-label="业务问题类型">
-                  <button
-                    v-for="capability in capabilities"
-                    :key="capability.id"
-                    type="button"
-                    :aria-pressed="activeCapability.id === capability.id"
-                    @click="selectCapability(capability.id)"
-                  >
-                    <AppIcon :name="capability.icon" :size="16" />{{ capability.label }}
-                  </button>
-                </div>
-                <div class="welcome-pills">
-                  <button
-                    v-for="example in welcomePrompts"
-                    :key="example"
-                    type="button"
-                    @click="selectQuickPrompt(example)"
-                  >
-                    {{ example }}
-                  </button>
-                </div>
-              </details>
-            </section>
-
-            <section v-else class="message-list">
+      <div v-if="!showDockNotice" class="wb-content" :class="{ 'is-welcome': showWelcome }">
+        <template v-if="showWelcome">
+          <section class="welcome" aria-labelledby="workbench-ask-title">
+            <h2 id="workbench-ask-title">{{ activeCapability.label }}</h2>
+            <p v-if="activeCapability.id !== 'general'">{{ activeCapability.description }}</p>
+          </section>
+        </template>
+        <el-scrollbar v-else ref="conversationScroll" class="chat-scroll">
+          <div class="chat-inner">
+            <section class="message-list" aria-label="业务问答记录">
               <article v-for="message in activeMessages" :key="message.id" class="msg" :class="`is-${message.role}`">
                 <template v-if="message.role === 'user'">
                   <div class="msg-user">
@@ -1373,8 +1236,6 @@ onBeforeUnmount(() => {
                   </div>
                   <div class="msg-body">
                     <p class="msg-text">{{ answerText(message) }}</p>
-                    <button v-if="!previewMode && answerText(message)" class="text-button" type="button"
-                      @click="openTools('read', answerText(message))">朗读答复</button>
                     <AiResultBlocks v-if="message.blocks?.length" :blocks="message.blocks" />
                     <!-- 有业务数据没读到时直接说明缺哪一项，避免用户把不完整的结论当成全量结论。 -->
                     <p v-if="message.dataGaps?.length" class="msg-data-gaps">
@@ -1462,6 +1323,15 @@ onBeforeUnmount(() => {
                     <div class="msg-foot">
                       <p class="msg-disclaimer">{{ message.disclaimer || activeCapability.dataScope }}</p>
                       <div class="msg-actions">
+                        <button
+                          v-if="!previewMode && answerText(message)"
+                          type="button"
+                          aria-label="朗读答复"
+                          title="朗读答复"
+                          @click="openTools('read', answerText(message))"
+                        >
+                          <AppIcon name="speaker" :size="15" />
+                        </button>
                         <el-tooltip :content="copiedMessageId === message.id ? '已复制' : '复制回答'" placement="top">
                           <button type="button" aria-label="复制回答" @click="copyMessage(message)">
                             <AppIcon :name="copiedMessageId === message.id ? 'check' : 'clipboard'" :size="13" />
@@ -1509,11 +1379,11 @@ onBeforeUnmount(() => {
                 </ol>
               </article>
             </section>
-          </main>
+          </div>
         </el-scrollbar>
 
-        <footer v-if="!showDockNotice" class="compose">
-          <div class="compose-box" :class="{ disabled: !(status.available || status.queryAvailable) }">
+        <div class="compose">
+          <div class="compose-box" :class="{ disabled: !serviceUsable }">
             <el-input
               ref="composer"
               v-model="question"
@@ -1521,17 +1391,17 @@ onBeforeUnmount(() => {
               :autosize="{ minRows: 1, maxRows: 5 }"
               maxlength="500"
               resize="none"
-              :disabled="!(status.available || status.queryAvailable) || historyChanging"
+              :disabled="!serviceUsable || historyChanging"
               :placeholder="inputPlaceholder"
               aria-label="业务问题"
               @keydown="handleKeydown"
             />
             <div class="compose-bar">
               <el-dropdown trigger="click" :disabled="sending" @command="selectCapability">
-                <button class="compose-capability" type="button" :disabled="sending">
+                <button class="compose-tool compose-capability" type="button" :disabled="sending">
                   <AppIcon :name="activeCapability.icon" :size="13" />
                   <span>{{ activeCapability.shortLabel }}</span>
-                  <AppIcon name="chevron" :size="11" />
+                  <AppIcon name="chevron" :size="11" class="chevron-down" />
                 </button>
                 <template #dropdown>
                   <el-dropdown-menu>
@@ -1541,6 +1411,15 @@ onBeforeUnmount(() => {
                   </el-dropdown-menu>
                 </template>
               </el-dropdown>
+              <div v-if="!previewMode" class="compose-tools">
+                <button type="button" class="compose-tool" aria-label="公开资料" title="公开资料" @click="openTools('web')">
+                  <AppIcon name="globe" :size="15" /><span>公开资料</span>
+                </button>
+                <button type="button" class="compose-tool" aria-label="语音输入" title="语音输入" @click="openTools('voice')">
+                  <AppIcon name="mic" :size="15" /><span>语音输入</span>
+                </button>
+              </div>
+              <span class="compose-spacer" />
               <button
                 v-if="canUndoQuestion"
                 class="text-button compose-undo"
@@ -1558,7 +1437,7 @@ onBeforeUnmount(() => {
                   aria-label="停止生成"
                   @click="cancelRequest"
                 >
-                  <AppIcon name="close" :size="15" />
+                  <AppIcon name="close" :size="15" /><span>停止</span>
                 </button>
                 <button
                   v-else
@@ -1566,26 +1445,285 @@ onBeforeUnmount(() => {
                   type="button"
                   aria-label="发送问题"
                   :disabled="
-                    !(status.available || status.queryAvailable) ||
+                    !serviceUsable ||
                     historyChanging ||
                     Boolean(conversationActionPending) ||
                     !question.trim()
                   "
                   @click="sendQuestion"
                 >
-                  <AppIcon name="arrow" :size="15" />
+                  <span>发送</span><AppIcon name="arrow" :size="16" />
                 </button>
               </el-tooltip>
             </div>
           </div>
-          <p class="compose-hint">
-            <button v-if="!previewMode" type="button" class="text-button" @click="openTools('web')">公开资料</button>
-            <button v-if="!previewMode" type="button" class="text-button" @click="openTools('voice')">语音输入</button>
-            <span>Enter 发送 / Shift+Enter 换行</span>
+          <p v-if="!showWelcome" class="compose-hint">Enter 发送 · Shift+Enter 换行</p>
+        </div>
+
+        <section v-if="showWelcome" class="welcome-queries" aria-labelledby="workbench-query-label">
+          <div class="query-heading">
+            <h3 id="workbench-query-label">常用查询</h3>
+            <span>点选后填入输入框</span>
+          </div>
+          <div class="query-grid">
+            <button
+              v-for="item in welcomeQueries"
+              :key="item.prompt"
+              type="button"
+              class="query-item"
+              :disabled="!serviceUsable || historyChanging"
+              @click="selectQuickPrompt(item.prompt, item.selectText)"
+            >
+              <span class="query-mark"><AppIcon :name="item.icon" :size="18" /></span>
+              <span class="query-text">
+                <strong v-if="item.topic">{{ item.topic }}</strong>
+                <span>{{ item.label || item.prompt }}</span>
+              </span>
+              <AppIcon name="arrow" :size="15" class="query-arrow" />
+            </button>
+          </div>
+          <details v-if="activeCapability.id === 'general'" class="welcome-examples">
+            <summary>更多示例</summary>
+            <div class="welcome-pills">
+              <button
+                v-for="example in moreQuestions"
+                :key="example"
+                type="button"
+                :disabled="!serviceUsable || historyChanging"
+                @click="selectQuickPrompt(example)"
+              >
+                {{ example }}
+              </button>
+            </div>
+          </details>
+        </section>
+        <section v-if="showWelcome" class="front-actions" aria-labelledby="workbench-actions-title">
+          <header class="front-actions-head">
+            <div>
+              <h2 id="workbench-actions-title">快捷办理</h2>
+              <p>办理先预览，再确认执行。</p>
+            </div>
+            <button class="catalog-link" type="button" aria-haspopup="dialog" @click="openSidebar('actions')">
+              全部办理<span v-if="actionCount" class="catalog-total">{{ actionCount }}</span>
+              <AppIcon name="arrow" :size="15" />
+            </button>
+          </header>
+          <div v-if="shortcuts.length" class="front-actions-grid">
+            <button
+              v-for="item in shortcuts"
+              :key="item.flowKey"
+              type="button"
+              class="front-action"
+              :disabled="actionsDisabled"
+              @click="openActionForm(item)"
+            >
+              <span class="front-action-icon">
+                <AppIcon :name="shortcutIcons[item.code] || actionIcons[item.phaseId]" :size="18" />
+              </span>
+              <span class="front-action-label"><strong>{{ item.label }}</strong><small>{{ item.phase }}</small></span>
+              <AppIcon
+                v-if="pinnedActions.includes(item.flowKey)"
+                class="front-action-pin"
+                name="pin"
+                :size="13"
+              />
+            </button>
+          </div>
+          <p v-else class="catalog-message" role="status">
+            {{ catalogLoading ? '正在读取可办理事项…' : catalogError ? '办理目录暂未读到，可打开全部办理重试。' : '当前账号暂无办理权限。' }}
           </p>
-        </footer>
-      </section>
-    </div>
+        </section>
+      </div>
+    </section>
+
+    <el-drawer
+      v-model="sidebarOpen"
+      :title="sidebarSection === 'actions' ? '快捷办理' : '会话记录'"
+      :size="sidebarSection === 'actions' ? 'min(480px, 100vw)' : 'min(390px, 100vw)'"
+      class="wb-drawer"
+      append-to-body
+      @opened="focusActionSearch"
+    >
+      <div class="wb-body">
+        <div v-if="sidebarSection === 'actions'" class="wb-group-catalog" :aria-busy="catalogLoading">
+          <div class="catalog-filters">
+            <label class="catalog-search">
+              <AppIcon name="search" :size="16" />
+              <input
+                ref="actionSearchInput"
+                v-model="actionSearch"
+                type="search"
+                aria-label="搜索快捷办理"
+                placeholder="搜索办理事项"
+                :aria-describedby="uniqueCatalogAction ? 'workbench-action-key-help' : undefined"
+                @keydown.enter="openSearchResult"
+              />
+            </label>
+            <div v-if="actionGroups.length > 1" class="catalog-phases" role="group" aria-label="按生产环节筛选">
+              <button type="button" :aria-pressed="!actionPhase" @click="actionPhase = ''">全部</button>
+              <button
+                v-for="group in actionGroups"
+                :key="group.id"
+                type="button"
+                :aria-pressed="actionPhase === group.id"
+                @click="actionPhase = group.id"
+              >
+                {{ group.label }}
+              </button>
+            </div>
+          </div>
+          <p v-if="previewMode" class="catalog-message">当前仅预览入口，登录后按账号权限办理。</p>
+          <p v-else-if="catalogLoading" class="catalog-message" role="status">正在加载快捷入口…</p>
+          <div v-else-if="catalogError" class="catalog-message" role="status">
+            <p>快捷入口未能加载，请检查后端连接。</p>
+            <button class="ghost-button" type="button" @click="loadCapabilities(true)">重新加载入口</button>
+          </div>
+          <p v-else-if="!actionGroups.length" class="catalog-message">当前账号暂无可办理入口。</p>
+          <p v-else-if="shortcutStorageKey" class="catalog-message" role="status">
+            置顶 {{ visiblePinnedCount }}/{{ workbenchShortcutLimit }} 项，显示在工作台首屏。
+          </p>
+          <p v-if="uniqueCatalogAction" id="workbench-action-key-help" class="catalog-message" role="status">
+            按 Enter 打开「{{ uniqueCatalogAction.label }}」表单。
+          </p>
+          <div
+            v-if="actionSearch.trim() && actionGroups.length && !filteredActionGroups.length"
+            class="catalog-message"
+            role="status"
+          >
+            没有匹配的办理入口<button class="text-button" type="button" @click="actionSearch = ''">清除搜索</button>
+            <button v-if="actionPhase" class="text-button" type="button" @click="actionPhase = ''">搜索全部环节</button>
+          </div>
+          <section v-for="group in filteredActionGroups" :key="group.id" class="catalog-phase" :aria-label="group.label">
+            <h3 class="catalog-phase-title">{{ group.label }}</h3>
+            <div class="catalog-grid">
+              <div v-for="item in group.items" :key="item.flowKey" class="catalog-row">
+                <button
+                  class="command-chip"
+                  type="button"
+                  :disabled="actionsDisabled"
+                  :aria-label="`办理：${item.label}`"
+                  @click="openActionForm(item)"
+                >
+                  <span><strong>{{ item.label }}</strong><small>{{ item.prompt }}</small></span>
+                  <AppIcon name="chevron" :size="14" />
+                </button>
+                <button
+                  v-if="shortcutStorageKey"
+                  type="button"
+                  class="catalog-pin"
+                  :aria-label="`置顶 ${item.label}`"
+                  :aria-pressed="pinnedActions.includes(item.flowKey)"
+                  :title="pinnedActions.includes(item.flowKey) ? '取消置顶' : '置顶到工作台'"
+                  @click="togglePinnedAction(item.flowKey)"
+                >
+                  <AppIcon name="pin" :size="16" />
+                </button>
+              </div>
+            </div>
+          </section>
+        </div>
+        <div
+          v-else
+          class="wb-group wb-group-history"
+          :aria-busy="Boolean(conversationActionPending)"
+        >
+          <div class="history-scroll">
+            <template v-for="group in sessionGroups" :key="group.key">
+              <div class="history-sub">{{ group.label }}</div>
+              <div
+                v-for="conversation in group.items"
+                :key="conversation.id"
+                class="session-row"
+                :class="{ active: activeConversationId === conversation.id }"
+              >
+                <button
+                  class="session-main"
+                  type="button"
+                  :disabled="sending || Boolean(conversationActionPending)"
+                  @click="openConversation(conversation.id)"
+                >
+                  <span class="session-title">{{
+                    conversation.title === '新对话'
+                      ? conversationDraft(conversation).trim() || conversation.title
+                      : conversation.title
+                  }}</span>
+                  <small>{{
+                    conversationDraft(conversation).trim() ? '草稿' : conversationTime(conversation.updatedAt)
+                  }}</small>
+                </button>
+                <div class="session-actions">
+                  <el-tooltip content="归档会话" placement="top">
+                    <button
+                      type="button"
+                      aria-label="归档会话"
+                      :disabled="sending || Boolean(conversationActionPending)"
+                      @click.stop="changeConversationArchive(conversation.id, true)"
+                    >
+                      <AppIcon name="package" :size="12" />
+                    </button>
+                  </el-tooltip>
+                  <el-tooltip content="删除会话" placement="top">
+                    <button
+                      type="button"
+                      aria-label="删除会话"
+                      :disabled="sending || Boolean(conversationActionPending)"
+                      @click.stop="deleteConversation(conversation.id)"
+                    >
+                      <AppIcon name="trash" :size="12" />
+                    </button>
+                  </el-tooltip>
+                </div>
+              </div>
+            </template>
+
+            <template v-if="archivedConversations.length">
+              <div class="history-sub">已归档</div>
+              <div
+                v-for="conversation in archivedConversations"
+                :key="conversation.id"
+                class="session-row is-archived"
+                :class="{ active: activeConversationId === conversation.id }"
+              >
+                <button
+                  class="session-main"
+                  type="button"
+                  :disabled="sending || Boolean(conversationActionPending)"
+                  @click="openConversation(conversation.id)"
+                >
+                  <span class="session-title">{{ conversation.title }}</span>
+                  <small>{{ conversationTime(conversation.updatedAt) }}</small>
+                </button>
+                <div class="session-actions">
+                  <el-tooltip content="恢复会话" placement="top">
+                    <button
+                      type="button"
+                      aria-label="恢复会话"
+                      :disabled="sending || Boolean(conversationActionPending)"
+                      @click.stop="changeConversationArchive(conversation.id, false)"
+                    >
+                      <AppIcon name="refresh" :size="12" />
+                    </button>
+                  </el-tooltip>
+                  <el-tooltip content="删除会话" placement="top">
+                    <button
+                      type="button"
+                      aria-label="删除会话"
+                      :disabled="sending || Boolean(conversationActionPending)"
+                      @click.stop="deleteConversation(conversation.id)"
+                    >
+                      <AppIcon name="trash" :size="12" />
+                    </button>
+                  </el-tooltip>
+                </div>
+              </div>
+            </template>
+
+            <p v-if="!sessionGroups.length && !archivedConversations.length" class="history-empty">还没有对话记录</p>
+          </div>
+        </div>
+
+      </div>
+    </el-drawer>
 
     <DeepSeekToolsDialog v-model="toolsOpen" :mode="toolsMode" :answer="spokenAnswer"
       :conversation="String(activeConversationId || '')" :apply-transcript="onVoiceDraft" />
@@ -1608,7 +1746,7 @@ onBeforeUnmount(() => {
     <el-dialog
       v-model="businessDialogOpen"
       :title="businessActionEntry?.label || '办理业务'"
-      width="560px"
+      width="min(560px, 94vw)"
       append-to-body
     >
       <AiBusinessActionForm
@@ -1621,7 +1759,7 @@ onBeforeUnmount(() => {
         @question="(text) => askRecovery({ question: text })"
       />
     </el-dialog>
-    <el-dialog v-model="createOrderDialog" title="创建生产订单" width="560px" append-to-body>
+    <el-dialog v-model="createOrderDialog" title="创建生产订单" width="min(560px, 94vw)" append-to-body>
       <AiCreateOrderForm
         v-if="createOrderDialog"
         :conversation-id="activeConversationId"
@@ -1635,7 +1773,7 @@ onBeforeUnmount(() => {
     <el-dialog
       v-model="flowDialogOpen"
       :title="flowDialogAction === 'SCHEDULE_PRODUCTION_ORDER' ? '安排生产订单' : '下达生产工单'"
-      width="560px"
+      width="min(560px, 94vw)"
       append-to-body
     >
       <AiProductionFlowForm

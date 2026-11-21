@@ -1,5 +1,6 @@
 <script setup>
 import { computed, ref } from 'vue';
+import { ElSelect, ElSelectV2 } from 'element-plus';
 
 // defineModel 接收父组件的 v-model：用户修改控件时，值会同步回通用资源页的表单对象。
 const model = defineModel();
@@ -32,7 +33,8 @@ function resetSearch(visible) {
 
 <template>
   <!-- select/reference 都使用下拉框；reference 的选项通常来自另一张业务表。 -->
-  <el-select
+  <component
+    :is="field.virtualOptions ? ElSelectV2 : ElSelect"
     v-if="field.type === 'select' || field.type === 'reference'"
     v-model="model"
     :id="inputId"
@@ -45,17 +47,20 @@ function resetSearch(visible) {
     clearable
     filterable
     :filter-method="filterOptions"
+    :options="field.virtualOptions ? filteredOptions : undefined"
     @visible-change="resetSearch"
   >
-    <el-option
-      v-for="item in filteredOptions"
-      :key="String(item.value)"
-      :label="item.label"
-      :value="item.value"
-      :disabled="item.disabled"
-      :title="item.searchLabel || item.label"
-    />
-  </el-select>
+    <template v-if="!field.virtualOptions">
+      <el-option
+        v-for="item in filteredOptions"
+        :key="String(item.value)"
+        :label="item.label"
+        :value="item.value"
+        :disabled="item.disabled"
+        :title="item.searchLabel || item.label"
+      />
+    </template>
+  </component>
 
   <!-- 数量、工时、比例等数字字段使用数字输入框，并读取最小值、精度和步长配置。 -->
   <el-input-number
@@ -144,6 +149,7 @@ function resetSearch(visible) {
 <style scoped>
 /* 所有动态表单控件统一占满表单列宽。 */
 .el-select,
+.el-select-v2,
 .el-input,
 .el-input-number,
 .el-date-editor {

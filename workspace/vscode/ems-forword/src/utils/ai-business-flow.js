@@ -5,7 +5,7 @@
 const phases = [
   [
     'order',
-    '1 接单与工单',
+    '接单与工单',
     [
       ['CREATE_PRODUCTION_ORDER', '创建订单', '创建一个生产订单'],
       ['SCHEDULE_PRODUCTION_ORDER', '安排排产', '安排刚才这张订单的排产'],
@@ -15,7 +15,7 @@ const phases = [
   ],
   [
     'stock',
-    '2 领料与库存组件',
+    '领料与库存',
     [
       ['GENERATE_MATERIAL_ISSUE', '生成领料单', '组件默认从半成品仓领用；整机领本级原料和辅料'],
       ['SUBMIT_INSPECTION', '领用复验', '填写这张领料单关联的逐件检验结果'],
@@ -24,7 +24,7 @@ const phases = [
   ],
   [
     'production',
-    '3 整机装配与报工',
+    '生产与检验',
     [
       ['GENERATE_DISPATCH_ORDER', '生成派工单', '组件已到线边后，为整机生成派工单'],
       ['RELEASE_DISPATCH_ORDER', '下达派工单', '下达派工单并生成工序任务'],
@@ -37,7 +37,7 @@ const phases = [
   ],
   [
     'inbound',
-    '4 成品入库',
+    '成品入库',
     [
       ['GENERATE_PRODUCTION_INBOUND', '生成成品入库单', '为已终检放行的整机批次生成入库单'],
       ['CONFIRM_INBOUND', '确认入库', '确认入库单，让成品进入可用库存'],
@@ -45,7 +45,7 @@ const phases = [
   ],
   [
     'shipment',
-    '5 出货与发运',
+    '出货与发运',
     [
       ['GENERATE_SALES_OUTBOUND', '生成发货单', '为这张已完成生产的订单生成发货单'],
       ['CREATE_OUTGOING_INSPECTION', '生成出货检验单', '为发货单生成出货检验单'],
@@ -83,6 +83,62 @@ export function businessActionPreviewGroups() {
     previewOnly: true,
   }));
   return businessActionGroups(catalog);
+}
+
+// 动作接口给出执行权限，跨生产单据的两个生成动作还受后端读取权限和数据范围限制。
+const generationActions = new Set(['GENERATE_WORK_ORDER', 'GENERATE_DISPATCH_ORDER']);
+const generationReadPermissions = ['mfg:production-order:view', 'mfg:production-plan:view', 'mfg:work-order:view'];
+const schedulePermissions = [
+  'mfg:schedule-scenario:view',
+  'mfg:schedule-scenario:create',
+  'mfg:schedule-scenario:update',
+  'mfg:production-order:view',
+];
+
+export function businessActionEntries(groups) {
+  return groups.flatMap((group) => group.items.map((item) => ({ ...item, phase: group.label, phaseId: group.id })));
+}
+
+export function permittedBusinessCommands(actions, can, fullDataScope) {
+  return actions
+    .filter((item) => {
+      if (!item.action || !item.permission || !can(item.permission)) return false;
+      if (item.action === 'SCHEDULE_PRODUCTION_ORDER') return schedulePermissions.every(can);
+      if (generationActions.has(item.action)) return fullDataScope && generationReadPermissions.every(can);
+      return true;
+    })
+    .map((item) => ({ ...item, kind: 'command' }));
+}
+
+export const workbenchShortcutLimit = 4;
+const defaultWorkbenchActions = [
+  'order-CREATE_PRODUCTION_ORDER',
+  'order-SCHEDULE_PRODUCTION_ORDER',
+  'production-SUBMIT_WORK_REPORT',
+  'production-SUBMIT_INSPECTION',
+];
+
+export function workbenchShortcuts(groups, pinned) {
+  const items = businessActionEntries(groups);
+  const available = new Map(items.map((item) => [item.flowKey, item]));
+  return [...new Set([...pinned, ...defaultWorkbenchActions, ...available.keys()])]
+    .filter((key) => available.has(key))
+    .slice(0, workbenchShortcutLimit)
+    .map((key) => available.get(key));
+}
+
+export function filterBusinessActions(groups, phase, query) {
+  const terms = query.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  return groups
+    .filter((group) => !phase || group.id === phase)
+    .map((group) => ({
+      ...group,
+      items: group.items.filter((item) => {
+        const text = [item.label, item.description, item.prompt, group.label].join(' ').toLowerCase();
+        return terms.every((term) => text.includes(term));
+      }),
+    }))
+    .filter((group) => group.items.length);
 }
 
 export function filterWorkflowCandidates(candidates, progress, action) {

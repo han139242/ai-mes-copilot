@@ -1,4 +1,5 @@
 <script setup>
+import MesPageHeading from '@/components/common/MesPageHeading.vue';
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import dayjs from 'dayjs';
@@ -12,6 +13,7 @@ import { getCurrentUser, isFrameworkPreview } from '@/utils/auth';
 import { openAiAssistant } from '@/utils/app-events';
 import { activeTheme } from '@/utils/theme';
 import { hasPermission } from '@/utils/permission';
+import { isNavigationPathAccessible } from '@/config/navigation';
 
 // 首页仪表盘将生产、质量、设备等多个后端统计接口汇总成指标条和ECharts图表。
 const router = useRouter();
@@ -24,7 +26,20 @@ const summary = ref({});
 const trend = ref([]);
 const quality = ref({});
 const equipment = ref({});
-const hasData = ref(false);
+const panels = [
+  { key: 'summary', label: '运营指标', value: summary, fallback: () => ({}) },
+  { key: 'trend', label: '生产趋势', value: trend, fallback: () => [] },
+  { key: 'quality', label: '质量概况', value: quality, fallback: () => ({}) },
+  { key: 'equipment', label: '设备状态', value: equipment, fallback: () => ({}) },
+];
+const panelStatus = ref(Object.fromEntries(panels.map(({ key }) => [key, 'pending'])));
+const requestedRange = ref('');
+const panelWarnings = computed(() => panels
+  .filter(({ key }) => ['stale', 'error'].includes(panelStatus.value[key]))
+  .map(({ key, label }) => `${label}${panelStatus.value[key] === 'stale' ? '显示上次结果' : '暂不可用'}`));
+const settledInspectionCount = computed(() =>
+  Number(quality.value.qualifiedCount || 0) + Number(quality.value.unqualifiedCount || 0),
+);
 let loadSequence = 0;
 const currentUser = getCurrentUser();
 // 根据权限控制首页AI助手入口是否显示。
@@ -93,8 +108,8 @@ const numberStats = computed(() => [
   },
   {
     label: '检验合格率',
-    value: Number(quality.value.inspectionCount || 0) ? Number(quality.value.qualifiedRate || 0).toFixed(2) : '--',
-    unit: Number(quality.value.inspectionCount || 0) ? '%' : '',
+    value: settledInspectionCount.value ? Number(quality.value.qualifiedRate || 0).toFixed(2) : '—',
+    unit: settledInspectionCount.value ? '%' : '',
     icon: 'shield-check',
   },
   {
@@ -112,7 +127,7 @@ const numberStats = computed(() => [
 ]);
 
 // 首页常用业务入口，点击后直接跳到相应资源页面。
-const quickCommands = [
+const shortcuts = [
   { label: '生产任务', description: '开工与完工', icon: 'activity', path: '/mfg/tasks' },
   { label: '生产报工', description: '提交产量与用料', icon: 'clipboard', path: '/mfg/work-reports' },
   { label: '质量检验', description: '检验与判定', icon: 'shield-check', path: '/qms/inspection-orders' },
@@ -120,15 +135,17 @@ const quickCommands = [
   { label: '设备维修', description: '派工与关闭', icon: 'wrench', path: '/eam/repair-orders' },
   { label: '批次追溯', description: '查询产品去向', icon: 'scan', path: '/trace/product-lots' },
 ];
+const quickCommands = computed(() => shortcuts.filter(({ path }) => isNavigationPathAccessible(path)));
 
 // 只展示需要管理人员关注的库存、设备和质量风险，并携带对应处理页面路径。
 const attentionItems = computed(() => [
   {
-    label: '库存预警',
+    label: '待处理补货',
     value: formatNumber(summary.value.inventoryWarningCount),
     unit: '项',
     tone: Number(summary.value.inventoryWarningCount || 0) > 0 ? 'warning' : 'normal',
-    path: '/wms/inventory',
+    path: '/wms/replenishment',
+    query: { status: 'SUBMITTED' },
   },
   {
     label: '故障设备',
@@ -136,6 +153,7 @@ const attentionItems = computed(() => [
     unit: '台',
     tone: Number(summary.value.equipmentFaultCount || 0) > 0 ? 'danger' : 'normal',
     path: '/eam/equipment',
+    query: { status: 'FAULT' },
   },
   {
     label: '区间不良',
@@ -231,7 +249,7 @@ const qualityOption = computed(() => {
         center: ['50%', '42%'],
         avoidLabelOverlap: false,
         label: {
-          show: true,
+          show: hasData,
           position: 'center',
           formatter: `${Number(quality.value.qualifiedRate || 0).toFixed(1)}%`,
           color: '#1f2329',
@@ -244,7 +262,7 @@ const qualityOption = computed(() => {
               { value: qualified, name: '合格' },
               { value: unqualified, name: '不合格' },
             ]
-          : [{ value: 1, name: '暂无检验' }],
+          : [],
       },
     ],
   };
@@ -292,7 +310,7 @@ const equipmentOption = computed(() => ({
 }));
 
 // 生产执行主流程入口，帮助用户按订单到追溯的顺序进入各模块。
-const processSteps = [
+const manufacturingSteps = [
   { label: '订单', icon: 'clipboard', path: '/mfg/production-orders' },
   { label: '工单', icon: 'package', path: '/mfg/work-orders' },
   { label: '派工', icon: 'users', path: '/mfg/dispatch-orders' },
@@ -301,6 +319,7 @@ const processSteps = [
   { label: '入库', icon: 'warehouse', path: '/wms/inbound-orders' },
   { label: '追溯', icon: 'scan', path: '/trace/product-lots' },
 ];
+const processSteps = computed(() => manufacturingSteps.filter(({ path }) => isNavigationPathAccessible(path)));
 
 // 设备总数，标题右侧直接给出规模。
 const equipmentTotal = computed(
@@ -332,35 +351,49 @@ function queryParams() {
 // silent 用于定时自动刷新：不显示整页 loading，避免页面反复闪烁。
 async function loadDashboard(silent = false) {
   const sequence = ++loadSequence;
-  // 预览模式直接赋值；真实模式并行请求四块统计数据，全部完成后响应式更新界面。
+  const params = queryParams();
+  const range = `${params.beginDate} 至 ${params.endDate}`;
+  if (range !== requestedRange.value) {
+    requestedRange.value = range;
+    panels.filter(({ key }) => key !== 'equipment').forEach(({ key, value, fallback }) => {
+      value.value = fallback();
+      panelStatus.value[key] = 'pending';
+    });
+    lastRefreshAt.value = '';
+  }
   if (previewMode) {
     summary.value = previewPayload.summary;
     trend.value = previewPayload.trend;
     quality.value = previewPayload.quality;
     equipment.value = previewPayload.equipment;
-    hasData.value = true;
+    panels.forEach(({ key }) => { panelStatus.value[key] = 'ready'; });
     return;
   }
 
-  if (!silent) {
+  if (silent !== true) {
     loading.value = true;
   }
   loadError.value = '';
   try {
-    const params = queryParams();
-    const [summaryResult, trendResult, qualityResult, equipmentResult] = await Promise.all([
-      getDashboardSummary(params),
-      getProductionTrend(params),
-      getQualityStatistics(params),
-      getEquipmentStatus(),
+    const options = { suppressErrorMessage: true };
+    const results = await Promise.allSettled([
+      getDashboardSummary(params, options),
+      getProductionTrend(params, options),
+      getQualityStatistics(params, options),
+      getEquipmentStatus(options),
     ]);
     if (sequence !== loadSequence) return;
-    summary.value = summaryResult.data || {};
-    trend.value = trendResult.data || [];
-    quality.value = qualityResult.data || {};
-    equipment.value = equipmentResult.data || {};
-    hasData.value = true;
-    lastRefreshAt.value = dayjs().format('HH:mm:ss');
+    panels.forEach(({ key, value }, index) => {
+      const result = results[index];
+      if (result.status === 'fulfilled' && result.value?.data != null) {
+        value.value = result.value.data;
+        panelStatus.value[key] = 'ready';
+      } else {
+        panelStatus.value[key] = ['ready', 'stale'].includes(panelStatus.value[key]) ? 'stale' : 'error';
+      }
+    });
+    if (panelWarnings.value.length) loadError.value = panelWarnings.value.join('，');
+    if (!panelWarnings.value.length) lastRefreshAt.value = dayjs().format('HH:mm:ss');
   } catch (error) {
     // 自动刷新失败时保留上一次成功的数据，只记错误，不清空看板。
     if (sequence !== loadSequence) return;
@@ -398,14 +431,22 @@ onBeforeUnmount(() => {
 <template>
   <!-- 页面结构：标题行 + 指标条 + 常用入口 + 业务链路/趋势图与关注项/质量/设备两栏。 -->
   <div class="mes-page dashboard-page" v-loading="loading">
-    <header class="page-head">
-      <div class="head-copy">
-        <h1>首页</h1>
-        <p>{{ greeting }}，{{ displayName }} · {{ dateSubtitle }}</p>
-      </div>
-      <div class="head-actions">
+    <MesPageHeading title="生产概览" class="dashboard-heading">
+      <template #detail>
+        <div class="dashboard-context">
+          <span>{{ greeting }}，{{ displayName }} · {{ dateSubtitle }}</span>
+          <span class="refresh-hint" :class="{ 'is-current': !previewMode && lastRefreshAt && !loadError }">
+            <i /><template v-if="previewMode">界面预览</template
+            ><template v-else-if="lastRefreshAt">{{ loadError ? '上次完整同步' : '数据更新于' }} {{ lastRefreshAt }}</template
+            ><template v-else-if="loadError">同步未完成</template
+            ><template v-else>尚未同步数据</template>
+          </span>
+        </div>
+      </template>
+      <template #actions>
         <el-tag v-if="previewMode" size="small" effect="plain">预览数据</el-tag>
         <el-date-picker
+          class="dashboard-date-range"
           v-model="dateRange"
           type="daterange"
           range-separator="至"
@@ -414,14 +455,14 @@ onBeforeUnmount(() => {
           unlink-panels
           :clearable="false"
           size="default"
-          @change="loadDashboard"
+          @change="loadDashboard()"
         />
         <el-tooltip content="刷新数据" placement="bottom">
           <el-button class="mes-icon-button" aria-label="刷新数据" @click="loadDashboard()">
             <AppIcon name="refresh" :size="15" />
           </el-button>
         </el-tooltip>
-        <el-button v-if="canUseAi" class="ai-entry" @click="openAiAssistant">
+        <el-button v-if="canUseAi" type="primary" class="ai-entry" @click="openAiAssistant">
           <AppIcon name="bot" :size="15" />
           AI 解读
         </el-button>
@@ -429,8 +470,8 @@ onBeforeUnmount(() => {
           <AppIcon name="monitor" :size="15" />
           生产大屏
         </el-button>
-      </div>
-    </header>
+      </template>
+    </MesPageHeading>
 
     <el-alert v-if="loadError" class="dashboard-alert" :title="loadError" type="error" show-icon :closable="false">
       <template #default>
@@ -465,15 +506,12 @@ onBeforeUnmount(() => {
         <AppIcon :name="item.icon" :size="14" />
         {{ item.label }}
       </button>
-      <span class="refresh-hint" :class="{ 'is-current': !previewMode && lastRefreshAt && !loadError }">
-        <i /><template v-if="previewMode">界面预览</template
-        ><template v-else-if="lastRefreshAt">数据更新于 {{ lastRefreshAt }}</template
-        ><template v-else>尚未同步数据</template>
-      </span>
     </section>
 
+    <AiTodoPanel class="dashboard-todo" />
+
     <div class="board-grid">
-      <article class="mes-panel chain-panel">
+      <article v-if="processSteps.length" class="mes-panel chain-panel">
         <div class="mes-panel-header">
           <div>
             <h2 class="mes-panel-title">生产业务链路</h2>
@@ -502,30 +540,31 @@ onBeforeUnmount(() => {
             :key="item.label"
             type="button"
             :class="`tone-${item.tone}`"
-            @click="router.push(item.path)"
+            :disabled="!isNavigationPathAccessible(item.path)"
+            @click="router.push({ path: item.path, query: item.query })"
           >
             <span>{{ item.label }}</span>
             <strong
               >{{ item.value }}<small>{{ item.unit }}</small></strong
             >
-            <AppIcon name="right" :size="13" />
+            <AppIcon v-if="isNavigationPathAccessible(item.path)" name="right" :size="13" />
           </button>
         </div>
       </article>
     </div>
 
-    <!-- 我的待办：紧挨运营关注，把九类待办和可直接办理的按钮摊开，不用再点进各业务页找。 -->
-    <AiTodoPanel class="dashboard-todo" />
-
     <div class="chart-grid">
       <article class="mes-panel trend-panel">
         <div class="mes-panel-header">
           <div>
-            <h2 class="mes-panel-title">近七日生产趋势</h2>
+            <h2 class="mes-panel-title">区间生产趋势</h2>
           </div>
           <el-tag size="small" effect="plain">按日</el-tag>
         </div>
-        <div class="chart-body"><MesChart :option="trendOption" height="200px" /></div>
+        <div class="chart-body">
+          <MesChart v-if="trend.length" :option="trendOption" height="200px" />
+          <p v-else class="dashboard-chart-empty">{{ panelStatus.trend === 'error' ? '生产趋势暂不可用' : panelStatus.trend === 'pending' ? '正在读取生产趋势' : '区间暂无生产数据' }}</p>
+        </div>
       </article>
 
       <article class="mes-panel quality-panel">
@@ -535,7 +574,10 @@ onBeforeUnmount(() => {
           </div>
           <span class="header-value">{{ formatNumber(quality.inspectionCount) }} 单</span>
         </div>
-        <div class="chart-body"><MesChart :option="qualityOption" height="200px" /></div>
+        <div class="chart-body">
+          <MesChart v-if="settledInspectionCount" :option="qualityOption" height="200px" />
+          <p v-else class="dashboard-chart-empty">{{ panelStatus.quality === 'error' ? '质量统计暂不可用' : panelStatus.quality === 'pending' ? '正在读取质量统计' : '区间暂无已判定检验' }}</p>
+        </div>
       </article>
 
       <article class="mes-panel equipment-panel">
@@ -543,9 +585,12 @@ onBeforeUnmount(() => {
           <div>
             <h2 class="mes-panel-title">设备状态</h2>
           </div>
-          <span class="header-value">{{ hasData ? equipmentTotal : '--' }} 台</span>
+          <span class="header-value">{{ ['ready', 'stale'].includes(panelStatus.equipment) ? equipmentTotal : '—' }} 台</span>
         </div>
-        <div class="chart-body"><MesChart :option="equipmentOption" height="200px" /></div>
+        <div class="chart-body">
+          <MesChart v-if="['ready', 'stale'].includes(panelStatus.equipment)" :option="equipmentOption" height="200px" />
+          <p v-else class="dashboard-chart-empty">{{ panelStatus.equipment === 'error' ? '设备状态暂不可用' : '正在读取设备状态' }}</p>
+        </div>
       </article>
     </div>
   </div>
@@ -559,80 +604,38 @@ onBeforeUnmount(() => {
 }
 
 /* ---------- 标题行 ---------- */
-.page-head {
-  display: flex;
-  min-height: 46px;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  margin-bottom: 22px;
-}
-
-.head-copy {
-  min-width: 0;
-}
-
-.head-copy h1 {
-  margin: 0;
-  color: var(--mes-text);
-  font-size: 24px;
-  font-weight: 600;
-  line-height: 1.35;
-  letter-spacing: -0.2px;
-}
-
-.head-copy p {
-  margin: 3px 0 0;
-  color: var(--mes-text-muted);
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.head-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 8px;
-}
-
-.head-actions :deep(.el-date-editor) {
-  width: 240px;
-}
-.head-actions :deep(.el-button) {
-  gap: 6px;
-  margin: 0;
-}
-.head-actions :deep(.el-tag) {
-  border-radius: 3px;
-}
-
-.head-actions .ai-entry.el-button {
-  color: var(--mes-primary);
-  border-color: var(--mes-primary-border);
+.dashboard-heading {
+  margin-bottom: 16px;
+  padding: 20px 22px;
+  border: 0;
+  border-radius: var(--mes-radius-lg);
   background: var(--mes-primary-soft);
 }
-
-.head-actions .ai-entry.el-button:hover {
-  color: #fff;
-  border-color: var(--mes-primary);
-  background: var(--mes-primary);
+.dashboard-heading :deep(h1) {
+  font-size: 29px;
+  line-height: 1.25;
 }
-
-.head-actions :deep(.el-button--primary.is-plain) {
-  color: var(--mes-primary);
-  border-color: var(--mes-primary-border);
-  background: #fff;
+.dashboard-context {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
 }
-
-.head-actions :deep(.el-button--primary.is-plain:hover) {
-  color: #fff;
-  border-color: var(--mes-primary);
-  background: var(--mes-primary-hover);
+.dashboard-date-range.el-date-editor {
+  width: 240px;
+  max-width: 100%;
 }
 
 .dashboard-alert {
   margin-bottom: 10px;
+}
+.dashboard-chart-empty {
+  display: grid;
+  min-height: 200px;
+  margin: 0;
+  place-items: center;
+  color: var(--mes-text-secondary);
+  font-size: var(--mes-font-label);
+  text-align: center;
 }
 
 /* ---------- 指标条 ---------- */
@@ -640,8 +643,8 @@ onBeforeUnmount(() => {
   display: grid;
   grid-template-columns: repeat(6, minmax(0, 1fr));
   border: 1px solid var(--mes-border);
-  border-radius: var(--mes-radius);
-  background: #fff;
+  border-radius: var(--mes-radius-lg);
+  background: var(--mes-surface);
 }
 
 .metric-cell {
@@ -649,7 +652,7 @@ onBeforeUnmount(() => {
   min-width: 0;
   flex-direction: column;
   gap: 6px;
-  padding: 20px;
+  padding: 15px clamp(10px, 1.4vw, 20px) 16px;
   border-left: 1px solid var(--mes-border);
 }
 
@@ -662,9 +665,9 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 5px;
   overflow: hidden;
-  color: var(--mes-text-muted);
-  font-size: 12px;
-  line-height: 1.3;
+  color: var(--mes-text-secondary);
+  font-size: var(--mes-font-label);
+  line-height: 1.35;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -700,9 +703,9 @@ onBeforeUnmount(() => {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 2px;
-  margin-top: 10px;
-  padding: 0 2px;
+  gap: 4px 8px;
+  margin: 9px 0 12px;
+  padding: 5px 0;
 }
 
 .shortcut-label {
@@ -716,9 +719,10 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  padding: 4px 9px;
-  color: #4b5563;
-  font-size: 12px;
+  min-height: 32px;
+  padding: 5px 9px;
+  color: var(--mes-text-secondary);
+  font-size: var(--mes-font-label);
   border: 1px solid transparent;
   border-radius: 5px;
   background: transparent;
@@ -747,9 +751,8 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-left: auto;
-  color: var(--mes-text-muted);
-  font-size: 12px;
+  color: var(--mes-text-secondary);
+  font-size: var(--mes-font-small);
   white-space: nowrap;
 }
 
@@ -959,26 +962,21 @@ onBeforeUnmount(() => {
 }
 
 @media (max-width: 900px) {
-  .page-head {
-    align-items: flex-start;
-    flex-direction: column;
-  }
-  .head-actions {
-    width: 100%;
-    justify-content: flex-start;
-  }
   .chart-grid {
     grid-template-columns: minmax(0, 1fr);
   }
   .chart-grid > .equipment-panel {
     grid-column: auto;
   }
-  .refresh-hint {
-    margin-left: 0;
-  }
 }
 
 @media (max-width: 640px) {
+  .dashboard-heading {
+    padding: 15px 14px;
+  }
+  .dashboard-heading :deep(h1) {
+    font-size: 24px;
+  }
   .metric-strip {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -988,7 +986,7 @@ onBeforeUnmount(() => {
   .metric-cell:nth-child(n + 3) {
     border-top: 1px solid var(--mes-border);
   }
-  .head-actions :deep(.el-date-editor) {
+  .dashboard-date-range.el-date-editor {
     width: 100%;
   }
   .process-flow {

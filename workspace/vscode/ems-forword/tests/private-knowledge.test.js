@@ -8,6 +8,7 @@ import {
   knowledgeGenerationState,
   knowledgePreferencesSnapshot,
   knowledgePreferencesChanged,
+  locateCitationExcerpt,
   normalizeKnowledgeGraph,
   validateKnowledgeFile,
 } from '../src/utils/private-knowledge.js';
@@ -94,6 +95,30 @@ test('answer parser recognizes citations and emphasis while leaving active marku
   assert.equal(tokens.find((token) => token.kind === 'strong').text, '真实步骤');
   assert.equal(tokens[0].kind, 'text');
   assert.match(tokens[0].text, /<img/);
+});
+
+test('citation highlighting preserves original whitespace and declines uncertain matches', () => {
+  assert.deepEqual(locateCitationExcerpt('驱动板使用 DRV-07。复测亮度。', 'DRV-07'), {
+    before: '驱动板使用 ', match: 'DRV-07', after: '。复测亮度。',
+  });
+  assert.deepEqual(locateCitationExcerpt('核对\n驱动板 DRV-07 后复测。', '核对驱动板DRV-07'), {
+    before: '', match: '核对\n驱动板 DRV-07', after: ' 后复测。',
+  });
+  assert.equal(locateCitationExcerpt('DRV-07 与 DRV-07', 'DRV-07'), null);
+  assert.equal(locateCitationExcerpt('DRV-07', 'DRV-08'), null);
+});
+
+test('citation highlighting respects identifier boundaries in the original text', () => {
+  assert.equal(locateCitationExcerpt('备件为 DRV-070', 'DRV-07'), null);
+  assert.equal(locateCitationExcerpt('检验码为 TEST-9001', 'TEST-900'), null);
+  assert.equal(locateCitationExcerpt('旧编号 X-DRV-07', 'DRV-07'), null);
+  assert.equal(locateCitationExcerpt('长编号 DRV-\n070', 'DRV-07'), null);
+  assert.deepEqual(locateCitationExcerpt('备件 DRV-070，现行 DRV-07。', 'DRV-07'), {
+    before: '备件 DRV-070，现行 ', match: 'DRV-07', after: '。',
+  });
+  assert.deepEqual(locateCitationExcerpt('核对\nDRV-07 及备件', '核对DRV-07'), {
+    before: '', match: '核对\nDRV-07', after: ' 及备件',
+  });
 });
 
 test('graph source links require an owned active document with matching version and hash', () => {

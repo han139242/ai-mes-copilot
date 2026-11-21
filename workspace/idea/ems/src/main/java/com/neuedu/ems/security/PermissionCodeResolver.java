@@ -106,6 +106,7 @@ public class PermissionCodeResolver {
             rule("POST", "/api/trace/barcode/generate", "trace:barcode:generate"),
             rule("GET", "/api/trace/barcode/scan/[^/]+", "trace:barcode:scan"),
             rule("GET", "/api/trace/product-lot/lot-no/[^/]+", "trace:product-lot:trace"),
+            rule("GET", "/api/trace/product-lot/[^/]+/trace", "trace:product-lot:trace"),
             rule("GET", "/api/trace/material-usage/batch/[^/]+", "trace:material-usage:reverse-trace")
     );
 

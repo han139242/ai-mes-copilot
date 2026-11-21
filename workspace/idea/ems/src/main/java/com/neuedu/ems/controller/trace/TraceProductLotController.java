@@ -1,9 +1,11 @@
 package com.neuedu.ems.controller.trace;
 
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
+import com.neuedu.ems.common.AuthorizationContext;
 import com.neuedu.ems.common.ResultCode;
 import com.neuedu.ems.common.ResultData;
 import com.neuedu.ems.entity.trace.TraceProductLot;
+import com.neuedu.ems.exception.DataScopeAccessDeniedException;
 import com.neuedu.ems.service.trace.TraceProductLotService;
 import com.neuedu.ems.util.ExcelExportUtil;
 import jakarta.servlet.http.HttpServletResponse;
@@ -13,6 +15,7 @@ import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
+import org.springframework.web.bind.annotation.RequestAttribute;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
@@ -126,5 +129,15 @@ public class TraceProductLotController {
     public ResultData traceByLotNo(@PathVariable("lotNo") String lotNo) {
         Map<String, Object> result = traceProductLotService.getProductLotTraceByLotNo(lotNo);
         return ResultData.success(ResultCode.SUCCESS, result);
+    }
+
+    @GetMapping("/{productLotId}/trace")
+    public ResultData traceById(
+            @PathVariable("productLotId") Long productLotId,
+            @RequestAttribute(value = "authorizationContext", required = false) AuthorizationContext authorization) {
+        if (authorization == null || !authorization.hasPermission("trace:product-lot:trace")) {
+            throw new DataScopeAccessDeniedException();
+        }
+        return ResultData.success(ResultCode.SUCCESS, traceProductLotService.getProductLotTraceById(productLotId));
     }
 }

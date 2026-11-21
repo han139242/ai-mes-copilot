@@ -1,4 +1,5 @@
 <script setup>
+import MesPageHeading from '@/components/common/MesPageHeading.vue';
 import { computed, onMounted, ref } from 'vue';
 import { getResourcePage } from '@/api/resource';
 import AppIcon from '@/components/common/AppIcon.vue';
@@ -263,16 +264,12 @@ const summaryRows = computed(() =>
 
 <template>
   <div class="po-page">
-    <header class="po-head">
-      <div class="po-head-main">
-        <span class="po-head-icon"><AppIcon name="route" :size="21" /></span>
-        <div>
-          <h1>流程优化对比</h1>
-        </div>
-      </div>
-      <el-tag type="info" effect="plain" size="large">改善基线</el-tag>
-      <el-button :loading="loading" @click="loadOverview">刷新记录数</el-button>
-    </header>
+    <MesPageHeading title="流程优化对比" icon="workflow">
+      <template #actions>
+        <el-tag type="info" effect="plain" size="large">改善基线</el-tag>
+        <el-button :loading="loading" @click="loadOverview">刷新记录数</el-button>
+      </template>
+    </MesPageHeading>
 
     <el-alert
       v-if="hasReadError"
@@ -389,47 +386,6 @@ const summaryRows = computed(() =>
   font-size: 13px;
 }
 
-.po-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.po-head-main {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.po-head-icon {
-  display: inline-flex;
-  width: 42px;
-  height: 42px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  color: var(--mes-primary, var(--mes-primary));
-  border: 1px solid var(--mes-primary-border, var(--mes-primary-border));
-  border-radius: 8px;
-  background: var(--mes-primary-soft, #eaf2ff);
-}
-
-.po-head h1 {
-  margin: 0;
-  font-size: 19px;
-  font-weight: 600;
-  letter-spacing: 0;
-}
-
-.po-head p {
-  margin: 4px 0 0;
-  color: var(--mes-text-muted, var(--mes-text-muted));
-  font-size: 12px;
-}
-
-/* ---------- 总览指标 ---------- */
 .po-overview {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

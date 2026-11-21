@@ -3,6 +3,8 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import dayjs from 'dayjs';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppIcon from '@/components/common/AppIcon.vue';
+import MesPageHeading from '@/components/common/MesPageHeading.vue';
+import { isNavigationPathAccessible } from '@/config/navigation';
 import {
   acknowledgeAlert,
   changeAlertRuleStatus,
@@ -333,7 +335,7 @@ const TARGET_KEYWORD_METRICS = [
 
 function targetLink(row) {
   const { routePath: path, bizId, bizNo: rawBizNo } = row || {};
-  if (!path) {
+  if (!path || !isNavigationPathAccessible(path)) {
     return null;
   }
   const metric = String(row.metricCode || '').toUpperCase();
@@ -763,15 +765,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="alert-page">
-    <header class="page-header">
-      <div class="page-title">
-        <span class="page-icon"><AppIcon name="bell" :size="21" /></span>
-        <div class="title-text">
-          <h1>预警中心</h1>
-        </div>
-      </div>
-      <div class="page-actions">
-        <span v-if="lastRefreshAt" class="refresh-time">更新于 {{ lastRefreshAt }}</span>
+    <MesPageHeading title="预警中心" icon="bell">
+      <template #detail>
+        <span class="refresh-time">{{ lastRefreshAt ? '更新于 ' + lastRefreshAt : '尚未获取更新时间' }}</span>
+      </template>
+      <template #actions>
         <el-switch v-model="autoRefresh" size="small" active-text="自动刷新" />
         <el-button :loading="eventLoading" @click="refreshAll">
           <AppIcon name="refresh" :size="15" />
@@ -781,8 +779,8 @@ onBeforeUnmount(() => {
           <AppIcon name="activity" :size="15" />
           <span>立即扫描</span>
         </el-button>
-      </div>
-    </header>
+      </template>
+    </MesPageHeading>
 
     <p v-if="offlineHint" class="offline-notice">
       <AppIcon name="alert" :size="14" />
@@ -1375,54 +1373,6 @@ onBeforeUnmount(() => {
   min-width: 0;
   flex-direction: column;
   gap: 12px;
-}
-
-.page-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.page-title {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 10px;
-}
-
-.page-icon {
-  display: inline-flex;
-  width: 36px;
-  height: 36px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  color: var(--mes-primary, #2f6fed);
-  border-radius: 6px;
-  background: var(--mes-primary-soft, #eaf2ff);
-}
-
-.title-text { min-width: 0; }
-
-.title-text h1 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.page-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.page-actions :deep(.el-button > span) {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
 }
 
 .refresh-time {

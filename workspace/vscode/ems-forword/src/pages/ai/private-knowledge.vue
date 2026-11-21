@@ -10,6 +10,9 @@ import ReviewNotebook from '@/components/ai/ReviewNotebook.vue';
 import ScanImportDialog from '@/components/ai/ScanImportDialog.vue';
 import DeepSeekToolsDialog from '@/components/ai/DeepSeekToolsDialog.vue';
 import { sliceUtf16 } from '@/utils/text';
+import { createClientId } from '@/utils/client-id';
+import { queueBusinessDraft } from '@/utils/business-handoff';
+import { isNavigationPathAccessible } from '@/config/navigation';
 import { privateAction as dispatchPrivate, uploadPrivateFile } from '@/api/ai/private';
 import {
   historySessions,
@@ -19,6 +22,7 @@ import {
   knowledgePreferencesSnapshot,
   knowledgePreferencesChanged,
   knowledgeState,
+  locateCitationExcerpt,
   savePrivateDownload,
   validateKnowledgeFile,
 } from '@/utils/private-knowledge';
@@ -30,7 +34,25 @@ const tab = ref('ask'),
   sideTab = ref('documents'),
   filter = ref(''),
   sourcePanel = ref(null);
+const sourceSelection = ref(null);
+const sourcePieces = computed(() =>
+  (sourcePanel.value?.pieces || []).map((piece) => ({
+    ...piece,
+    excerpt: piece.locator === sourceSelection.value?.locator
+      ? locateCitationExcerpt(piece.text, sourceSelection.value?.text)
+      : null,
+  })),
+);
 const filesCollapsed = ref(true);
+const questionExamples = [
+  { title: '整理操作步骤', icon: 'list', text: '请整理这些资料中的关键操作步骤，并给出依据。' },
+  { title: '追查资料关联', icon: 'workflow', text: '资料中的产品、物料、工序和检验标准有哪些关联？' },
+  {
+    title: '核对变更影响',
+    icon: 'clipboard',
+    text: '我想核对一项物料变更是否已经批准，以及影响哪些工序和检验规范。请先告诉我需要补充哪些信息。',
+  },
+];
 const scanOpen = ref(false);
 const scanDocument = ref(null);
 const toolsOpen = ref(false);
@@ -45,8 +67,10 @@ const filesInput = ref(),
   replaceInput = ref(),
   replaceTarget = ref(null),
   questionInput = ref(),
+  knowledgeChat = ref(),
   jobsPanel = ref(),
-  thread = ref();
+  thread = ref(),
+  sourceHeading = ref();
 const documents = ref([]),
   jobs = ref([]),
   histories = ref([]),
@@ -66,7 +90,9 @@ const serviceError = ref(''),
 const messages = ref([]),
   question = ref(''),
   mode = ref('auto'),
-  session = ref(crypto.randomUUID());
+  session = ref(createClientId());
+const sourceScope = ref(null);
+const canOpenBusiness = computed(() => isNavigationPathAccessible('/ai/workbench'));
 const replacedQuestion = ref(null),
   previousConversation = ref(null);
 const canReturnPrevious = computed(
@@ -107,6 +133,7 @@ function checkSession() {
   expandedSources.value = new Set();
   queryController?.abort();
   documents.value = [];
+  sourceScope.value = null;
   messages.value = [];
   question.value = '';
   replacedQuestion.value = null;
@@ -129,6 +156,11 @@ const visibleDocs = computed(() =>
 const sessions = computed(() => historySessions(histories.value));
 const pending = computed(() => jobs.value.some((job) => ['queued', 'running'].includes(job.state)));
 const readyCount = computed(() => documents.value.filter((doc) => doc.vector_version > 0 && doc.active_hash).length);
+const scopeDocument = computed(() => sourceScope.value &&
+  documents.value.find((doc) => doc.id === sourceScope.value.documentId && doc.active_hash && doc.vector_version > 0));
+const scopeCurrent = computed(() => !sourceScope.value || (
+  service.value?.sourceScopeAvailable === true && scopeDocument.value?.vector_version === sourceScope.value.version
+));
 const relevantJobs = computed(() => jobs.value.filter((job) => job.state !== 'superseded').slice(0, 3));
 const stageLabel = computed(() =>
   serviceError.value ? '连接待恢复' : !service.value ? '正在连接' : service.value.ragReady ? '文档可用' : '等待资料',
@@ -188,14 +220,16 @@ function newConversation() {
       messages: [...messages.value],
       question: question.value,
       mode: mode.value,
+      sourceScope: sourceScope.value,
       replacedQuestion: replacedQuestion.value,
       revision: service.value?.revision,
       answerRevision: service.value?.answer_revision,
     };
   }
-  session.value = crypto.randomUUID();
+  session.value = createClientId();
   messages.value = [];
   question.value = '';
+  sourceScope.value = null;
   replacedQuestion.value = null;
   closeSource();
   scrollThread();
@@ -213,6 +247,7 @@ function returnPreviousConversation() {
   );
   question.value = previous.question;
   mode.value = previous.mode;
+  sourceScope.value = previous.sourceScope ?? null;
   replacedQuestion.value = previous.replacedQuestion;
   closeSource();
   scrollThread();
@@ -222,6 +257,10 @@ function openConversation(value) {
   if (sending.value) stopWaiting();
   previousConversation.value = null;
   session.value = value.id;
+  const latest = value.rows[0];
+  sourceScope.value = latest?.response?.sourceScope
+    ? { ...latest.response.sourceScope, previousHistoryId: latest.valid === false ? null : latest.id }
+    : null;
   messages.value = [...value.rows].reverse().flatMap((row) => [
     { role: 'user', text: row.question, key: 'q-' + row.id },
     {
@@ -254,7 +293,8 @@ async function clearHistory() {
     historySequence++;
     histories.value = [];
     previousConversation.value = null;
-    session.value = crypto.randomUUID();
+    session.value = createClientId();
+    if (sourceScope.value) sourceScope.value = { ...sourceScope.value, previousHistoryId: null };
     messages.value = [];
     closeSource();
     scrollThread();
@@ -269,18 +309,45 @@ async function scrollThread() {
   await nextTick();
   thread.value?.scrollTo({ top: messages.value.length ? thread.value.scrollHeight : 0, behavior: 'auto' });
 }
-async function sendQuestion(text) {
+function chooseSourceScope(doc) {
+  if (sending.value || !service.value?.sourceScopeAvailable || !doc.active_hash || doc.vector_version <= 0) return;
+  const current = sourceScope.value;
+  const sameVersion = current?.documentId === doc.id && current.version === doc.vector_version;
+  sourceScope.value = {
+    documentId: doc.id,
+    name: doc.active_name || doc.name,
+    version: doc.vector_version,
+    previousHistoryId: sameVersion ? current.previousHistoryId : null,
+  };
+  closeSource();
+  filesCollapsed.value = true;
+  nextTick(() => questionInput.value?.focus());
+}
+function clearSourceScope() {
+  sourceScope.value = null;
+  nextTick(() => questionInput.value?.focus());
+}
+async function sendQuestion(text, retryContext) {
   const value = (typeof text === 'string' ? text : question.value).trim();
   if (!value || sending.value || historyClearing.value || preview || !service.value || serviceError.value) return;
   if (value.length < 2) {
     actionError.value = '问题至少需要 2 个字';
     return;
   }
+  if (!retryContext && !scopeCurrent.value) {
+    actionError.value = '所选版本已变化，请先更新资料范围或切回全部资料。';
+    return;
+  }
+  const scope = retryContext ? retryContext.sourceScope : sourceScope.value;
+  const requestMode = retryContext ? retryContext.mode : scope ? 'rag' : mode.value;
+  const requestScope = scope
+    ? { documentId: scope.documentId, version: scope.version, previousHistoryId: scope.previousHistoryId ?? null }
+    : null;
   actionError.value = '';
   const sequence = ++querySequence,
     currentSession = session.value;
   queryController = new AbortController();
-  messages.value.push({ role: 'user', text: value, key: crypto.randomUUID() });
+  messages.value.push({ role: 'user', text: value, key: createClientId() });
   previousConversation.value = null;
   if (typeof text !== 'string') {
     question.value = '';
@@ -291,11 +358,27 @@ async function sendQuestion(text) {
   try {
     const result = await privateAction(
       'question',
-      { question: value, mode: mode.value, sessionId: currentSession },
+      { question: value, mode: requestMode, sessionId: currentSession, ...(requestScope && { sourceScope: requestScope }) },
       { signal: queryController.signal },
     );
     if (sequence !== querySequence || !mounted || session.value !== currentSession) return;
-    messages.value.push({ role: 'assistant', ...result, question: value, valid: true, key: crypto.randomUUID() });
+    if (requestScope && (
+      result.sourceScope?.documentId !== requestScope.documentId ||
+      result.sourceScope?.version !== requestScope.version ||
+      result.citations?.some((citation) =>
+        citation.documentId !== requestScope.documentId || citation.version !== requestScope.version)
+    )) {
+      const mismatch = new Error('这次未能确认查询范围，请重试“只问此资料”。');
+      mismatch.displayMessage = mismatch.message;
+      throw mismatch;
+    }
+    if (requestScope &&
+      sourceScope.value?.documentId === requestScope.documentId &&
+      sourceScope.value.version === requestScope.version
+    ) {
+      sourceScope.value = { ...sourceScope.value, previousHistoryId: result.historyId };
+    }
+    messages.value.push({ role: 'assistant', ...result, question: value, valid: true, key: createClientId() });
     loadHistory();
     refresh(true);
   } catch (failure) {
@@ -304,7 +387,8 @@ async function sendQuestion(text) {
       role: 'error',
       text: failureText(failure, '这次问答未完成，请重试。'),
       retry: value,
-      key: crypto.randomUUID(),
+      retryContext: { mode: requestMode, sourceScope: scope },
+      key: createClientId(),
     });
   } finally {
     if (sequence === querySequence) sending.value = false;
@@ -318,7 +402,7 @@ function stopWaiting() {
   messages.value.push({
     role: 'notice',
     text: '已停止等待。服务端若已生成结果，可稍后在历史问答中查看。',
-    key: crypto.randomUUID(),
+    key: createClientId(),
   });
 }
 function composerKey(event) {
@@ -425,6 +509,7 @@ async function download(doc) {
   }
 }
 let sourceSequence = 0;
+let sourceTrigger;
 const scanPageUrl = ref('');
 const scanPageLoading = ref(false);
 const scanPageError = ref('');
@@ -456,26 +541,54 @@ async function loadScanPage(piece) {
     if (sequence === sourceSequence) scanPageLoading.value = false;
   }
 }
-function closeSource() {
+function closeSource(restoreFocus = false) {
+  const trigger = sourceTrigger;
+  sourceTrigger = undefined;
   sourceSequence += 1;
   clearScanPage();
   sourcePanel.value = null;
+  sourceSelection.value = null;
   sourceLoading.value = false;
   sourceError.value = '';
+  if (restoreFocus) {
+    nextTick(() => {
+      if (trigger?.isConnected && trigger.getClientRects().length) trigger.focus();
+      else questionInput.value?.focus();
+    });
+  }
 }
 async function openSource(source) {
+  const trigger = knowledgeChat.value?.ownerDocument?.activeElement;
+  if (!sourcePanel.value || (trigger && !trigger.closest?.('.knowledge-source'))) sourceTrigger = trigger;
+  sourceSelection.value = source;
+  return loadSource(source);
+}
+
+async function loadSource(source, context = false) {
   clearScanPage();
   const sequence = ++sourceSequence;
   sourceLoading.value = true;
   sourceError.value = '';
-  sourcePanel.value = { id: source.documentId || source.id, name: source.name, version: source.version, pieces: [] };
+  sourcePanel.value = { id: source.documentId || source.id, name: source.name, version: source.version, pieces: [], context };
+  nextTick(() => sourceHeading.value?.focus({ preventScroll: true }));
   try {
     const result = await privateAction('documents.preview', {
       documentId: source.documentId || source.id,
       version: source.version,
-      locator: source.locator,
+      locator: context ? undefined : source.locator,
     });
-    if (sequence === sourceSequence && mounted) sourcePanel.value = result;
+    if (sequence !== sourceSequence || !mounted) return;
+    if (source.hash && result.hash !== source.hash) throw new Error('保存的引用与当前原件校验值不一致。');
+    sourcePanel.value = { ...result, context };
+    if (source.locator) {
+      const located = (result.pieces || []).some((piece) => piece.locator === source.locator);
+      if (!located) {
+        sourceError.value = context
+          ? '当前范围未显示该引用位置，可切回单条引用查看。'
+          : '此版本未找到引用位置，可打开同版本上下文核对。';
+      }
+      if (context && located) nextTick(() => sourceHeading.value?.closest('.knowledge-source')?.querySelector('[data-citation-locus="true"]')?.scrollIntoView({ block: 'nearest' }));
+    }
   } catch (failure) {
     if (sequence === sourceSequence && mounted)
       sourceError.value = failureText(failure, '这份来源暂时无法打开，可能已被删除或更新。');
@@ -604,9 +717,16 @@ function showRelationships(message) {
   tab.value = 'graph';
   loadGraph();
 }
-function toBusiness(text) {
-  if (String(text || '').length > 500) ElMessage.info('问题较长，已带入前500字，可在业务助手中调整后发送。');
-  router.push({ path: '/ai/workbench', query: text ? { prefill: sliceUtf16(text, 500) } : {} });
+async function toBusiness(text) {
+  if (!canOpenBusiness.value) return;
+  const cancelDraft = queueBusinessDraft(text, getToken());
+  try {
+    if (await router.push('/ai/workbench')) return;
+    if (String(text || '').length > 500) ElMessage.info('问题较长，已带入前500字，可在业务助手中调整后发送。');
+  } finally {
+    await nextTick();
+    cancelDraft();
+  }
 }
 async function saveReview(message) {
   if (!message.historyId || message.valid === false) return;
@@ -641,6 +761,7 @@ function undoQuestionReplacement() {
   nextTick(() => questionInput.value?.focus());
 }
 function useGraphQuestion(text) {
+  sourceScope.value = null;
   fillQuestion(text, 'fusion');
   tab.value = 'ask';
   closeSource();
@@ -749,7 +870,9 @@ onBeforeUnmount(() => {
         preview ? '登录后使用' : stageLabel
       }}</span>
       <div class="knowledge-toolbar-actions">
-        <el-button @click="toBusiness()"><AppIcon name="bot" :size="16" />业务助手</el-button>
+        <el-button v-if="canOpenBusiness" class="knowledge-business-entry" aria-label="打开业务助手" @click="toBusiness()">
+          <AppIcon name="bot" :size="16" /><span>业务助手</span>
+        </el-button>
         <el-button :disabled="preview || !service || uploading" @click="openScan()">
           <AppIcon name="scan" :size="16" />扫描件识别
         </el-button><el-button
@@ -759,16 +882,16 @@ onBeforeUnmount(() => {
           @click="filesInput?.click()"
           ><AppIcon name="plus" :size="16" />上传资料</el-button
         >
+        <button
+          type="button"
+          class="icon-action"
+          :disabled="loading || preview"
+          aria-label="刷新私有资料状态"
+          @click="refresh()"
+        >
+          <AppIcon name="refresh" :size="16" />
+        </button>
       </div>
-      <button
-        type="button"
-        class="icon-action"
-        :disabled="loading || preview"
-        aria-label="刷新私有资料状态"
-        @click="refresh()"
-      >
-        <AppIcon name="refresh" :size="16" />
-      </button>
     </div>
     <div v-if="preview" class="knowledge-banner">
       <AppIcon name="lock" :size="18" /><span>当前为框架预览，私有资料需登录后使用。</span
@@ -805,9 +928,9 @@ onBeforeUnmount(() => {
     >
       <aside id="private-files" class="knowledge-files">
         <div class="files-switch" role="group" aria-label="私有资料与历史问答">
-          <button type="button" :class="{ active: sideTab === 'documents' }" @click="sideTab = 'documents'">
+          <button type="button" :class="{ active: sideTab === 'documents' }" :aria-pressed="sideTab === 'documents'" @click="sideTab = 'documents'">
             我的资料 <span>{{ service ? documents.length : '—' }}</span></button
-          ><button type="button" :class="{ active: sideTab === 'history' }" @click="sideTab = 'history'">
+          ><button type="button" :class="{ active: sideTab === 'history' }" :aria-pressed="sideTab === 'history'" @click="sideTab = 'history'">
             历史问答
           </button>
         </div>
@@ -843,6 +966,15 @@ onBeforeUnmount(() => {
               </div>
               <p v-if="doc.vector_error" class="file-error">{{ doc.vector_error }}</p>
               <div class="file-actions">
+                <button
+                  v-if="service?.sourceScopeAvailable && doc.vector_version > 0 && doc.active_hash"
+                  type="button"
+                  class="file-ask"
+                  :aria-pressed="sourceScope?.documentId === doc.id && sourceScope?.version === doc.vector_version"
+                  :aria-label="`只问此资料：${doc.active_name || doc.name} v${doc.vector_version}`"
+                  :disabled="sending"
+                  @click="chooseSourceScope(doc)"
+                >只问此资料</button>
                 <button type="button" @click="download(doc)">下载</button
                 ><button type="button" :disabled="uploading" @click="chooseReplacement(doc)">更新版本</button
                 ><button v-if="/\.(pdf|png|jpe?g)$/i.test(doc.name) && service?.ocrAvailable" type="button"
@@ -901,10 +1033,10 @@ onBeforeUnmount(() => {
         </template>
       </aside>
 
-      <main class="knowledge-chat">
+      <section ref="knowledgeChat" class="knowledge-chat" aria-labelledby="knowledge-chat-title">
         <header class="knowledge-chat-head">
           <div>
-            <h2>资料问答</h2>
+            <h2 id="knowledge-chat-title">资料问答</h2>
             <span
               >{{ service ? `${readyCount} 份文档可用` : '正在连接资料'
               }}<span v-if="service?.graphReady"> · 图谱已就绪</span></span
@@ -919,223 +1051,244 @@ onBeforeUnmount(() => {
             </button>
           </div>
         </header>
-        <div
-          ref="thread"
-          class="knowledge-thread"
-          :class="{ 'is-empty': !messages.length }"
-          role="log"
-          aria-label="私有知识问答记录"
-          aria-live="polite"
-        >
-          <div v-if="!messages.length" class="knowledge-welcome">
-            <h3>
+        <div class="knowledge-chat-content" :class="{ 'is-empty': !messages.length }">
+          <section v-if="!messages.length" class="knowledge-welcome" aria-labelledby="knowledge-intro">
+            <h3 id="knowledge-intro">
               {{
                 !service && !preview
-                  ? serviceError
-                    ? '资料连接待恢复'
-                    : '正在读取你的资料'
-                  : readyCount
-                    ? '今天，你想核对什么？'
-                    : documents.length
-                      ? pending
-                        ? '资料正在处理中'
-                        : '资料暂未就绪'
-                      : '先放入一份你要用的资料'
+                  ? serviceError ? '资料连接待恢复' : '正在读取资料'
+                  : readyCount ? '向资料提问' : documents.length ? pending ? '资料正在处理中' : '资料暂未就绪' : '上传第一份资料'
               }}
             </h3>
-            <p v-if="!readyCount">
-              {{
-                !service && !preview
-                  ? serviceError
-                    ? '可先使用原业务工作台，连接恢复后再查看资料。'
-                    : '正在核对文件、版本和索引状态。'
-                  : readyCount
-                    ? '查询参数、整理步骤，或追查跨文件关系。每条引用都能打开原文核对。'
-                    : documents.length
-                      ? pending
-                        ? '资料已经接收，正在建立索引。就绪后即可提问；处理任务中可查看进度。'
-                        : '请查看处理任务中的结果与原因。失败任务可重试，也可以更新原文件后重新处理。'
-                      : '说明书、SOP、检验标准都可以。资料就绪后，在这里直接提问。'
-              }}
+            <p v-if="readyCount">核对参数、作业步骤或变更影响，沿引用查看对应版本和原文。</p>
+            <p v-else-if="!service && !preview">
+              {{ serviceError ? '重新连接后可继续查看资料和问答。' : '正在核对文件、版本和索引状态。' }}
             </p>
-            <p v-if="readyCount" class="knowledge-welcome-intro">从作业步骤到变更影响，让每个结论都有出处。</p>
-            <div v-if="readyCount" class="knowledge-suggestions">
+            <p v-else-if="documents.length">索引就绪后即可提问。处理任务中可查看进度与失败原因。</p>
+            <p v-else>上传说明书、作业指导书或检验标准后，就能检索原文。</p>
+            <el-button v-if="!readyCount && documents.length" @click="showProcessing">查看处理任务</el-button>
+          </section>
+          <div
+            v-else
+            ref="thread"
+            class="knowledge-thread"
+            role="log"
+            aria-label="私有知识问答记录"
+            aria-live="polite"
+          >
+            <article
+              v-for="message in messages"
+              :key="message.key"
+              class="knowledge-message"
+              :class="'is-' + message.role"
+            >
+              <template v-if="message.role === 'user'"
+                ><span class="message-who">你</span>
+                <p>{{ message.text }}</p></template
+              >
+              <template v-else-if="message.role === 'assistant'"
+                ><div class="message-who">
+                  <AppIcon name="bot" :size="15" />资料助手<span>{{
+                    message.businessHandoff
+                      ? '业务引导'
+                      : message.needsSubject
+                        ? '待明确对象'
+                        : `${knowledgeModes.find((item) => item.value === message.mode)?.label || '文档'}检索`
+                  }}</span>
+                </div>
+                <p v-if="message.sourceScope && !message.businessHandoff" class="message-scope">
+                  <AppIcon name="clipboard" :size="14" />
+                  <span>
+                    {{ message.needsSubject ? '所选资料' : '本次依据' }} · {{ message.sourceScope.name }} · v{{ message.sourceScope.version }}
+                    <template v-if="message.followupTarget && message.valid !== false">
+                      · 接续编号 {{ message.followupTarget }}
+                    </template>
+                  </span>
+                </p>
+                <p v-if="message.valid === false" class="message-warning">
+                  资料已变化，此回答仅作为历史记录，不再用于后续问答。
+                </p>
+                <GroundedAnswer :text="message.answer" :citations="message.citations" @source="openSource" />
+                <p v-if="message.notice" class="message-notice">{{ message.notice }}</p>
+                <div v-if="message.citations?.length" class="message-sources">
+                  <button
+                    v-for="citation in expandedSources.has(message.key)
+                      ? orderedAnswerCitations(message.answer, message.citations)
+                      : orderedAnswerCitations(message.answer, message.citations).slice(0, 3)"
+                    :key="citation.id"
+                    type="button"
+                    @click="openSource(citation)"
+                  >
+                    <span>{{ citation.id }}</span
+                    >{{ citation.name }}<small>{{ citation.locator }} · v{{ citation.version }}</small>
+                  </button>
+                </div>
+                <button
+                  v-if="message.citations?.length > 3"
+                  type="button"
+                  class="text-action more-sources"
+                  @click="toggleSources(message.key)"
+                >
+                  {{ expandedSources.has(message.key) ? '收起依据' : `查看全部 ${message.citations.length} 处依据` }}
+                </button>
+                <details class="message-route">
+                  <summary>检索方式与关系线索</summary>
+                  <span>{{ message.routeReason }}</span
+                  ><button
+                    v-if="message.graphEvidence?.relationships?.length"
+                    type="button"
+                    @click="showRelationships(message)"
+                  >
+                    查看本次关系线索
+                  </button>
+                </details>
+                <div class="message-next-actions">
+                  <button v-if="message.needsSubject" class="text-action" type="button" @click="fillQuestion(message.question)">
+                    修改问题
+                  </button>
+                  <button v-if="!preview && service?.model_consent && message.historyId && message.answer && message.valid !== false && !message.filtered"
+                    class="text-action" type="button" @click="openTools('read', message)">朗读答复</button>
+                  <button
+                    v-if="message.historyId && message.citations?.length && message.valid !== false"
+                    type="button"
+                    class="message-save-note"
+                    @click="saveReview(message)"
+                  >
+                    <AppIcon name="clipboard" :size="15" />存为工作单</button
+                  ><button v-if="canOpenBusiness && message.valid !== false && !message.needsSubject" type="button" class="message-business" @click="toBusiness(message.question)">
+                    转到业务助手<AppIcon name="arrow" :size="14" />
+                  </button>
+                </div>
+              </template>
+              <template v-else
+                ><p :role="message.role === 'error' ? 'alert' : 'status'">{{ message.text }}</p>
+                <button v-if="message.retry" type="button" class="text-action" @click="sendQuestion(message.retry, message.retryContext)">
+                  重新提问
+                </button></template
+              >
+            </article>
+            <div v-if="sending" class="knowledge-thinking" role="status">
+              <AppIcon name="search" :size="16" /><span>正在检索资料并整理回答…</span
+              ><button type="button" @click="stopWaiting">停止等待</button>
+            </div>
+          </div>
+          <form class="knowledge-composer" @submit.prevent="sendQuestion()">
+            <div class="knowledge-input-box">
+              <div v-if="sourceScope" class="knowledge-scope" :class="{ 'scope-unavailable': !scopeCurrent }">
+                <AppIcon name="clipboard" :size="15" />
+                <span id="knowledge-source-scope" role="status">
+                  <small>{{ scopeCurrent ? '只查这份资料' : '所选版本已不可用' }}</small>
+                  <strong :title="sourceScope.name">{{ sourceScope.name }}</strong>
+                  <span>v{{ sourceScope.version }}</span>
+                </span>
+                <button
+                  v-if="!scopeCurrent && scopeDocument"
+                  type="button"
+                  :disabled="sending"
+                  @click="chooseSourceScope(scopeDocument)"
+                >改用 v{{ scopeDocument.vector_version }}</button>
+                <button type="button" :disabled="sending" @click="clearSourceScope">切回全部资料</button>
+              </div>
+              <label class="sr-only" for="knowledge-question">向私有资料提问</label>
+              <textarea
+                id="knowledge-question"
+                ref="questionInput"
+                v-model="question"
+                maxlength="1000"
+                rows="2"
+                :disabled="preview || !service || !!serviceError"
+                :placeholder="messages.length ? '继续向资料提问…' : '输入问题，或从下方选择示例…'"
+                :aria-describedby="sourceScope ? 'knowledge-source-scope knowledge-retrieval-status' : 'knowledge-retrieval-status'"
+                @keydown="composerKey"
+              />
+              <div class="composer-bottom">
+                <div v-if="!sourceScope" class="retrieval-switch" role="group" aria-label="检索方式">
+                  <button
+                    v-for="item in knowledgeModes"
+                    :key="item.value"
+                    type="button"
+                    :class="{ active: mode === item.value }"
+                    :aria-pressed="mode === item.value"
+                    @click="mode = item.value"
+                  >
+                    {{ item.label }}
+                  </button>
+                </div>
+                <div v-if="!preview && service" class="knowledge-input-tools">
+                  <button type="button" aria-label="公开资料" title="公开资料" @click="openTools('web')">
+                    <AppIcon name="globe" :size="15" /><span>公开资料</span>
+                  </button>
+                  <button type="button" aria-label="语音输入" title="语音输入" @click="openTools('voice')">
+                    <AppIcon name="mic" :size="15" /><span>语音输入</span>
+                  </button>
+                </div>
+                <button v-if="replacedQuestion" type="button" class="text-action knowledge-undo" @click="undoQuestionReplacement">
+                  撤销填入
+                </button>
+                <span v-if="question.length" class="composer-count">{{ question.length }}/1000</span
+                ><button
+                  type="submit"
+                  class="knowledge-send"
+                  :disabled="preview || !service || !scopeCurrent || !question.trim() || sending || historyClearing || !!serviceError"
+                  aria-label="发送知识问题"
+                >
+                  <span aria-hidden="true">发送</span><AppIcon name="arrow" :size="16" />
+                </button>
+              </div>
+            </div>
+            <div id="knowledge-retrieval-status" class="composer-note">
+              <button type="button" class="generation-entry" :title="generation.detail" @click="tab = 'settings'">
+                <AppIcon :name="generation.available ? 'bot' : 'search'" :size="13" />{{ generation.label }}
+                <AppIcon name="chevron" :size="12" />
+              </button>
+              <span v-if="!sourceScope && readyCount" class="knowledge-all-sources">范围 · 全部已发布资料</span>
+              <span>Enter 发送 · Shift+Enter 换行</span>
+            </div>
+          </form>
+          <section v-if="!messages.length && readyCount" class="knowledge-suggestions" aria-labelledby="knowledge-examples">
+            <h3 id="knowledge-examples">提问示例</h3>
+            <div class="knowledge-example-grid">
               <button
-                v-for="item in [
-                  { title: '整理操作步骤', text: '请整理这些资料中的关键操作步骤，并给出依据。' },
-                  { title: '追查资料关联', text: '资料中的产品、物料、工序和检验标准有哪些关联？' },
-                  {
-                    title: '核对变更影响',
-                    text: '我想核对一项物料变更是否已经批准，以及影响哪些工序和检验规范。请先告诉我需要补充哪些信息。',
-                  },
-                ]"
+                v-for="item in questionExamples"
                 :key="item.title"
                 type="button"
                 @click="fillQuestion(item.text)"
               >
-                <span
-                  ><strong>{{ item.title }}</strong></span
-                ><AppIcon name="arrow" :size="15" />
+                <AppIcon :name="item.icon" :size="16" />
+                <strong>{{ item.title }}</strong>
+                <AppIcon name="arrow" :size="14" />
               </button>
             </div>
-            <el-button v-else-if="serviceError" :loading="loading" @click="refresh()">重新连接</el-button>
-            <el-button v-else-if="documents.length" @click="showProcessing">查看处理任务</el-button>
-            <el-button v-else-if="service || preview" :disabled="preview || uploading" @click="filesInput?.click()"
-              >上传第一份资料</el-button
-            >
-          </div>
-          <article
-            v-for="message in messages"
-            :key="message.key"
-            class="knowledge-message"
-            :class="'is-' + message.role"
-          >
-            <template v-if="message.role === 'user'"
-              ><span class="message-who">你</span>
-              <p>{{ message.text }}</p></template
-            >
-            <template v-else-if="message.role === 'assistant'"
-              ><div class="message-who">
-                <AppIcon name="bot" :size="15" />资料助手<span>{{
-                  message.businessHandoff
-                    ? '业务引导'
-                    : `${knowledgeModes.find((item) => item.value === message.mode)?.label || '文档'}检索`
-                }}</span>
-              </div>
-              <p v-if="message.valid === false" class="message-warning">
-                资料已变化，此回答仅作为历史记录，不再用于后续问答。
-              </p>
-              <GroundedAnswer :text="message.answer" :citations="message.citations" @source="openSource" />
-              <p v-if="message.notice" class="message-notice">{{ message.notice }}</p>
-              <div v-if="message.citations?.length" class="message-sources">
-                <button
-                  v-for="citation in expandedSources.has(message.key)
-                    ? orderedAnswerCitations(message.answer, message.citations)
-                    : orderedAnswerCitations(message.answer, message.citations).slice(0, 3)"
-                  :key="citation.id"
-                  type="button"
-                  @click="openSource(citation)"
-                >
-                  <span>{{ citation.id }}</span
-                  >{{ citation.name }}<small>{{ citation.locator }} · v{{ citation.version }}</small>
-                </button>
-              </div>
-              <button
-                v-if="message.citations?.length > 3"
-                type="button"
-                class="text-action more-sources"
-                @click="toggleSources(message.key)"
-              >
-                {{ expandedSources.has(message.key) ? '收起依据' : `查看全部 ${message.citations.length} 处依据` }}
-              </button>
-              <details class="message-route">
-                <summary>检索方式与关系线索</summary>
-                <span>{{ message.routeReason }}</span
-                ><button
-                  v-if="message.graphEvidence?.relationships?.length"
-                  type="button"
-                  @click="showRelationships(message)"
-                >
-                  查看本次关系线索
-                </button>
-              </details>
-              <div class="message-next-actions">
-                <button v-if="!preview && service?.model_consent && message.historyId && message.answer && message.valid !== false && !message.filtered"
-                  class="text-action" type="button" @click="openTools('read', message)">朗读答复</button>
-                <button
-                  v-if="message.historyId && message.citations?.length && message.valid !== false"
-                  type="button"
-                  class="message-save-note"
-                  @click="saveReview(message)"
-                >
-                  <AppIcon name="clipboard" :size="15" />存为工作单</button
-                ><button type="button" class="message-business" @click="toBusiness(message.question)">
-                  转到业务助手<AppIcon name="arrow" :size="14" />
-                </button>
-              </div>
-            </template>
-            <template v-else
-              ><p :role="message.role === 'error' ? 'alert' : 'status'">{{ message.text }}</p>
-              <button v-if="message.retry" type="button" class="text-action" @click="sendQuestion(message.retry)">
-                重新提问
-              </button></template
-            >
-          </article>
-          <div v-if="sending" class="knowledge-thinking" role="status">
-            <AppIcon name="search" :size="16" /><span>正在检索资料并整理回答…</span
-            ><button type="button" @click="stopWaiting">停止等待</button>
-          </div>
+          </section>
         </div>
-        <form class="knowledge-composer" @submit.prevent="sendQuestion()">
-          <label class="sr-only" for="knowledge-question">向私有资料提问</label>
-          <textarea
-            id="knowledge-question"
-            ref="questionInput"
-            v-model="question"
-            maxlength="1000"
-            rows="3"
-            :disabled="preview || !service || !!serviceError"
-            placeholder="输入问题，例如：更换驱动板后要复核什么？"
-            @keydown="composerKey"
-          />
-          <div class="composer-bottom">
-            <div class="retrieval-switch" role="group" aria-label="检索方式">
-              <button
-                v-for="item in knowledgeModes"
-                :key="item.value"
-                type="button"
-                :class="{ active: mode === item.value }"
-                :aria-pressed="mode === item.value"
-                @click="mode = item.value"
-              >
-                {{ item.label }}
-              </button>
-            </div>
-            <span v-if="question.length" class="composer-count">{{ question.length }}/1000</span
-            ><button
-              type="submit"
-              class="knowledge-send"
-              :disabled="preview || !service || !question.trim() || sending || historyClearing || !!serviceError"
-              aria-label="发送知识问题"
-            >
-              <AppIcon name="arrow" :size="18" />
-            </button>
-          </div>
-          <div class="composer-note">
-            <button v-if="!preview && service" type="button" class="text-action" @click="openTools('web')">公开资料</button>
-            <button v-if="!preview && service" type="button" class="text-action" @click="openTools('voice')">语音输入</button>
-            <button type="button" class="generation-entry" :title="generation.detail" @click="tab = 'settings'">
-              <AppIcon :name="generation.available ? 'bot' : 'search'" :size="13" />{{ generation.label }}
-              <AppIcon name="chevron" :size="12" />
-            </button>
-            <button v-if="replacedQuestion" type="button" class="text-action" @click="undoQuestionReplacement">
-              撤销填入
-            </button>
-            <span>Enter 发送 · Shift+Enter 换行</span>
-          </div>
-        </form>
-      </main>
-      <aside v-if="sourcePanel" class="knowledge-source" aria-label="原文来源预览">
+      </section>
+      <aside v-if="sourcePanel" class="knowledge-source" aria-labelledby="knowledge-source-title" @keydown.esc.stop="closeSource(true)">
         <header>
           <div>
-            <h2>{{ sourcePanel.name }}</h2>
+            <h2 id="knowledge-source-title" ref="sourceHeading" tabindex="-1">{{ sourcePanel.name }}</h2>
             <span
               >版本 {{ sourcePanel.version
               }}<template v-if="sourcePanel.publication === 'pending'"> · 尚未用于问答</template
               ><template v-else-if="sourcePanel.active === false"> · 历史版本</template></span
             >
           </div>
-          <button type="button" class="icon-action" aria-label="关闭原文预览" @click="closeSource">
+          <button type="button" class="icon-action" aria-label="关闭原文预览" @click="closeSource(true)">
             <AppIcon name="close" :size="16" />
           </button>
         </header>
         <p v-if="sourceLoading" role="status">正在读取原文…</p>
-        <p v-if="sourceError" class="source-error" role="alert">{{ sourceError }}</p>
-        <div class="source-pieces">
-          <section v-for="(piece, index) in sourcePanel.pieces" :key="piece.locator + '-' + index">
-            <h3>{{ piece.locator }}</h3>
+        <div v-if="sourceError" class="source-error" role="alert">
+          <p>{{ sourceError }}</p>
+          <button v-if="sourceSelection" type="button" class="text-action"
+            @click="loadSource(sourceSelection, sourcePanel.context)">重试读取</button>
+        </div>
+        <div class="source-pieces" :aria-busy="sourceLoading">
+          <section v-for="(piece, index) in sourcePieces" :key="piece.locator + '-' + index"
+            :data-citation-locus="piece.locator === sourceSelection?.locator">
+            <h3>{{ piece.locator }}<span v-if="piece.excerpt" class="source-match-label">引用片段</span></h3>
             <p v-if="piece.method === 'deepseek-ocr'" class="scan-source-label">经核对的 OCR 文字</p>
-            <p>{{ piece.text }}</p>
+            <p v-if="piece.excerpt">{{ piece.excerpt.before }}<mark>{{ piece.excerpt.match }}</mark>{{ piece.excerpt.after }}</p>
+            <p v-else>{{ piece.text }}</p>
             <button v-if="piece.method === 'deepseek-ocr'" type="button" class="text-action"
               :disabled="scanPageLoading" @click="loadScanPage(piece)">查看扫描原页</button>
           </section>
@@ -1146,9 +1299,11 @@ onBeforeUnmount(() => {
             <a :href="scanPageUrl" target="_blank" rel="noopener noreferrer">打开扫描原页 ↗</a>
           </template>
         </div>
-        <footer v-if="sourcePanel.pieces?.length">
+        <footer v-if="sourcePanel.pieces?.length || (sourceSelection?.locator && !sourceLoading && sourceError)">
           <span v-if="sourcePanel.total > 200">当前显示前 200 个位置。</span
-          ><button type="button" class="text-action" @click="download(sourcePanel)">下载这个版本的原件</button>
+          ><button v-if="sourceSelection?.locator && !sourceLoading" type="button" class="text-action"
+            @click="loadSource(sourceSelection, !sourcePanel.context)">{{ sourcePanel.context ? '仅看引用位置' : '查看同版本上下文' }}</button>
+          <button v-if="sourcePanel.pieces?.length" type="button" class="text-action" @click="download(sourcePanel)">下载这个版本的原件</button>
         </footer>
       </aside>
     </div>

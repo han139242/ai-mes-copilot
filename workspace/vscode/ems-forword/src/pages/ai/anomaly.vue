@@ -3,6 +3,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref } from 'vue';
 import dayjs from 'dayjs';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import AppIcon from '@/components/common/AppIcon.vue';
+import MesPageHeading from '@/components/common/MesPageHeading.vue';
 import {
   closeAnomaly,
   getAnomalies,
@@ -285,15 +286,11 @@ onBeforeUnmount(() => {
 
 <template>
   <div class="anomaly-page">
-    <header class="page-header">
-      <div class="page-title">
-        <span class="page-icon"><AppIcon name="alert" :size="21" /></span>
-        <div class="title-text">
-          <h1>异常闭环</h1>
-        </div>
-      </div>
-      <div class="page-actions">
-        <span v-if="lastRefreshAt" class="refresh-time">更新于 {{ lastRefreshAt }}</span>
+    <MesPageHeading title="异常闭环" icon="alert">
+      <template #detail>
+        <span class="refresh-time">{{ lastRefreshAt ? '更新于 ' + lastRefreshAt : '尚未获取更新时间' }}</span>
+      </template>
+      <template #actions>
         <el-switch v-model="autoRefresh" size="small" active-text="自动刷新" />
         <el-button :loading="anomalyLoading" @click="refreshAll">
           <AppIcon name="refresh" :size="15" />
@@ -303,8 +300,8 @@ onBeforeUnmount(() => {
           <AppIcon name="play" :size="15" />
           <span>立即扫描</span>
         </el-button>
-      </div>
-    </header>
+      </template>
+    </MesPageHeading>
 
     <p v-if="offlineHint" class="offline-notice">
       <AppIcon name="alert" :size="14" />
@@ -516,57 +513,6 @@ onBeforeUnmount(() => {
   gap: 14px;
   color: var(--ap-text);
   font-size: 13px;
-}
-
-.page-header {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-}
-
-.page-title {
-  display: flex;
-  min-width: 0;
-  align-items: center;
-  gap: 11px;
-}
-
-.page-icon {
-  display: inline-flex;
-  width: 42px;
-  height: 42px;
-  flex: none;
-  align-items: center;
-  justify-content: center;
-  color: var(--mes-primary);
-  border: 1px solid var(--mes-primary-border, #bcd3fb);
-  border-radius: 6px;
-  background: var(--mes-primary-soft, #eaf2ff);
-}
-
-.title-text {
-  min-width: 0;
-}
-
-.title-text h1 {
-  margin: 0;
-  font-size: 18px;
-  font-weight: 600;
-}
-
-.page-actions {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-}
-
-.page-actions :deep(.el-button > span) {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
 }
 
 .refresh-time {

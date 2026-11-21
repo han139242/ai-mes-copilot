@@ -10,6 +10,7 @@ from assistant.answers import business_intent, graph_citations, merge_citations,
 from assistant.config import Settings
 from assistant.database import Databases
 from assistant.knowledge import Knowledge
+from assistant.llm import ContentFiltered
 from assistant.vectors import pieces_to_chunks
 
 
@@ -31,7 +32,7 @@ def test_exact_identifier_recovers_past_dense_limit_and_excludes_stale_chunks(mo
     kb = Knowledge(settings, dbs)
     active = kb.upload(uid, "合成编号.txt", "DRV-07 精确目标".encode())
     stale = kb.upload(uid, "旧版合成编号.txt", "DRV-07 已撤销".encode())
-    decoy = kb.upload(uid, "近似编号.txt", "DRV-070 干扰编号".encode())
+    decoy = kb.upload(uid, "近似编号.txt", "DRV-070 干扰编号，L900 的检验码为 TEST-900".encode())
     model = settings.embedding_model
     close = "[" + ",".join(["1", "0"] + ["0"] * (settings.embedding_dim - 2)) + "]"
     distant = "[" + ",".join(["0", "1"] + ["0"] * (settings.embedding_dim - 2)) + "]"
@@ -40,7 +41,7 @@ def test_exact_identifier_recovers_past_dense_limit_and_excludes_stale_chunks(mo
         for item, texts, embedding, current in (
             (active, ["DRV-07 精确目标"], distant, True),
             (stale, ["DRV-07 已撤销"], close, False),
-            (decoy, ["DRV-070 干扰编号"] * 41, close, True),
+            (decoy, ["DRV-070 干扰编号，L900 的检验码为 TEST-900"] * 41, close, True),
         ):
             doc = db.execute("SELECT hash,name FROM documents WHERE id=%s", (item["id"],)).fetchone()
             db.execute("UPDATE documents SET vector_version=1,active_hash=hash,active_name=name,deleted=%s WHERE id=%s",
@@ -52,6 +53,133 @@ def test_exact_identifier_recovers_past_dense_limit_and_excludes_stale_chunks(mo
                     (f"{item['id']}-{i}", item["id"], doc["hash"], "行 1", value, embedding, model))
     result = kb.vectors.retrieve(uid, "DRV-07 是什么？", limit=1)
     assert [(row["documentId"], row.get("retrieval")) for row in result] == [(active["id"], "identifier")]
+    requested = {"documentId": active["id"], "version": 1}
+    assert kb.ask(uid, "L900 的检验码是什么？", "rag", session="same")["citations"]
+    scoped = kb.ask(uid, "DRV-07 是什么？", "fusion", session="same", source_scope=requested)
+    assert scoped["sourceScope"]["documentId"] == active["id"]
+    assert scoped["sourceScope"]["name"] == "合成编号.txt"
+    assert scoped["mode"] == "rag" and not scoped["graphEvidence"]["relationships"]
+    assert {row["documentId"] for row in scoped["citations"]} == {active["id"]}
+    missed = kb.ask(uid, "L900 的检验码是什么？", "auto", session="same", source_scope=requested)
+    assert not missed["citations"] and not missed["generated"]
+    assert "所选资料中没有找到" in missed["answer"]
+
+
+@pytest.mark.skipif(os.environ.get("PRIVATE_INTEGRATION") != "1", reason="requires dedicated PostgreSQL and local models")
+def test_scoped_followup_stays_with_visible_subject_and_published_version():
+    settings = Settings(llm_url="", llm_key="", llm_model="")
+    dbs = Databases(settings)
+    uid = 220_000_000_000 + int(uuid.uuid4().hex[:8], 16)
+    dbs.ensure(uid)
+    kb = Knowledge(settings, dbs)
+    content = "L100 的示例检验码为 SKY-731。\nL200 的示例检验码为 CLOUD-928。"
+    document = kb.upload(uid, "合成型号与检验码.txt", content.encode())
+    other = kb.upload(uid, "另一份合成说明.txt", "L100 的示例检验码为 OTHER-345。".encode())
+    for item in (document, other):
+        kb.rebuild(uid, item["jobId"])
+    scope = {"documentId": document["id"], "version": 1}
+    separate = {"documentId": other["id"], "version": 1}
+    latest = kb.ask(uid, "L100 的示例检验码是什么？", "rag", session="scoped", source_scope=scope)
+    assert any("SKY-731" in citation["text"] for citation in latest["citations"])
+
+    def ask(question="那它的示例检验码是什么？", current=scope, session="scoped"):
+        return kb.ask(uid, question, "rag", session=session, source_scope=current)
+
+    def clarify(result):
+        assert result["needsSubject"] is True
+        assert not result["citations"] and not result["generated"] and not result.get("followupTarget")
+
+    following = ask(current={**scope, "previousHistoryId": latest["historyId"]})
+    assert following["followupTarget"] == "L100"
+    assert any("SKY-731" in citation["text"] for citation in following["citations"])
+    assert all("CLOUD-928" not in citation["text"] for citation in following["citations"])
+    assert {row["hash"] for row in following["citations"]} == {following["sourceScope"]["hash"]}
+    assert ask("该型号的示例检验码是什么？")["followupTarget"] == "L100"
+
+    clarify(ask(session="new-session"))
+    clarify(ask(current={**scope, "previousHistoryId": None}))
+    anchor = ask("请核对 L200 的示例检验码")
+    assert ask()["followupTarget"] == "L200"
+    clarify(ask(current={**scope, "previousHistoryId": anchor["historyId"]}))
+    assert ask("比较 L100 和 L200 的检验码")["citations"]
+    clarify(ask())
+    assert ask("L100 的示例检验码是什么？")["citations"]
+    clarify(ask(current=separate))
+    clarify(ask())
+
+    latest = ask("L100 的示例检验码是什么？")
+    updated = kb.upload(uid, "合成型号与检验码.txt", content.replace("SKY-731", "SKY-742").encode(), document["id"])
+    kb.rebuild(uid, updated["jobId"])
+    with pytest.raises(ValueError, match="已不可用"):
+        ask(current={**scope, "previousHistoryId": latest["historyId"]})
+    published = {**scope, "version": 2}
+    clarify(ask(current=published))
+    fresh = ask("L100 的示例检验码是什么？", current=published)
+    result = ask(current={**published, "previousHistoryId": fresh["historyId"]})
+    assert result["followupTarget"] == "L100"
+    assert any("SKY-742" in citation["text"] for citation in result["citations"])
+    assert all(citation["version"] == 2 and "SKY-731" not in citation["text"] for citation in result["citations"])
+
+
+@pytest.mark.skipif(os.environ.get("PRIVATE_INTEGRATION") != "1", reason="requires dedicated PostgreSQL and local models")
+def test_leaving_a_document_does_not_resume_an_older_all_sources_subject(monkeypatch):
+    settings = Settings(llm_url="", llm_key="", llm_model="")
+    dbs = Databases(settings)
+    uid = 225_000_000_000 + int(uuid.uuid4().hex[:8], 16)
+    dbs.ensure(uid)
+    kb = Knowledge(settings, dbs)
+    first = kb.upload(uid, "合成全库主题.txt", "MES-100 示例检验码为 OLD-314。".encode())
+    second = kb.upload(uid, "合成单资料主题.txt", "MES-200 示例检验码为 NEW-927。".encode())
+    for item in (first, second):
+        kb.rebuild(uid, item["jobId"])
+    assert kb.ask(uid, "MES-100 的示例检验码？", "rag")["citations"]
+    assert kb.ask(uid, "MES-200 的示例检验码？", "rag",
+                  source_scope={"documentId": second["id"], "version": 1})["citations"]
+    queries = []
+    retrieve = kb.vectors.retrieve
+
+    def capture_query(uid, question, **kwargs):
+        queries.append(question)
+        return retrieve(uid, question, **kwargs)
+
+    monkeypatch.setattr(kb.vectors, "retrieve", capture_query)
+    first_reference = kb.ask(uid, "它呢？", "rag")
+    print({"question": "它呢？", "retrieval_queries": queries.copy(), "answer": first_reference["answer"],
+           "citation_texts": [citation["text"] for citation in first_reference["citations"]]})
+    for result in (first_reference, kb.ask(uid, "它的检验码呢？", "rag")):
+        assert result.get("needsSubject") and not result["citations"]
+    assert not queries
+    assert kb.ask(uid, "MES-200 的检验码呢？", "rag")["citations"]
+    assert any("NEW-927" in citation["text"] for citation in kb.ask(uid, "它呢？", "rag")["citations"])
+    assert "MES-200" in queries[-1] and "MES-100" not in queries[-1]
+
+
+@pytest.mark.skipif(os.environ.get("PRIVATE_INTEGRATION") != "1", reason="requires dedicated PostgreSQL and local models")
+def test_filtered_history_restores_only_status_and_does_not_supply_a_subject(monkeypatch):
+    settings = Settings(llm_url="https://example.invalid", llm_key="synthetic-key", llm_model="synthetic-model")
+    dbs = Databases(settings)
+    uid = 230_000_000_000 + int(uuid.uuid4().hex[:8], 16)
+    dbs.ensure(uid)
+    kb = Knowledge(settings, dbs)
+    doc = kb.upload(uid, "合成检验码.txt", "L100 的示例检验码为 SKY-731。".encode())
+    kb.rebuild(uid, doc["jobId"])
+    kb.preferences(uid, {"modelConsent": True})
+    attempts = []
+
+    async def refused(*args, **kwargs):
+        attempts.append(True)
+        raise ContentFiltered()
+
+    monkeypatch.setattr("assistant.answers.complete", refused)
+    result = kb.ask(uid, "L100 的示例检验码是什么？", "rag")
+    with dbs.connect(uid) as db:
+        history = db.execute("SELECT response FROM history WHERE id=%s", (result["historyId"],)).fetchone()["response"]
+    assert history["filtered"] and not history["generated"]
+    assert history["answer"] == "模型内容审核未通过，本次未生成回答"
+    assert not history["citations"] and not history["graphEvidence"]
+    followup = kb.ask(uid, "它的检验码呢？", "rag")
+    assert followup.get("needsSubject") and not followup["citations"]
+    assert len(attempts) == 1
 
 
 def test_explicit_mode_and_visible_fallback():
@@ -106,14 +234,21 @@ def test_graph_failure_does_not_block_real_rag_and_update_delete_revokes_sources
     result=kb.ask(uid,"L100 使用什么驱动板","fusion")
     assert result["mode"]=="rag" and not result["generated"]
     assert any("DRV-07" in c["text"] and c["version"]==1 for c in result["citations"])
+    selected = {"documentId": first["id"], "version": 1}
     assert not kb.ask(other,"L100 使用什么驱动板","rag")["citations"]
     with pytest.raises(ValueError): kb.preview(other,first["id"])
     with pytest.raises(ValueError): kb.download(other,first["id"])
+    with pytest.raises(ValueError, match="已不可用"):
+        kb.ask(other, "L100 使用什么驱动板", "rag", source_scope=selected)
+    with pytest.raises(ValueError, match="范围无效"):
+        kb.ask(uid, "L100 使用什么驱动板", "rag", source_scope={**selected, "version": True})
 
     update=kb.upload(uid,"合成台灯说明.txt","合成教学样例：L100 台灯改用 DRV-08 驱动板，换版后进行调光稳定性检查。".encode(),first["id"])
     pending=kb.ask(uid,"L100 使用什么驱动板","rag")
     assert pending["citations"] and all(c["version"]==1 for c in pending["citations"])
     assert "沿用已发布的旧版本" in pending["routeReason"]
+    old_scope = kb.ask(uid, "L100 使用什么驱动板", "rag", source_scope=selected)
+    assert old_scope["sourceScope"]["version"] == 1 and old_scope["citations"]
     with monkeypatch.context() as outage:
         outage.setattr(kb.vectors,"index",unavailable)
         kb.rebuild(uid,update["jobId"])
@@ -124,6 +259,11 @@ def test_graph_failure_does_not_block_real_rag_and_update_delete_revokes_sources
     kb.rebuild(uid,update["jobId"])
     new=kb.ask(uid,"L100 使用什么驱动板","rag")
     assert new["citations"] and all(c["version"]==2 and "DRV-07" not in c["text"] for c in new["citations"])
+    with pytest.raises(ValueError, match="已不可用"):
+        kb.ask(uid, "L100 使用什么驱动板", "rag", source_scope=selected)
+    new_scope = kb.ask(uid, "L100 使用什么驱动板", "rag", source_scope={**selected, "version": 2})
+    assert all(c["version"] == 2 and c["documentId"] == first["id"] for c in new_scope["citations"])
+    assert new_scope["citations"] and new_scope["sourceScope"]["version"] == 2
     with dbs.connect(uid) as db:
         assert db.execute("SELECT count(*) AS n FROM history WHERE NOT valid").fetchone()["n"]>=1
     assert kb.preview(uid,first["id"],1)["active"] is False

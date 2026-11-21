@@ -103,6 +103,7 @@ export default [
         icon: 'shield-check',
         method: 'put',
         type: 'primary',
+        primary: true,
         visible: (row) => row.roleCode !== 'SUPER_ADMIN',
         path: (row) => `/api/sys/role/${row.roleId}/menus`,
         fields: [
@@ -111,6 +112,8 @@ export default [
             type: 'reference',
             reference: 'sys-menu',
             multiple: true,
+            virtualOptions: true,
+            completeOptions: true,
             required: true,
           }),
         ],
@@ -121,6 +124,7 @@ export default [
         payload: (form) => ({ menuIds: form.menuIds || [] }),
       },
     ],
+    actionColumnWidth: 205,
   }),
   defineResource({
     key: 'sys-menu',
@@ -130,8 +134,8 @@ export default [
     icon: 'menu',
     baseUrl: '/api/sys/menu',
     idField: 'menuId',
-    treeEndpoint: '/api/sys/menu/tree',
-    description: '以树形结构维护目录、菜单、按钮和权限标识',
+    description: '按名称、权限标识或路由查询和维护菜单',
+    referenceEndpoint: '/api/sys/menu/tree',
     fields: ['parentId', 'menuName', 'menuType', 'permissionCode', 'routePath', 'remark', 'createdTime'],
     filters: ['keyword', 'menuType'],
     overrides: {

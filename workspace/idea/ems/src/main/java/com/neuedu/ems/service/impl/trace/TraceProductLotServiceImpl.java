@@ -148,7 +148,18 @@ public class TraceProductLotServiceImpl extends ServiceImpl<TraceProductLotMappe
         LambdaQueryWrapper<TraceProductLot> lotQuery = new LambdaQueryWrapper<>();
         lotQuery.eq(TraceProductLot::getLotNo, lotNo)
                 .eq(TraceProductLot::getDeletedFlag, 0);
-        TraceProductLot productLot = baseMapper.selectOne(lotQuery);
+        return buildTrace(baseMapper.selectOne(lotQuery));
+    }
+
+    @Override
+    public Map<String, Object> getProductLotTraceById(Long productLotId) {
+        LambdaQueryWrapper<TraceProductLot> lotQuery = new LambdaQueryWrapper<>();
+        lotQuery.eq(TraceProductLot::getProductLotId, productLotId)
+                .eq(TraceProductLot::getDeletedFlag, 0);
+        return buildTrace(baseMapper.selectOne(lotQuery));
+    }
+
+    private Map<String, Object> buildTrace(TraceProductLot productLot) {
         if (productLot == null) {
             return null;
         }
@@ -170,6 +181,7 @@ public class TraceProductLotServiceImpl extends ServiceImpl<TraceProductLotMappe
                 .orderByAsc(TraceMaterialUsage::getUsageId);
         for (TraceMaterialUsage usage : traceMaterialUsageMapper.selectList(materialQuery)) {
             Map<String, Object> material = new LinkedHashMap<>();
+            material.put("usageId", usage.getUsageId());
             material.put("materialId", usage.getMaterialId());
             material.put("batchId", usage.getBatchId());
             material.put("usedQuantity", usage.getUsedQuantity());
@@ -207,8 +219,11 @@ public class TraceProductLotServiceImpl extends ServiceImpl<TraceProductLotMappe
      */
     private Map<String, Object> buildInspectionSummary(TraceProductLot productLot) {
         LambdaQueryWrapper<QmsInspectionOrder> orderQuery = new LambdaQueryWrapper<>();
+        // 同一工单可能产出多个批次，过程检验和其他批次的终检都不能作为此批次的依据。
         orderQuery.eq(QmsInspectionOrder::getDeletedFlag, 0)
-                .eq(productLot.getWorkOrderId() != null, QmsInspectionOrder::getWorkOrderId, productLot.getWorkOrderId())
+                .eq(QmsInspectionOrder::getProductLotId, productLot.getProductLotId())
+                .eq(QmsInspectionOrder::getInspectionType, "FINAL")
+                .ne(QmsInspectionOrder::getStatus, BusinessStatus.Document.CLOSED)
                 .orderByDesc(QmsInspectionOrder::getInspectionId);
         List<QmsInspectionOrder> inspectionOrders = qmsInspectionOrderMapper.selectList(orderQuery);
         QmsInspectionOrder inspectionOrder = inspectionOrders.isEmpty() ? null : inspectionOrders.get(0);
@@ -217,9 +232,15 @@ public class TraceProductLotServiceImpl extends ServiceImpl<TraceProductLotMappe
         }
         Map<String, Object> inspection = new LinkedHashMap<>();
         inspection.put("inspectionId", inspectionOrder.getInspectionId());
-        inspection.put("inspectionResult", StringUtils.hasText(inspectionOrder.getInspectionResult())
-                ? inspectionOrder.getInspectionResult()
-                : deriveInspectionResult(inspectionOrder.getInspectionId()));
+        inspection.put("status", inspectionOrder.getStatus());
+        String verdict = null;
+        if (BusinessStatus.Production.FINISHED.equals(inspectionOrder.getStatus())) {
+            verdict = inspectionOrder.getInspectionResult();
+            if (!BusinessStatus.isInspectionResult(verdict)) {
+                verdict = deriveInspectionResult(inspectionOrder.getInspectionId());
+            }
+        }
+        inspection.put("inspectionResult", verdict);
         return inspection;
     }
 
@@ -236,8 +257,14 @@ public class TraceProductLotServiceImpl extends ServiceImpl<TraceProductLotMappe
         if (results.isEmpty()) {
             return null;
         }
-        boolean hasUnqualified = results.stream()
-                .anyMatch(item -> BusinessStatus.Quality.FAIL.equals(item.getResult()));
-        return hasUnqualified ? BusinessStatus.Quality.FAIL : BusinessStatus.Quality.PASS;
+        List<String> recordedResults = results.stream().map(QmsInspectionResult::getResult).toList();
+        if (recordedResults.contains(BusinessStatus.Quality.FAIL)) {
+            return BusinessStatus.Quality.FAIL;
+        }
+        if (!recordedResults.stream().allMatch(BusinessStatus::isInspectionResult)) {
+            return null;
+        }
+        return recordedResults.contains(BusinessStatus.Quality.CONCESSION)
+                ? BusinessStatus.Quality.CONCESSION : BusinessStatus.Quality.PASS;
     }
 }

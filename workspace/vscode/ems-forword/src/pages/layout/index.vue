@@ -92,6 +92,7 @@ onBeforeUnmount(() => {
       'is-mobile': mobile,
     }"
   >
+    <a class="skip-to-content" href="#mes-main-content" @click.prevent="$refs.mainContent.focus()">跳到页面内容</a>
     <div v-if="mobile && mobileMenuOpen" class="mobile-mask" @click="mobileMenuOpen = false" />
 
     <div class="sidebar-region" :class="{ 'mobile-open': mobileMenuOpen }">
@@ -105,7 +106,7 @@ onBeforeUnmount(() => {
       <Teleport to="#mes-header-tabs" :disabled="mobile" defer>
         <AppTabs v-model="tabs" :compact="!mobile" @refresh="refreshCurrentPage" />
       </Teleport>
-      <main class="content-region">
+      <main id="mes-main-content" ref="mainContent" class="content-region" tabindex="-1">
         <!-- 这里显示 layout 的子路由，例如生产订单、设备管理等具体业务页面。 -->
         <RouterView v-slot="{ Component }">
           <component :is="Component" :key="`${route.fullPath}-${viewVersion}`" />
@@ -129,6 +130,20 @@ onBeforeUnmount(() => {
 
 .layout-shell.sidebar-collapsed {
   padding-left: var(--mes-sidebar-collapsed-width);
+}
+.skip-to-content {
+  position: fixed;
+  z-index: 100;
+  top: 8px;
+  left: 8px;
+  padding: 8px 12px;
+  color: var(--mes-primary);
+  border-radius: var(--mes-radius-sm);
+  background: var(--mes-surface);
+  clip-path: inset(50%);
+}
+.skip-to-content:focus {
+  clip-path: none;
 }
 .layout-shell:not(.is-mobile) {
   --mes-tabs-height: 0px;

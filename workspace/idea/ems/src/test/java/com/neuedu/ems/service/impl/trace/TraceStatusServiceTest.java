@@ -1,5 +1,8 @@
 package com.neuedu.ems.service.impl.trace;
 
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.neuedu.ems.common.BusinessStatus;
 import com.neuedu.ems.entity.qms.QmsInspectionOrder;
 import com.neuedu.ems.entity.qms.QmsInspectionResult;
@@ -10,7 +13,10 @@ import com.neuedu.ems.mapper.qms.QmsInspectionResultMapper;
 import com.neuedu.ems.mapper.trace.TraceBarcodeMapper;
 import com.neuedu.ems.mapper.trace.TraceMaterialUsageMapper;
 import com.neuedu.ems.mapper.trace.TraceProductLotMapper;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.mockito.ArgumentCaptor;
 import org.springframework.test.util.ReflectionTestUtils;
 
@@ -18,8 +24,10 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -40,9 +48,18 @@ class TraceStatusServiceTest {
         assertEquals(BusinessStatus.Common.ENABLE, inserted.getValue().getStatus());
     }
 
-    @Test
+    @ParameterizedTest
+    @CsvSource({
+        "FINISHED, FAIL, FAIL, 1",
+        "FINISHED, CONCESSION, CONCESSION, 1",
+        "FINISHED, PASS, PASS, 1",
+        "FINISHED, , , 1",
+        "DRAFT, PASS, , 0",
+        "RUNNING, PASS, , 0"
+    })
     @SuppressWarnings("unchecked")
-    void productTraceDerivesFailCodeFromInspectionDetails() {
+    void productTraceUsesFinishedInspectionDetailsForThisLot(
+            String status, String itemResult, String expected, int detailReads) {
         TraceProductLotServiceImpl service = new TraceProductLotServiceImpl();
         TraceProductLotMapper productLotMapper = mock(TraceProductLotMapper.class);
         TraceMaterialUsageMapper usageMapper = mock(TraceMaterialUsageMapper.class);
@@ -59,8 +76,9 @@ class TraceStatusServiceTest {
         lot.setWorkOrderId(10L);
         QmsInspectionOrder inspectionOrder = new QmsInspectionOrder();
         inspectionOrder.setInspectionId(20L);
+        inspectionOrder.setStatus(status);
         QmsInspectionResult inspectionResult = new QmsInspectionResult();
-        inspectionResult.setResult(BusinessStatus.Quality.FAIL);
+        inspectionResult.setResult(itemResult);
         when(productLotMapper.selectOne(any())).thenReturn(lot);
         when(usageMapper.selectList(any())).thenReturn(List.of());
         when(orderMapper.selectList(any())).thenReturn(List.of(inspectionOrder));
@@ -69,6 +87,21 @@ class TraceStatusServiceTest {
         Map<String, Object> trace = service.getProductLotTraceByLotNo("LOT-1");
 
         Map<String, Object> inspection = (Map<String, Object>) trace.get("inspection");
-        assertEquals(BusinessStatus.Quality.FAIL, inspection.get("inspectionResult"));
+        assertEquals(status, inspection.get("status"));
+        assertEquals(expected, inspection.get("inspectionResult"));
+        verify(resultMapper, times(detailReads)).selectList(any());
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(new MybatisConfiguration(), "trace-test"),
+                QmsInspectionOrder.class);
+        ArgumentCaptor<LambdaQueryWrapper<QmsInspectionOrder>> query = ArgumentCaptor.forClass(LambdaQueryWrapper.class);
+        verify(orderMapper).selectList(query.capture());
+        String sql = query.getValue().getSqlSegment();
+        assertTrue(sql.contains("product_lot_id ="));
+        assertTrue(sql.contains("inspection_type ="));
+        assertTrue(sql.contains("status <>"));
+        assertTrue(!sql.contains("work_order_id"));
+        var params = query.getValue().getParamNameValuePairs();
+        assertTrue(params.containsValue(1L));
+        assertTrue(params.containsValue("FINAL"));
+        assertTrue(params.containsValue(BusinessStatus.Document.CLOSED));
     }
 }

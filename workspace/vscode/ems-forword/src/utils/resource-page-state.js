@@ -18,3 +18,13 @@ export function contextPayloadFields(config) {
   const defined = new Set(config.fields.map(({ prop }) => prop));
   return (config.contextFields || []).filter((prop) => defined.has(prop));
 }
+
+export function readSavedFilterValues(fields, values) {
+  return Object.fromEntries(
+    fields.flatMap(({ prop }) => {
+      const value = values?.[prop];
+      const scalar = typeof value === 'string' || typeof value === 'boolean' || Number.isFinite(value);
+      return scalar ? [[prop, value]] : [];
+    }),
+  );
+}

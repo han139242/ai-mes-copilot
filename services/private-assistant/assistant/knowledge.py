@@ -24,6 +24,7 @@ from .scans import image_for_ocr, inspect_scan, pdf_renderer, render_pdf_pages, 
 
 WORKERS = BoundedSemaphore(1)
 logger = logging.getLogger(__name__)
+SCOPE_REFERENCE = re.compile(r"^(?:那(?:么)?[，,\s]*)?(?:它(?!们)|(?:这[个款]|那[个款]|该|刚才(?:的|那个)|上一问的)(?:型号|部件|产品))")
 
 
 class Knowledge:
@@ -43,6 +44,7 @@ class Knowledge:
             state = db.execute("SELECT * FROM private_state WHERE id=1").fetchone()
         return {"documents": docs, "jobs": jobs, **state,
                 "ragReady": any(d["vector_version"]>0 and d["active_hash"] for d in docs),
+                "sourceScopeAvailable": True,
                 "graphReady": self.graph_ready(state),
                 "ocrAvailable": self.s.tools_ready,
                 "modelConfigured": all((self.s.llm_url, self.s.llm_key, self.s.llm_model))}
@@ -601,7 +603,50 @@ class Knowledge:
                            (active or "",keep_cache or ""))
         db.execute("DELETE FROM graph_profiles WHERE generation<>%s AND generation<>%s",(active or "",retained or ""))
 
-    def ask(self, uid, question, mode, session="default", context=None):
+    @staticmethod
+    def resolve_source_scope(db, requested):
+        if (not isinstance(requested, dict) or not isinstance(requested.get("documentId"), str)
+                or not re.fullmatch(r"[a-f0-9]{32}", requested["documentId"])
+                or type(requested.get("version")) is not int or not 1 <= requested["version"] <= 2147483647):
+            raise ValueError("资料范围无效，请重新选择")
+        previous_id = requested.get("previousHistoryId")
+        if previous_id is not None and (type(previous_id) is not int or not 1 <= previous_id < 2**63):
+            raise ValueError("上一问编号无效，请重新提问")
+        source = db.execute("""SELECT id,active_name,vector_version,active_hash FROM documents
+            WHERE id=%s AND NOT deleted AND vector_version=%s AND active_hash IS NOT NULL""",
+            (requested["documentId"], requested["version"])).fetchone()
+        if not source:
+            raise ValueError("所选资料或版本已不可用，请重新选择资料范围")
+        return {"documentId": source["id"], "version": source["vector_version"],
+                "name": source["active_name"], "hash": source["active_hash"]}
+
+    @staticmethod
+    def scoped_followup_target(db, session, answer_revision, scope, requested):
+        previous_id = requested.get("previousHistoryId")
+        if "previousHistoryId" in requested and previous_id is None:
+            return None  # The browser has no visible previous turn in this selection.
+        previous = db.execute("""SELECT id,question,response,revision,valid FROM history
+            WHERE session_id=%s ORDER BY id DESC LIMIT 1""", (session,)).fetchone()
+        if (not previous or not previous["valid"] or previous["revision"] != answer_revision
+                or (previous_id is not None and previous_id != previous["id"])):
+            return None
+        response = previous["response"] or {}
+        if response.get("filtered"):
+            return None
+        previous_scope = response.get("sourceScope") or {}
+        keys = ("documentId", "version", "hash")
+        if any(previous_scope.get(key) != scope[key] for key in keys):
+            return None
+        identifiers = {token.upper() for token in identifier_tokens(previous["question"])}
+        if not identifiers and response.get("followupTarget"):
+            identifiers.add(response["followupTarget"])
+        if len(identifiers) != 1:
+            return None
+        target = identifiers.pop()
+        sources = [row for row in response.get("citations", []) if all(row.get(key) == scope[key] for key in keys)]
+        return None if missing_identifiers(target, sources) else target
+
+    def ask(self, uid, question, mode, session="default", context=None, source_scope=None):
         if mode not in {"auto","rag","graph","fusion"} or not isinstance(question,str) or not 2<=len(question.strip())<=1000:
             raise ValueError("请输入 2～1000 字的问题，并选择有效检索模式")
         if not isinstance(session,str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,80}",session):
@@ -609,15 +654,34 @@ class Knowledge:
         if context is not None and not isinstance(context,dict):
             raise ValueError("页面上下文无效")
         question = question.strip()
+        business = business_intent(question)
+        reference = SCOPE_REFERENCE.match(question) is not None and not identifier_tokens(question)
+        target = None
+        needs_subject = False
         with self.dbs.connect(uid) as db:
             state = db.execute("SELECT * FROM private_state WHERE id=1").fetchone()
-            history = db.execute("""SELECT question,response FROM history WHERE valid AND revision=%s AND session_id=%s
-                ORDER BY id DESC LIMIT 3""",(state["answer_revision"],session)).fetchall()
-            docs = db.execute("""SELECT id,active_name AS name,vector_version AS version,active_hash AS hash,
-                active_pieces AS pieces FROM documents WHERE NOT deleted AND vector_version>0""").fetchall()
-            pending = db.execute("""SELECT name,version,vector_version FROM documents
-                WHERE NOT deleted AND vector_version>0 AND vector_version<>version""").fetchall()
-        business = business_intent(question)
+            scope = self.resolve_source_scope(db, source_scope) if source_scope is not None else None
+            if scope:
+                history, docs, pending = [], [], []
+                if reference and not business:
+                    target = self.scoped_followup_target(db, session, state["answer_revision"], scope, source_scope)
+                    needs_subject = target is None
+            else:
+                recent = db.execute("""SELECT question,response,revision,valid FROM history
+                    WHERE session_id=%s ORDER BY id DESC LIMIT 3""", (session,)).fetchall()
+                history = []
+                for previous in recent:
+                    response = previous["response"] or {}
+                    if response.get("sourceScope") or response.get("needsSubject") or response.get("filtered"):
+                        needs_subject = reference and not history
+                        break
+                    if not previous["valid"] or previous["revision"] != state["answer_revision"]:
+                        break
+                    history.append(previous)
+                docs = db.execute("""SELECT id,active_name AS name,vector_version AS version,active_hash AS hash,
+                    active_pieces AS pieces FROM documents WHERE NOT deleted AND vector_version>0""").fetchall()
+                pending = db.execute("""SELECT name,version,vector_version FROM documents
+                    WHERE NOT deleted AND vector_version>0 AND vector_version<>version""").fetchall()
         if business:
             result = {"answer": "这需要读取 MES 的实时业务数据。点击下方“转到业务助手”，我会带上你的原问题。"
                       +("涉及修改时仍会先展示操作预览，确认后才执行。" if business=="write" else "资料问答不会代替当前业务记录。"),
@@ -625,15 +689,28 @@ class Knowledge:
                       "requestedMode":mode,"routeReason":"已识别为实时业务请求，使用原 MES 权限与确认流程",
                       "businessHandoff":True,"generation":state["generation"],"revision":state["answer_revision"],
                       "sourceRevision":state["revision"],"graphEvidence":{}}
+            if scope:
+                result["sourceScope"] = scope
             return self.remember(uid,question,session,state,result)
-        effective = question
+        effective = f"{target}；{question}" if target else question
         if history and not identifier_tokens(question) and re.match(
                 r"^(它|这个|那个|刚才|上面|那|再|详细|简短|继续|换个)",question):
             effective = history[0]["question"]+"；后续问题："+question
-        actual, reason = route(effective,mode,self.graph_ready(state))
-        if pending:
+        if needs_subject:
+            actual, local = "rag", []
+            reason = ("上一问没有在当前资料版本中确认唯一编号" if scope
+                      else "当前对话没有可接续的唯一编号")
+        elif scope:
+            actual, reason = "rag", "本次仅检索所选资料的已发布版本"
+            local = self.vectors.retrieve(uid, effective, source_scope=scope)
+            if target:
+                # Keep excerpts anchored to the subject, including in the local-only answer.
+                local = [row for row in local if not missing_identifiers(target, [row])]
+        else:
+            actual, reason = route(effective,mode,self.graph_ready(state))
+            local = self.vectors.retrieve(uid,effective)
+        if pending and not needs_subject:
             reason += "；新版本尚未就绪，沿用已发布的旧版本，具体版本见引用"
-        local = self.vectors.retrieve(uid,effective)
         graph_data, remote = {}, []
         if actual in {"graph","fusion"}:
             try:
@@ -666,7 +743,7 @@ class Knowledge:
                     reserved.append(source)
             if reserved:
                 citations = merge_citations(reserved, citations, remote, local)
-        if not has_query_evidence(effective, citations):
+        if not scope and not needs_subject and not has_query_evidence(effective, citations):
             citations,graph_data = [],{}
             actual,reason = "rag","当前资料没有目标编号的有效依据，未改用相近编号"
         @contextmanager
@@ -680,11 +757,17 @@ class Knowledge:
                 yield
         missing = missing_identifiers(effective, citations)
         coverage_notice = "当前引用未覆盖编号：" + "、".join(missing) if missing else ""
-        if citations and missing and is_comparison(effective):
+        if needs_subject:
+            generated = {"answer":"请把问题里的指代词换成实际型号或编号，再问一次。",
+                         "generated":False, "notice":"", "needsSubject":True}
+        elif scope and not citations:
+            generated = {"answer":"所选资料中没有找到足够依据。可以调整问题，或改为全部资料后再提问。",
+                         "generated":False, "notice":"本次已在所选版本内完成检索。"}
+        elif citations and missing and is_comparison(effective):
             generated = {"answer": excerpt_answer(citations), "generated": False,
                          "notice": coverage_notice + "。先展示已找到的原文，暂不生成对比结论。"}
         else:
-            generated = generate(self.s,uid,question,citations,state,history,graph_data,
+            generated = generate(self.s,uid,effective if target else question,citations,state,history,graph_data,
                                  {key:str(value)[:500] for key,value in (context or {}).items()
                                   if key in {"route","pageTitle","product","recordNumber"}},authorize=authorize)
             if citations and coverage_notice:
@@ -694,6 +777,10 @@ class Knowledge:
                   "missingIdentifiers":missing,
                   "generation":state["generation"],"revision":state["answer_revision"],"sourceRevision":state["revision"],
                   "graphEvidence":{} if filtered else {key:graph_data.get(key,[]) for key in ("entities","relationships")}}
+        if scope:
+            result["sourceScope"] = scope
+        if target:
+            result["followupTarget"] = target
         return self.remember(uid,question,session,state,result)
 
     def remember(self, uid, question, session, state, result):

@@ -264,12 +264,13 @@ summary:focus-visible,
 
 .el-table th.el-table__cell {
   color: var(--mes-text-secondary);
-  font-weight: 600;
-  font-size: 12px;
+  font-weight: 650;
+  font-size: var(--mes-font-label);
 }
 
 .el-table td.el-table__cell {
-  font-size: 13px;
+  font-size: var(--mes-font-label);
+  font-variant-numeric: tabular-nums;
 }
 
 /* 收紧行高，让密集数据表在一屏内多显示几行。 */

@@ -62,10 +62,10 @@ function resolveCacheScope(previewMode, mockFallback) {
   return `${mockFallback ? 'mock-fallback' : 'live'}:${cacheRevision}`;
 }
 
-export async function loadReferenceOptions(resourceKey, previewMode = false) {
+export async function loadReferenceOptions(resourceKey, previewMode = false, { complete = false } = {}) {
   // 读取目标资源配置，再调用通用 API 获取数据，最后转换为 el-select 需要的 value/label。
   const mockFallback = canUseResourceMockFallback();
-  const cacheKey = `${resolveCacheScope(previewMode, mockFallback)}:${resourceKey}`;
+  const cacheKey = `${resolveCacheScope(previewMode, mockFallback)}:${resourceKey}${complete ? ':all' : ''}`;
   if (cache.has(cacheKey)) {
     return cache.get(cacheKey);
   }
@@ -78,8 +78,9 @@ export async function loadReferenceOptions(resourceKey, previewMode = false) {
       return previewOptions(config);
     }
     try {
-      const result = config.treeEndpoint
-        ? await getResourceList(config.treeEndpoint)
+      const listEndpoint = (complete && config.referenceEndpoint) || config.treeEndpoint;
+      const result = listEndpoint
+        ? await getResourceList(listEndpoint)
         : await getResourcePage(config.baseUrl, { current: 1, size: 200 });
       const data = result?.data;
       const records = Array.isArray(data) ? flatten(data) : data?.records || [];
@@ -95,7 +96,7 @@ export async function loadReferenceOptions(resourceKey, previewMode = false) {
         const fullLabel = labelFor(config, row);
         const name = nameField && row[nameField];
         // 名称唯一时直接展示短名称；同名项保留编码区分，完整编码仍可检索和悬停查看。
-        const label = name && nameCounts.get(name) === 1 ? name : fullLabel;
+        const label = !complete && name && nameCounts.get(name) === 1 ? name : fullLabel;
         return { value: row[config.idField], label, searchLabel: fullLabel, row };
       });
       return options.length || !mockFallback ? options : previewOptions(config);
@@ -116,12 +117,18 @@ export async function loadReferenceOptions(resourceKey, previewMode = false) {
 }
 
 // 首屏选项只加载200条；较旧单据的关联对象按ID读取，避免全量拉取主数据。
-export async function loadReferenceRecords(resourceKey, ids, previewMode = false, isCurrent = () => true) {
+export async function loadReferenceRecords(
+  resourceKey,
+  ids,
+  previewMode = false,
+  isCurrent = () => true,
+  { loadOptions = true } = {},
+) {
   const config = getResourceConfig(resourceKey);
   if (!config || !isCurrent()) return [];
   const revision = authRevision.value;
   const cacheScope = resolveCacheScope(previewMode, canUseResourceMockFallback());
-  const options = await loadReferenceOptions(resourceKey, previewMode);
+  const options = loadOptions || previewMode ? await loadReferenceOptions(resourceKey, previewMode) : [];
   if (revision !== authRevision.value || !isCurrent()) return [];
   if (previewMode) return options;
   const known = new Set(options.map((item) => String(item.value)));
@@ -158,6 +165,9 @@ export function clearReferenceOptions(resourceKey) {
   cache.delete(`preview:${resourceKey}`);
   cache.delete(`live:${cacheRevision}:${resourceKey}`);
   cache.delete(`mock-fallback:${cacheRevision}:${resourceKey}`);
+  cache.delete(`preview:${resourceKey}:all`);
+  cache.delete(`live:${cacheRevision}:${resourceKey}:all`);
+  cache.delete(`mock-fallback:${cacheRevision}:${resourceKey}:all`);
   for (const key of detailCache.keys()) {
     if (key.includes(`:${resourceKey}:`)) detailCache.delete(key);
   }

@@ -95,7 +95,6 @@ function openFirstSearchResult() {
       </span>
       <div v-show="!menuCollapsed" class="brand-copy">
         <strong>{{ appShortName }}</strong>
-        <span>自然语言 · 制造执行</span>
       </div>
     </div>
 
@@ -202,14 +201,13 @@ function openFirstSearchResult() {
 
 .sidebar-search {
   flex: none;
-  padding: 10px 12px;
-  border-bottom: 1px solid var(--mes-sidebar-border);
+  padding: 12px 12px 8px;
 }
 
 .sidebar-search :deep(.el-input__wrapper) {
-  min-height: 32px;
-  border-radius: 6px;
-  background: var(--mes-sidebar);
+  min-height: 34px;
+  border-radius: var(--mes-radius-sm);
+  background: var(--mes-sidebar-raised);
   box-shadow: 0 0 0 1px var(--mes-sidebar-border) inset;
 }
 
@@ -329,15 +327,6 @@ function openFirstSearchResult() {
   white-space: nowrap;
 }
 
-.brand-copy span {
-  margin-top: 2px;
-  color: var(--mes-sidebar-muted);
-  font-size: 11px;
-  font-weight: 500;
-  letter-spacing: 0.5px;
-  white-space: nowrap;
-}
-
 .sidebar-scroll {
   flex: 1;
 }
@@ -410,7 +399,8 @@ function openFirstSearchResult() {
 :deep(.el-menu-item.is-active) {
   color: var(--mes-sidebar-active-text);
   background: var(--mes-sidebar-active);
-  font-weight: 600;
+  box-shadow: inset 0 0 0 1px var(--mes-primary-border);
+  font-weight: 650;
 }
 
 :deep(.el-menu-item.is-featured) {

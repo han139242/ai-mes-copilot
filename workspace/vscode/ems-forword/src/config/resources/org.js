@@ -81,6 +81,15 @@ export default [
       departmentId: { required: true },
       createdTime: { form: false, width: 170 },
     },
+    masterDetail: {
+      key: 'members',
+      title: '班组成员',
+      resource: 'org-team-member',
+      parentField: 'teamId',
+      endpoint: () => '/api/org/team-member/page',
+      params: (row) => ({ current: 1, size: 100, teamId: row.teamId }),
+      label: (row) => row.teamName,
+    },
     relations: [
       {
         key: 'members',

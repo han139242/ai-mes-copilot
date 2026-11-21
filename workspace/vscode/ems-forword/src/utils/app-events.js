@@ -4,6 +4,7 @@
  */
 // 跨组件事件名称统一放在这里，避免发送方和监听方各自手写字符串造成拼写不一致。
 export const OPEN_AI_ASSISTANT_EVENT = 'mes:open-ai-assistant';
+export const OPEN_BUSINESS_FORM_EVENT = 'mes:open-business-form';
 // AI 办理成功后会改动业务单据，用这个事件通知各页面重新拉数据。
 export const DATA_CHANGED_EVENT = 'mes:data-changed';
 export const BEFORE_PAGE_REFRESH_EVENT = 'mes:before-page-refresh';
@@ -26,6 +27,10 @@ export async function allowPageRefresh() {
 // 任意组件调用该函数都会在 window 上广播“打开 AI 助手”事件；布局组件负责监听并跳转。
 export function openAiAssistant() {
   window.dispatchEvent(new CustomEvent(OPEN_AI_ASSISTANT_EVENT));
+}
+
+export function openBusinessForm(flowKey) {
+  window.dispatchEvent(new CustomEvent(OPEN_BUSINESS_FORM_EVENT, { detail: flowKey }));
 }
 
 // AI 办理成功后广播业务数据变更：待办面板、列表页各自监听后刷新，不用跨组件传状态。

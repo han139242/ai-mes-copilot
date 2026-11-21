@@ -1,6 +1,7 @@
 <script setup>
 import { computed, onBeforeUnmount, ref, watch } from 'vue';
 import { getResourceList } from '@/api/resource';
+import { createClientId } from '@/utils/client-id';
 
 const props = defineProps({
   taskId: { type: [Number, String], default: null },
@@ -52,7 +53,7 @@ async function load(fill = false, userInitiated = false) {
             totalUsedQuantity: Number(m.suggestedQuantity),
             scrapQuantity: 0,
             remark: '按本工序及本工单已领批次建议，请核对实际消耗',
-            _clientId: crypto.randomUUID(),
+            _clientId: createClientId(),
           })),
         userInitiated,
       );
